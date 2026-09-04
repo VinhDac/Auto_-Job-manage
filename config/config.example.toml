@@ -1,0 +1,33 @@
+# Copy sang config/config.toml rồi điền. File thật đã bị gitignore.
+
+[run]
+# Cửa sổ được phép chạy với nguồn KHÔNG có API công khai (design.md §3).
+# Nguồn có API công khai thì chạy 24/7 thoải mái, không đụng phần này.
+human_window_start = "08:00"
+human_window_end   = "22:00"
+
+[sources.greenhouse]
+enabled = true
+boards  = []          # ví dụ: ["stripe", "figma"]
+
+[sources.lever]
+enabled = true
+boards  = []          # ví dụ: ["spotify"]
+
+[sources.ashby]
+enabled = true
+boards  = []
+
+[sources.arbeitnow]
+enabled = true
+
+[sources.remotive]
+enabled = true
+
+[scoring]
+# Ngưỡng khởi điểm. Sẽ hiệu chỉnh bằng dữ liệu thật ở M9, không đoán.
+apply_threshold = 0.75
+
+[mail]
+address = ""
+# Không để mật khẩu ở đây. Dùng biến môi trường.

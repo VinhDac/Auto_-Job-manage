@@ -1,0 +1,16 @@
+[project]
+name = "jobbot"
+version = "0.1.0"
+description = "Hệ thống quản lý tìm việc — người giữ quyền quyết định"
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jobbot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

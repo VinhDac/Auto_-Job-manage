@@ -1,0 +1,28 @@
+# Dữ liệu chạy thật — không bao giờ commit
+data/*
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+
+# Bí mật
+.env
+config/config.toml
+config/*.local.*
+
+# Hồ sơ cá nhân sinh ra
+out/
+*.pdf
+*.docx
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# macOS
+.DS_Store
