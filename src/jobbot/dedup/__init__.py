@@ -1,4 +1,4 @@
-"""M2 — Gộp tin trùng.
+"""M3 — Gộp tin trùng.
 
 Cùng một việc đăng trên 4 board, tiêu đề khác nhau, công ty viết khác nhau.
 Đây là entity resolution, không phải so chuỗi.

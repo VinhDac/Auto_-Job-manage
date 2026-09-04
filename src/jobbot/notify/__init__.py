@@ -1,4 +1,4 @@
-"""M8 — Báo ra ngoài dashboard.
+"""M9 — Báo ra ngoài dashboard.
 
 Có việc hợp, hoặc có đề xuất đang chờ duyệt -> biết ngay, không phải mở dashboard.
 

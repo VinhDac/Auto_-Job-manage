@@ -1,4 +1,4 @@
-"""M6 — Dựng CV bám theo một JD cụ thể.  [CẦN Yes/No]
+"""M7 — Dựng CV bám theo một JD cụ thể.  [CẦN Yes/No]
 
 Bám ngôn ngữ JD để qua vòng lọc (strategy.md §3).
 Không bịa. Không tô hồng. Chỉ sắp xếp lại sự thật cho đúng trọng tâm.

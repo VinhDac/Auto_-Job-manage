@@ -90,6 +90,6 @@ Thêm vào chỉ tốn công bảo trì, không giải quyết gì ở quy mô m
 
 ## 7. Chưa quyết
 
-- [ ] Engine chấm điểm: keyword/BM25 thuần, embedding, hay LLM — quyết sau khi có dữ liệu thật ở M4
+- [ ] Engine chấm điểm: keyword/BM25 thuần, embedding, hay LLM — quyết sau khi có dữ liệu thật ở M5
 - [ ] Framework dashboard cụ thể
 - [ ] Gửi mail qua đâu

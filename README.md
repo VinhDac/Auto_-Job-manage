@@ -2,7 +2,18 @@
 
 Hệ thống tìm việc chạy liên tục — **máy đề xuất, người quyết định.**
 
-Trạng thái: **warmup — mới dựng khung, chưa có logic.**
+Trạng thái: **M0 chạy được** — app hỏi yêu cầu và lưu lại. Các module khác chưa làm.
+
+## Chạy
+
+```bash
+python3 run.py
+```
+
+Không cần cài gì, không cần venv. Chỉ cần Python 3.11+ (macOS có sẵn).
+App mở ở `http://127.0.0.1:8765` — chỉ máy này vào được, không mở ra mạng.
+
+Test: `python3 tests/test_profile.py`
 
 ---
 
@@ -34,16 +45,17 @@ cổng duyệt chỉ viết một lần, và thêm module mới thì lõi không
 docs/                 Tài liệu. Quyết định nằm ở đây, không nằm trong đầu.
 config/               config.example.toml -> copy thành config.toml (đã gitignore)
 src/jobbot/
-  core/         M0,M5  Kiểu dữ liệu, store, cache, hàng đợi, cổng Yes/No, thực thi
-  ingest/       M1     Kéo tin về. Một file một nguồn.
-  dedup/        M2     Gộp tin trùng
-  dashboard/    M3     Xem live, bấm Yes/No
-  scoring/      M4     Chấm điểm CV <-> JD
-  cv/           M6     Dựng CV theo JD  [Yes/No]
-  mail/         M7     Gửi hồ sơ, đọc phản hồi  [Yes/No khi gửi]
-  notify/       M8     Báo ra ngoài
-  stats/        M9     Đếm, đo, tỉ lệ phản hồi
-  outreach/     M10    Profile, bài đăng, kết nối  [Yes/No — rủi ro cao nhất]
+  profile/      M0     Hồ sơ người dùng: là ai, muốn gì, KHÔNG nhận gì
+  core/         M1,M6  Kiểu dữ liệu, store, cache, hàng đợi, cổng Yes/No, thực thi
+  ingest/       M2     Kéo tin về. Một file một nguồn.
+  dedup/        M3     Gộp tin trùng
+  dashboard/    M4     Xem live, bấm Yes/No
+  scoring/      M5     Chấm điểm CV <-> JD
+  cv/           M7     Dựng CV theo JD  [Yes/No]
+  mail/         M8     Gửi hồ sơ, đọc phản hồi  [Yes/No khi gửi]
+  notify/       M9     Báo ra ngoài
+  stats/        M10    Đếm, đo, tỉ lệ phản hồi
+  outreach/     M11    Profile, bài đăng, kết nối  [Yes/No — rủi ro cao nhất]
 tests/                Test theo module
 scripts/              Lệnh chạy tay, việc một lần
 data/                 DB + cache. KHÔNG commit.
@@ -63,10 +75,14 @@ Mỗi thư mục con trong `src/jobbot/` có `__init__.py` ghi rõ **cái gì th
 
 ## Việc tiếp theo
 
-Lát 1 — xương sống: **M0 → M1 → M2 → M3**
+Lát 0 — mở bài: **M0 — hồ sơ người dùng.** Chưa xong cái này thì chưa kéo tin nào về.
 
-Kéo tin thật từ ≥3 nguồn → cache vào SQLite → dedup → dashboard hiện số live.
-Chưa chấm điểm, chưa CV, chưa gửi gì. Mục tiêu là chứng minh xương sống chạy được.
+Hệ thống phải biết: tuyển vai trò gì · băng tần nào · thị trường nào · nguyên liệu
+CV có gì · và quan trọng nhất là **KHÔNG nhận cái gì**.
+
+Thiếu nó thì ingest kéo về rác, scoring chấm điểm dựa trên không khí.
+
+Xong M0 mới tới lát 1 — xương sống: **M1 → M2 → M3 → M4**.
 
 ## Còn thiếu để đi tiếp
 

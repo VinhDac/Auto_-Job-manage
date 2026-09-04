@@ -1,4 +1,4 @@
-"""M1 — Kéo tin tuyển dụng về, mỗi nguồn một file.
+"""M2 — Kéo tin tuyển dụng về, mỗi nguồn một file.
 
 Ở đây:
     - Một file cho một nguồn (greenhouse.py, lever.py, ashby.py, mail_alert.py, ...)

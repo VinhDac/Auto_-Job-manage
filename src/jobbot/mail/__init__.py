@@ -1,4 +1,4 @@
-"""M7 — Gửi hồ sơ và đọc phản hồi.  [CẦN Yes/No khi gửi]
+"""M8 — Gửi hồ sơ và đọc phản hồi.  [CẦN Yes/No khi gửi]
 
 Ở đây:
     - Gửi (chỉ sau khi được duyệt)
