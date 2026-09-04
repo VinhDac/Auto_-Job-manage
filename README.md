@@ -2,7 +2,8 @@
 
 Hệ thống tìm việc chạy liên tục — **máy đề xuất, người quyết định.**
 
-Trạng thái: **M0 chạy được** — app hỏi yêu cầu và lưu lại. Các module khác chưa làm.
+Trạng thái: **Giao diện xong 8 trang** (dữ liệu giả) · **M0 chạy thật** (hồ sơ lưu SQLite).
+Backend các module khác chưa nối.
 
 ## Chạy
 
@@ -49,7 +50,10 @@ src/jobbot/
   core/         M1,M6  Kiểu dữ liệu, store, cache, hàng đợi, cổng Yes/No, thực thi
   ingest/       M2     Kéo tin về. Một file một nguồn.
   dedup/        M3     Gộp tin trùng
-  dashboard/    M4     Xem live, bấm Yes/No
+  dashboard/    M4     8 trang giao diện — xem live, bấm Yes/No
+    layout.py          khung chung: nav, thẻ, huy hiệu, thanh điểm
+    mock.py            DỮ LIỆU GIẢ = hợp đồng backend phải khớp
+    views/             một file một trang
   scoring/      M5     Chấm điểm CV <-> JD
   cv/           M7     Dựng CV theo JD  [Yes/No]
   mail/         M8     Gửi hồ sơ, đọc phản hồi  [Yes/No khi gửi]

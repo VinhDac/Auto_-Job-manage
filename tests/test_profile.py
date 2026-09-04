@@ -7,7 +7,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from jobbot.core import db
 from jobbot.profile import store
-from jobbot.profile.schema import ROUNDS, all_questions
+from jobbot.profile.schema import INGEST_GATE, SECTIONS, all_questions, section_by_id
+from jobbot.dashboard.server import _form_to_answers
 
 ok = fail = 0
 def check(name, cond):
@@ -15,37 +16,60 @@ def check(name, cond):
     if cond: ok += 1; print(f"  ok   {name}")
     else:    fail += 1; print(f"  FAIL {name}")
 
+print("\n[schema]")
+qs = all_questions()
+ids = [q.id for s in SECTIONS for q in s.questions]
+check("không trùng id câu hỏi", len(ids) == len(set(ids)))
+check("mọi câu chọn đều có option", all(
+    q.options for q in qs.values() if q.kind in ("single", "multi")))
+check("cổng ingest tồn tại trong schema", all(q in qs for q in INGEST_GATE))
+check("job_titles là câu tự do, không phải danh sách cố định",
+      qs["job_titles"].kind == "longtext" and not qs["job_titles"].options)
+check("phần project là tuỳ chọn", section_by_id("project").optional)
+check("work_auth nằm trong phần mục tiêu, không phải danh tính",
+      any(q.id == "work_auth" for q in section_by_id("muc_tieu").questions))
+check("không còn lựa chọn riêng của thị trường VN",
+      not any(o.value.startswith("vn_") for q in all_questions().values() for o in q.options))
+check("không câu bắt buộc nào nằm ngoài cổng ingest",
+      {q.id for q in qs.values() if q.required} == set(INGEST_GATE))
+
+print("\n[lưu trữ]")
 with tempfile.TemporaryDirectory() as tmp:
     conn = db.connect(Path(tmp) / "t.db")
 
     check("DB trống -> hồ sơ rỗng", store.load(conn) == {})
-    check("DB trống -> chưa được kéo tin", store.can_ingest(conn and store.load(conn)) is False)
-    check("DB trống -> vòng cần làm là vòng 1", store.next_unfinished_round({}).id == "dinh_vi")
+    check("DB trống -> chưa tìm được", not store.can_ingest({}))
+    check("nêu đúng cái còn thiếu", store.missing_for_ingest({}) == list(INGEST_GATE))
 
-    v1 = store.save(conn, {"target_roles": ["backend"], "years_real": "1-3"}, "test")
-    check("lưu ra phiên bản 1", v1 == 1)
-    check("đọc lại đúng", store.load(conn)["target_roles"] == ["backend"])
-    check("vòng 1 thiếu câu -> chưa xong", not store.can_ingest(store.load(conn)))
+    store.save(conn, {"job_titles": "Backend Engineer"}, "t")
+    check("thiếu markets + work_auth -> vẫn chặn",
+          store.missing_for_ingest(store.load(conn)) == ["markets", "work_auth"])
 
-    v2 = store.save(conn, {"markets": ["remote_global"], "doc_language": "en"}, "test")
+    store.save(conn, {"markets": ["uk_remote"], "work_auth": "citizen"}, "t")
     answers = store.load(conn)
-    check("phiên bản mới", v2 == 2)
-    check("câu cũ được mang sang", answers["years_real"] == "1-3")
-    check("vòng 1 đủ -> mở cổng ingest", store.can_ingest(answers))
-    check("vòng tiếp theo là vòng 2", store.next_unfinished_round(answers).id == "rang_buoc")
-
-    store.save(conn, {"years_real": "3-5"}, "sửa")
-    check("sửa thì ghi đè giá trị mới", store.load(conn)["years_real"] == "3-5")
-    check("lịch sử giữ đủ 3 phiên bản", len(store.history(conn)) == 3)
+    check("đủ 3 câu -> mở cổng", store.can_ingest(answers))
+    check("câu cũ được mang sang", answers["job_titles"] == "Backend Engineer")
+    check("lịch sử giữ 2 phiên bản", len(store.history(conn)) == 2)
 
     store.save(conn, {"khong_ton_tai": "x"}, "rác")
-    check("bỏ qua câu không có trong schema", "khong_ton_tai" not in store.load(conn))
+    check("bỏ qua câu ngoài schema", "khong_ton_tai" not in store.load(conn))
 
-    ids = [q.id for r in ROUNDS for q in r.questions]
-    check("không trùng id câu hỏi", len(ids) == len(set(ids)))
-    check("mọi câu chọn đều có option", all(
-        q.options for q in all_questions().values() if q.kind in ("single", "multi")))
+    check("phần kế tiếp đúng thứ tự", store.next_section("muc_tieu").id == "rang_buoc")
+    check("phần cuối -> hết", store.next_section(SECTIONS[-1].id) is None)
     conn.close()
+
+print("\n[đọc form]")
+a = _form_to_answers({"markets": ["uk_remote", "HACK"],
+                      "markets__other": ["Ireland, Netherlands"]}, "muc_tieu")
+check("bỏ giá trị không có trong option", "HACK" not in a["markets"])
+check("giữ giá trị hợp lệ", "uk_remote" in a["markets"])
+check("ô tự do được gộp vào", a["markets"] == ["uk_remote", "Ireland", "Netherlands"])
+
+b = _form_to_answers({"work_auth__other": ["Graduate visa, hết hạn 03/2027"]}, "muc_tieu")
+check("câu chọn-một cũng nhận ô tự do", b["work_auth"] == "Graduate visa, hết hạn 03/2027")
+
+c = _form_to_answers({"job_titles": ["  Backend Engineer\nSWE  "]}, "muc_tieu")
+check("text được cắt khoảng trắng", c["job_titles"] == "Backend Engineer\nSWE")
 
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

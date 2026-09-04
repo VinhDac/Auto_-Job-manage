@@ -14,7 +14,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
-from .schema import ROUNDS, Round, all_questions
+from .schema import INGEST_GATE, SECTIONS, Section, all_questions, section_index
 
 Answers = dict[str, Any]
 
@@ -73,20 +73,33 @@ def _has_value(answers: Answers, question_id: str) -> bool:
     return True
 
 
-def missing_in_round(answers: Answers, round_: Round) -> list[str]:
-    """Câu bắt buộc còn thiếu trong một vòng."""
-    return [q.id for q in round_.questions if q.required and not _has_value(answers, q.id)]
+def missing_in_section(answers: Answers, section: Section) -> list[str]:
+    """Câu bắt buộc còn thiếu trong một phần."""
+    return [q.id for q in section.questions if q.required and not _has_value(answers, q.id)]
 
 
-def is_round_done(answers: Answers, round_: Round) -> bool:
-    return not missing_in_round(answers, round_)
+def is_section_done(answers: Answers, section: Section) -> bool:
+    """Xong = không thiếu câu bắt buộc VÀ đã trả lời ít nhất một câu."""
+    if missing_in_section(answers, section):
+        return False
+    return any(_has_value(answers, q.id) for q in section.questions)
 
 
-def next_unfinished_round(answers: Answers) -> Round | None:
-    """Vòng tiếp theo cần làm. Xong hết thì None."""
-    return next((r for r in ROUNDS if not is_round_done(answers, r)), None)
+def next_section(section_id: str) -> Section | None:
+    """Phần kế tiếp theo thứ tự. Hết thì None -> về trang tổng kết."""
+    index = section_index(section_id)
+    return SECTIONS[index + 1] if 0 <= index < len(SECTIONS) - 1 else None
+
+
+def first_unfinished_section(answers: Answers) -> Section | None:
+    return next((s for s in SECTIONS if not is_section_done(answers, s)), None)
+
+
+def missing_for_ingest(answers: Answers) -> list[str]:
+    """Câu còn thiếu để được phép kéo tin về."""
+    return [qid for qid in INGEST_GATE if not _has_value(answers, qid)]
 
 
 def can_ingest(answers: Answers) -> bool:
-    """Đã đủ điều kiện cho phép kéo tin về chưa. Vòng 1 là cổng chặn."""
-    return is_round_done(answers, ROUNDS[0])
+    """Cổng chặn: không có chức danh và thị trường thì tìm không ra gì."""
+    return not missing_for_ingest(answers)

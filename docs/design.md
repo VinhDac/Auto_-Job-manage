@@ -48,8 +48,23 @@ Chạy chậm nhưng liên tục thì vẫn xong việc. Nhưng đặt sai chỗ
 
 Cách xử lý: chạy trong vài cửa sổ ngắn giống người, có nghỉ, có ngày trống. Phần nặng vốn không nằm ở đó.
 
-Ghi chú về nguồn dữ liệu: xem `docs/sources.md` (chưa viết) — hiện đã xác minh chạy được:
-`boards-api.greenhouse.io` · `api.lever.co` · `api.ashbyhq.com` · `arbeitnow.com` · `remotive.com`.
+### Nguồn dữ liệu — thị trường UK + global
+
+Người dùng ở **UK**, nhắm **UK + global**. Đã kiểm chứng thật:
+
+| Nguồn | Cần key | Ghi chú |
+|---|---|---|
+| `arbeitnow.com` | Không | **59/175 tin trang đầu là UK.** Phủ EU tốt. Dùng ngay được. |
+| `boards-api.greenhouse.io` | Không | Theo từng công ty. Đã thử: `monzo`, `wise` OK. |
+| `api.lever.co` | Không | Theo từng công ty. |
+| `api.ashbyhq.com` | Không | Theo từng công ty. |
+| `remotive.com` | Không | Remote toàn cầu. |
+| `api.adzuna.com/.../gb/` | **Có** (miễn phí) | Nhà UK, phủ thị trường UK rộng nhất. Cần `app_id` + `app_key`. |
+| `reed.co.uk/api` | **Có** (miễn phí) | Board lớn ở UK. Trả 401 nếu thiếu key. |
+| `jobs.service.gov.uk` | — | Board của chính phủ UK (findAJob đã chuyển sang đây). |
+
+Nguồn không có API công khai (LinkedIn, Otta, Indeed): qua extension Chrome, chạy
+trong cửa sổ giống người — không 24/7.
 
 ## 4. Dữ liệu & cache
 
@@ -69,7 +84,18 @@ Vì sao cache là bắt buộc, không phải tối ưu:
 3. Dedup cần lịch sử để so.
 4. Tiến trình 24/7 **phải khởi động lại được mà không mất gì**.
 
-## 5. Stack
+## 5. Ngôn ngữ
+
+| Chỗ nào | Ngôn ngữ | Vì sao |
+|---|---|---|
+| Giao diện app (câu hỏi, nhãn, nút) | **Tiếng Anh** | Thị trường UK/global; CV và JD đều tiếng Anh |
+| Chú thích và docstring trong code | Tiếng Việt | Phần giải thích thiết kế, không phải giao diện |
+| Tài liệu trong `docs/` | Tiếng Việt | Bàn thiết kế |
+
+> Cần cân nhắc lại nếu repo này thành portfolio: người đọc ở UK sẽ không đọc được
+> chú thích tiếng Việt. Chưa quyết — xem §7.
+
+## 6. Stack
 
 | Chọn | Vì sao |
 |---|---|
@@ -80,7 +106,7 @@ Vì sao cache là bắt buộc, không phải tối ưu:
 **Không dùng:** Docker, Postgres, message queue, microservice.
 Thêm vào chỉ tốn công bảo trì, không giải quyết gì ở quy mô một người.
 
-## 6. Quyết định đã chốt
+## 7. Quyết định đã chốt
 
 - [x] Một vòng lặp `Proposal` duy nhất cho mọi module
 - [x] Mọi hành động không đảo ngược được đều qua cổng Yes/No
@@ -88,8 +114,9 @@ Thêm vào chỉ tốn công bảo trì, không giải quyết gì ở quy mô m
 - [x] Không lấy LinkedIn làm trung tâm — nó chỉ là một nguồn trong nhiều nguồn
 - [x] Làm đến đâu test được đến đấy (xem `roadmap.md`)
 
-## 7. Chưa quyết
+## 8. Chưa quyết
 
 - [ ] Engine chấm điểm: keyword/BM25 thuần, embedding, hay LLM — quyết sau khi có dữ liệu thật ở M5
 - [ ] Framework dashboard cụ thể
 - [ ] Gửi mail qua đâu
+- [ ] Có dịch chú thích code sang tiếng Anh không (cần nếu repo thành portfolio — xem §5)

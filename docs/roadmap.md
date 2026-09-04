@@ -1,7 +1,3 @@
-|~| M0 | **Hồ sơ người dùng** | `profile/` |  |
-
-> App đã chạy được: hỏi theo 3 vòng, lưu SQLite có phiên bản, 15/15 test qua.
-> Còn `~` chứ chưa `x` vì **dữ liệu thật chưa điền**. Chạy `python3 run.py` rồi làm vòng 1.
 # Roadmap — làm đến đâu test được đến đấy
 
 Luật: **không sang module sau khi module trước chưa đạt "Xong khi".**
@@ -15,15 +11,33 @@ Trạng thái: ` ` chưa làm · `~` đang làm · `x` xong
 
 | | # | Module | Thư mục | Xong khi |
 |---|---|---|---|---|
-|~| M0 | **Hồ sơ người dùng** | `profile/` | Trả lời được: tuyển vai trò gì · băng tần nào · thị trường nào · nguyên liệu CV có gì · **không nhận cái gì** |
+|~| M0 | **Hồ sơ người dùng** | `profile/` | Trả lời được: **chức danh đem đi tìm** · thị trường · năng lực · ràng buộc · bạn là ai |
 
-> App đã chạy được: hỏi theo 3 vòng, lưu SQLite có phiên bản, 15/15 test qua.
-> Vẫn là `~` chứ chưa `x` vì **dữ liệu thật chưa điền** — chạy `python3 run.py` rồi làm vòng 1.
+> App chạy được: 5 phần · 30 câu · lưu SQLite có phiên bản · thị trường **UK + global**.
+> **Giao diện tiếng Anh**; chú thích trong code giữ tiếng Việt.
+>
+> Chỉ **3 câu bắt buộc** (`job_titles` + `markets` + `work_auth`) — đủ để bắt đầu tìm.
+> `work_auth` bắt buộc vì ở UK đây là bộ lọc gắt nhất: rất nhiều tin ghi thẳng
+> *we cannot provide sponsorship*.
+> Mọi danh sách đều có ô tự do, không danh sách nào là lồng.
+> Phần *Personal project* để **tuỳ chọn** — đặc thù ngành Comp Sci.
+>
+> Vẫn `~` chứ chưa `x` vì **dữ liệu thật chưa điền** — chạy `python3 run.py`.
 
 Không có M0 thì M2 kéo về tin không liên quan, M5 chấm điểm dựa trên không khí,
 M7 không có nguyên liệu viết. Đây là gốc phụ thuộc của nửa hệ thống.
 
 Hồ sơ là dữ liệu **sống**, không phải form điền một lần. Nhận theo vòng.
+
+## Lát 0.5 — Giao diện đầy đủ  *(đã xong)*
+
+|x| UI | **Toàn bộ 8 trang** | `dashboard/` | Bấm được hết, hình dạng dữ liệu đã chốt |
+
+> Dựng giao diện trước, backend nhét vào sau. Dữ liệu giả gom hết vào **một file**
+> `dashboard/mock.py` — file đó chính là **bản hợp đồng** backend phải khớp.
+> Nối backend = thay ruột hàm trong mock.py, trang không phải sửa dòng nào.
+>
+> Trang: Dashboard · Jobs (+ chi tiết) · Queue · Pipeline · Projects · Profile · Stats · Settings
 
 ## Lát 1 — Xương sống
 

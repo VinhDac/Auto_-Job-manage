@@ -9,7 +9,9 @@ người dùng là ai và muốn gì. Thiếu nó thì:
     outreach không biết đang đại diện cho ai
 
 Ở đây:
-    - Nhận thông tin theo VÒNG, không hỏi một lần 30 câu
+    - Chia câu hỏi theo AI DÙNG: muc_tieu / rang_buoc / nang_luc / danh_tinh / project
+    - Chỉ 2 câu bắt buộc: job_titles + markets. Còn lại điền dần.
+    - Hỏi cái ingest DÙNG ĐƯỢC: chức danh thật, không phải phân loại
     - Nguyên liệu thô: CV, kinh nghiệm, dự án, kỹ năng
     - Mong muốn: vai trò, băng tần, thị trường, mức lương, giới hạn
     - Ràng buộc: cái gì KHÔNG nhận (đây là thứ hay bị quên nhất)
