@@ -95,7 +95,58 @@ Vì sao cache là bắt buộc, không phải tối ưu:
 > Cần cân nhắc lại nếu repo này thành portfolio: người đọc ở UK sẽ không đọc được
 > chú thích tiếng Việt. Chưa quyết — xem §7.
 
-## 6. Stack
+## 6. Hình dạng app
+
+**App macOS thật, không phải tab trình duyệt.** Cùng cách Discord/Slack/VS Code làm:
+nội dung là HTML, nhưng nằm trong `NSWindow` + `WKWebView` native.
+
+Một tiến trình, ba phần:
+
+| Luồng | Việc | Ghi chú |
+|---|---|---|
+| chính | Cocoa event loop + cửa sổ | Bắt buộc phải là luồng chính |
+| nền | Web server | Nội dung cho cửa sổ, ở localhost:8765 |
+| nền | Scheduler | Tự quét mỗi 60 phút |
+
+`setActivationPolicy(Regular)` -> có icon Dock, cmd-tab được.
+Xác nhận: `lsappinfo` báo `ApplicationType="Foreground"`, và `CGWindowListCopyWindowInfo`
+thấy cửa sổ `'jobbot' 1180x806 layer=0` cùng status item `'Item-0' layer=25`.
+
+Hành vi kiểu Discord: `windowShouldClose:` trả về `False` và `orderOut:` — đóng cửa sổ
+thì ẩn, app chạy tiếp. `applicationShouldTerminateAfterLastWindowClosed:` cũng `False`.
+Bấm icon Dock -> `applicationShouldHandleReopen:` hiện lại cửa sổ.
+
+WebKit không có bindings dựng sẵn trong PyObjC của Anaconda, nên nạp động bằng
+`objc.loadBundle` -> vẫn không phải cài gì thêm.
+
+launchd giữ cho nó sống: `KeepAlive={SuccessfulExit: false}` — crash thì bật lại,
+nhưng bấm Quit thì dừng hẳn. Dùng `KeepAlive=true` là mỗi lần Quit nó lại tự bật.
+
+## 7. Giao diện
+
+Bố cục **app desktop**, không phải trang web:
+
+- **Sidebar trái cố định** (216px), chạy lên tận đỉnh cửa sổ. Chân sidebar hiện
+  trạng thái engine — luôn nhìn thấy, không phải mở trang nào.
+- Thanh tiêu đề trong suốt + ẩn chữ (`FullSizeContentView`), chỉ còn ba nút
+  traffic light nổi trên nền. CSS chừa sẵn `--top: 38px`.
+- **Home = tình hình**, không phải bảng số. Thứ tự: *cần bạn làm gì* -> *máy đang
+  làm gì* -> *con số* -> *đã làm gì*. Người mở app không hỏi "có bao nhiêu tin",
+  họ hỏi "có gì cần tôi không".
+
+Bảng màu — dark theme dứt khoát, **chỉ một tông**, không theo theme hệ thống:
+
+| Biến | Mã | Vai trò |
+|---|---|---|
+| `--bg` | `#191B1C` | Nền ghi đậm. Không dùng đen tuyệt đối — tương phản quá gắt, mỏi mắt khi nhìn lâu |
+| `--panel` | `#212426` | Thẻ |
+| `--ink` | `#DDE1DF` | Chữ chính. Không trắng tinh |
+| `--acc` | `#55C98D` | Xanh lá dịu — không neon, cũng không xám nhờ |
+
+Toàn bộ CSS chạy bằng biến, nên đổi tông là sửa đúng khối `:root`.
+Nền cửa sổ native đặt khớp `--bg` để không nháy trắng lúc mở.
+
+## 8. Stack
 
 | Chọn | Vì sao |
 |---|---|
@@ -106,7 +157,7 @@ Vì sao cache là bắt buộc, không phải tối ưu:
 **Không dùng:** Docker, Postgres, message queue, microservice.
 Thêm vào chỉ tốn công bảo trì, không giải quyết gì ở quy mô một người.
 
-## 7. Quyết định đã chốt
+## 9. Quyết định đã chốt
 
 - [x] Một vòng lặp `Proposal` duy nhất cho mọi module
 - [x] Mọi hành động không đảo ngược được đều qua cổng Yes/No
@@ -114,7 +165,16 @@ Thêm vào chỉ tốn công bảo trì, không giải quyết gì ở quy mô m
 - [x] Không lấy LinkedIn làm trung tâm — nó chỉ là một nguồn trong nhiều nguồn
 - [x] Làm đến đâu test được đến đấy (xem `roadmap.md`)
 
-## 8. Chưa quyết
+## 10. Đã bỏ (có lý do)
+
+**Đối chiếu sponsor register gov.uk** — Vin đang có Graduate visa nên không cần lọc
+theo công ty được phép bảo lãnh. Bỏ khỏi bước 1.
+
+Dữ liệu vẫn có sẵn nếu cần bật lại: `gov.uk/government/publications/register-of-licensed-sponsors-workers`,
+CSV 143.082 tổ chức, cập nhật hàng ngày. Đáng bật lại khi Graduate visa còn ~9 tháng —
+lúc đó công ty không bảo lãnh được là công ty không giữ được Vin.
+
+## 11. Chưa quyết
 
 - [ ] Engine chấm điểm: keyword/BM25 thuần, embedding, hay LLM — quyết sau khi có dữ liệu thật ở M5
 - [ ] Framework dashboard cụ thể

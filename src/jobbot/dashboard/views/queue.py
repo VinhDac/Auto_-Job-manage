@@ -56,5 +56,5 @@ def render(proposals: list[dict], pending: int) -> str:
           "<button class=ghostbtn>Reject selected…</button>"
           "<span class=muted>Rejecting asks why — the reason becomes a filter rule.</span>"
           "</div></form>",
-        active="/queue", pending=pending,
+        active="/queue", pending=pending, mock=True, status="Running",
     )

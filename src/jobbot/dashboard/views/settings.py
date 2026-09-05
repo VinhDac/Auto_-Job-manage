@@ -49,14 +49,6 @@ def render(sources: list[dict], pending: int) -> str:
         "<div class=note>Nobody browses at 3am every night. The rhythm gives it away "
         "long before the click speed does.</div>", "sched")
 
-    sponsor = card(
-        "<b>UK sponsor register</b>"
-        "<div class=muted>143,082 organisations · downloaded from gov.uk · "
-        "updated daily</div>"
-        "<div class=srow><span>Last synced</span><span class=muted>today, 09:12</span></div>"
-        "<div class=note>Every employer is checked against this. On a Graduate visa, "
-        "a company that cannot sponsor is a company that cannot keep you.</div>", "notice")
-
     return page(
         "Settings",
         h1("Settings")
@@ -65,7 +57,6 @@ def render(sources: list[dict], pending: int) -> str:
           "<th>Last run</th><th>Found</th></tr>" + rows + "</table>"
         + "<h2>Engine</h2>" + engines
         + "<h2>Schedule</h2>" + schedule
-        + "<h2>Visa</h2>" + sponsor
         + "<h2>Safety</h2>" + safety,
-        active="/settings", pending=pending,
+        active="/settings", pending=pending, mock=True, status="Running",
     )

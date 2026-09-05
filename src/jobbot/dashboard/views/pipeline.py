@@ -46,5 +46,5 @@ def render(rows: list[dict], stages: list[str], pending: int) -> str:
                "but cannot read your personal inbox until you connect it in Settings.</div>",
                "notice")
         + body,
-        active="/pipeline", pending=pending,
+        active="/pipeline", pending=pending, mock=True, status="Running",
     )

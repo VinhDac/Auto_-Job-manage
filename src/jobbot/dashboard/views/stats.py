@@ -37,5 +37,5 @@ def render(data: dict, pending: int) -> str:
                  "<th>Source</th><th>Sent</th><th>Replies</th><th>Rate</th>", src)
         + _table("Response rate by match score",
                  "<th>Score band</th><th>Sent</th><th>Replies</th><th>Rate</th>", band),
-        active="/stats", pending=pending,
+        active="/stats", pending=pending, mock=True, status="Running",
     )

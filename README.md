@@ -2,19 +2,39 @@
 
 Hệ thống tìm việc chạy liên tục — **máy đề xuất, người quyết định.**
 
-Trạng thái: **Giao diện xong 8 trang** (dữ liệu giả) · **M0 chạy thật** (hồ sơ lưu SQLite).
-Backend các module khác chưa nối.
+Trạng thái: **App macOS chạy nền 24/7** · **Bước 1 xong** — 3.000+ tin thật, lọc còn 20 việc.
+Bước 2–6 (chấm điểm, CV, project, gửi, theo dõi) chưa làm.
 
 ## Chạy
 
 ```bash
-python3 run.py
+python3 scripts/make_app.py && python3 scripts/install_agent.py
 ```
 
-Không cần cài gì, không cần venv. Chỉ cần Python 3.11+ (macOS có sẵn).
-App mở ở `http://127.0.0.1:8765` — chỉ máy này vào được, không mở ra mạng.
+Lệnh đầu dựng `jobbot.app`. Lệnh sau cài nó thành dịch vụ — **bật máy là tự chạy**,
+crash thì tự bật lại.
 
-Test: `python3 tests/test_profile.py`
+Đây là **app macOS thật**, không phải tab trình duyệt:
+
+- Cửa sổ riêng (`NSWindow` + `WKWebView`) — không thanh URL, không tab
+- Icon ở Dock, cmd-tab được, có ở Launchpad
+- Icon `◆` trên thanh menu: trạng thái, Open jobbot, Scan now, Quit
+- **Đóng cửa sổ thì ẩn, app vẫn chạy nền** — giống Discord. Chỉ Quit mới thoát hẳn
+- Tự quét mỗi 60 phút, có việc mới thì báo qua thông báo macOS
+
+Không cần cài gì thêm, không venv. Python 3.11+ và PyObjC (macOS có sẵn);
+WebKit nạp động lúc chạy.
+
+| Lệnh | Làm gì |
+|---|---|
+| `open jobbot.app` | Mở app |
+| `python3 run.py` | Chạy trực tiếp, không qua bundle |
+| `python3 run.py --window` | Chạy trong Terminal, thấy log, Ctrl+C dừng |
+| `python3 run.py --scan` | Quét một lần rồi thoát |
+| `python3 scripts/install_agent.py --status` | Xem dịch vụ đang chạy không |
+| `python3 scripts/install_agent.py --uninstall` | Gỡ dịch vụ |
+
+Test: `python3 tests/test_profile.py && python3 tests/test_ingest.py`
 
 ---
 

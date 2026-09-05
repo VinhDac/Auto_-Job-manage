@@ -47,5 +47,5 @@ def render(clusters: list[dict], sample: dict, pending: int) -> str:
         + "<p class=lead>Five parts, fits one screen, reads in 90 seconds. "
           "The last two parts are the ones experienced readers actually trust.</p>"
         + example,
-        active="/projects", pending=pending,
+        active="/projects", pending=pending, mock=True, status="Running",
     )

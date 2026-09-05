@@ -15,7 +15,7 @@ from ..core import db
 from ..core.paths import web_dir
 from ..profile import store
 from ..profile.schema import LONGTEXT, MULTI, SECTIONS, TEXT, section_by_id
-from . import layout, mock
+from . import layout, live, mock
 from .views import home, jobs, pipeline, profile, projects, settings, stats, queue
 
 HOST = "127.0.0.1"          # chỉ máy này truy cập được. Không mở ra mạng.
@@ -87,17 +87,24 @@ class Handler(BaseHTTPRequestHandler):
             return self._send((web_dir() / "app.css").read_bytes(),
                               ctype="text/css; charset=utf-8")
 
-        pending = len(mock.proposals())          # TODO backend: đếm từ hàng đợi thật
+        pending = len(mock.proposals())          # TODO bước 5: đếm từ hàng đợi thật
 
-        # --- các trang chạy bằng dữ liệu giả (chờ backend) ---
-        if path == "/":
-            return self._html(home.render(mock.run_status(), mock.counters(),
-                                          mock.needs_you(), mock.activity(), pending))
-        if path == "/jobs":
-            return self._html(jobs.render(mock.jobs(), pending))
-        if path.startswith("/jobs/"):
-            found = mock.job_detail(path.rsplit("/", 1)[-1])
-            return self._html(jobs.render_detail(found, pending)) if found else self._404()
+        # --- ĐÃ NỐI DỮ LIỆU THẬT (bước 1) ---
+        if path in ("/", "/jobs") or path.startswith("/jobs/"):
+            conn = db.connect()
+            try:
+                if path == "/":
+                    return self._html(home.render(
+                        live.run_status(conn), live.counters(conn),
+                        live.needs_you(conn), live.activity(conn), pending))
+                if path == "/jobs":
+                    return self._html(jobs.render(live.jobs(conn), pending))
+                found = live.job_detail(conn, path.rsplit("/", 1)[-1])
+                return self._html(jobs.render_detail(found, pending)) if found else self._404()
+            finally:
+                conn.close()
+
+        # --- vẫn dùng dữ liệu giả (bước 4-6) ---
         if path == "/queue":
             return self._html(queue.render(mock.proposals(), pending))
         if path == "/pipeline":
