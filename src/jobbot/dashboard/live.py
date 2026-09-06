@@ -144,7 +144,7 @@ def job_detail(conn: sqlite3.Connection, job_id: str) -> dict | None:
         "jd": row["description"] or "(no description from this source)",
         "requirements": _reqs(row),
         "explain": json.loads(row["score_json"]) if row["score_json"] else None,
-        "cv_changes": [],                       # bước 3
+        "score_json": row["score_json"],
         "project": None,                        # bước 4
     }
 

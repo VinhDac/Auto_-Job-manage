@@ -17,7 +17,11 @@ from ..profile import store
 from ..profile.schema import LONGTEXT, MULTI, SECTIONS, TEXT, section_by_id
 from . import layout, live, mock
 from .filters import JobFilter
-from .views import home, jobs, pipeline, profile, projects, settings, stats, queue
+from . import upload
+from .views import cv as cvview
+from .views import cvhealth, importcv
+from .views import (home, jobs, pipeline, profile,
+                    projects, settings, stats, queue)
 
 HOST = "127.0.0.1"          # chỉ máy này truy cập được. Không mở ra mạng.
 DEFAULT_PORT = 8765
@@ -105,8 +109,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._html(jobs.render(
                         live.jobs(conn, flt), flt, live.job_counts(conn, flt),
                         live.facets(conn), pending))
-                found = live.job_detail(conn, path.rsplit("/", 1)[-1])
-                return self._html(jobs.render_detail(found, pending)) if found else self._404()
+                parts = path.strip("/").split("/")
+                found = live.job_detail(conn, parts[1])
+                if not found:
+                    return self._404()
+                if len(parts) == 3 and parts[2] == "cv":
+                    import json as _json
+                    from ..cv.build import build as build_cv
+                    from ..profile import store as pstore
+                    answers = pstore.load(conn)
+                    explain = _json.loads(found["score_json"]) if found.get("score_json") else None
+                    tailored = build_cv(answers, explain, found["jd"])
+                    return self._html(cvview.render(found, tailored, pending))
+                return self._html(jobs.render_detail(found, pending))
             finally:
                 conn.close()
 
@@ -131,6 +146,11 @@ class Handler(BaseHTTPRequestHandler):
                     answers, len(store.history(conn)),
                     store.missing_for_ingest(answers), pending))
 
+            if path == "/profile/import":
+                return self._html(importcv.render_form(pending))
+            if path == "/profile/health":
+                return self._html(cvhealth.render(answers.get("cv_text", ""), pending))
+
             if path == "/api/profile":
                 payload = {"answers": answers, "versions": len(store.history(conn)),
                            "can_ingest": store.can_ingest(answers),
@@ -154,7 +174,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         path = urlparse(self.path).path
         length = int(self.headers.get("Content-Length") or 0)
-        form = parse_qs(self.rfile.read(length).decode("utf-8"), keep_blank_values=True)
+        ctype = self.headers.get("Content-Type", "")
+        raw = self.rfile.read(length)
+
+        if path == "/profile/import":
+            return self._import_cv(ctype, raw)
+
+        form = parse_qs(raw.decode("utf-8"), keep_blank_values=True)
+
+        if path == "/profile/import/save":
+            return self._save_import(form)
 
         if path == "/queue":
             # TODO backend: thực thi đề xuất đã duyệt. Hiện chỉ quay lại trang.
@@ -171,6 +200,46 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
 
         self._404()
+
+
+    # --- nhập CV ----------------------------------------------------------
+    def _import_cv(self, ctype: str, raw: bytes):
+        """Đọc file hoặc chữ dán vào rồi hiện ĐỀ XUẤT — chưa ghi gì cả."""
+        from ..profile.import_cv import ReadError, propose, read
+        pending = len(mock.proposals())
+        try:
+            fields = upload.parse(ctype, raw) if "multipart" in ctype else {}
+            filename, blob = fields.get("file", ("", b""))
+            pasted = fields.get("pasted", ("", b""))[1].decode("utf-8", "replace").strip()
+            text = read(filename, blob) if blob else pasted
+            if not text.strip():
+                raise ReadError("No file chosen and nothing pasted.")
+        except (upload.TooBig, ReadError) as exc:
+            return self._html(importcv.render_form(pending, str(exc)))
+        except Exception as exc:                        # noqa: BLE001
+            return self._html(importcv.render_form(pending, f"Could not read it: {exc}"))
+
+        conn = db.connect()
+        try:
+            found = propose(text, store.load(conn))
+        finally:
+            conn.close()
+        self._html(importcv.render_review(found, text, pending))
+
+    def _save_import(self, form: dict):
+        """Chỉ ghi những ô người dùng để tick. Không đè ô đã có sẵn."""
+        from ..profile.import_cv import propose
+        text = form.get("text", [""])[0]
+        wanted = set(form.get("accept", []))
+        conn = db.connect()
+        try:
+            found = {p.field: p.value for p in propose(text, store.load(conn))}
+            picked = {k: v for k, v in found.items() if k in wanted}
+            if picked:
+                store.save(conn, picked, note=f"imported CV ({len(picked)} fields)")
+        finally:
+            conn.close()
+        self._redirect("/profile")
 
 
 def find_port(start: int = DEFAULT_PORT, tries: int = 20) -> int:

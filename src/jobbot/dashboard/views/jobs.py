@@ -173,7 +173,6 @@ def render_detail(job: dict, pending: int) -> str:
         f"<span>{esc(r['evidence'])}</span></li>"
         for r in job["requirements"]
     )
-    changes = "".join(f"<li>{esc(c)}</li>" for c in job["cv_changes"])
     proj = job.get("project")
     return page(
         job["title"],
@@ -186,9 +185,11 @@ def render_detail(job: dict, pending: int) -> str:
         + (card(f"<ul class=reqs>{reqs}</ul>") if reqs
            else empty("Could not read any requirements from this posting. "
                       "Read it yourself — the system will not guess."))
-        + "<h2>What would change in your CV</h2>"
-        + (card(f"<ul class=changes>{changes}</ul>") if changes
-           else empty("No CV variant yet — that is step 3."))
+        + "<h2>Tailored CV</h2>"
+        + card(f"<a class=ghost href='/jobs/{esc(job['id'])}/cv'>"
+               "Build a CV for this posting →</a>"
+               "<div class=muted style='margin-top:6px'>Selects and orders lines from your "
+               "own profile against what this posting asks for. Writes nothing new.</div>")
         + "<h2>Project to attach</h2>"
         + (card(f"<b>{esc(proj['title'])}</b>"
                 f"<div class=muted>Cluster: {esc(proj['cluster'])} · {esc(proj['status'])}</div>"

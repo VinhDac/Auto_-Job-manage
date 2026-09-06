@@ -145,6 +145,9 @@ def render_summary(answers: Answers, versions: int, missing_gate: list[str],
     return page(
         "Profile",
         "<h1>Your profile</h1>"
+        + "<div class=frow style='margin:0 0 14px'>"
+          "<a class='chip on' href='/profile/import'>Import a CV</a>"
+          "<a class=chip href='/profile/health'>CV health</a></div>"
         f"<p class=lead>{versions} version(s) saved. Every edit writes a new version rather than "
         "overwriting — this profile is living data, not a form you fill in once.</p>"
         f"{gate}{''.join(blocks)}",

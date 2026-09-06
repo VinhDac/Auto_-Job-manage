@@ -103,12 +103,50 @@ Chạy 24 tin trong **12ms**, không gọi LLM lần nào. Test: 31/31 qua.
 **Còn thiếu:** CV đầy đủ của Vin. Hiện nhiều bằng chứng phải dựa vào *từ khoá tìm
 kiếm* thay vì CV — hệ thống có đánh dấu chỗ nào yếu, nhưng điền CV vào là chắc hẳn.
 
-## Bước 3 — SỬA CV
+## Bước 3 — SỬA CV   *(xong)*
 
-Sinh CV riêng cho từng JD.
+|x| Tách CV thành khối rời (vai trò, project, học vấn, kỹ năng) | `cv/blocks.py` |
+|x| Bộ luật viết CV, rút từ CV thật đang bị từ chối | `cv/rules.py` |
+|x| Chọn + sắp câu theo từng JD | `cv/build.py` |
+|x| Trang `/jobs/<id>/cv` kèm phần kiểm chứng | `cv/render.py` |
 
-**Xong khi:** hai JD khác nhau cho ra hai bản CV khác nhau, xuất được file,
-và **không câu nào bịa** — chỉ sắp xếp lại sự thật cho đúng trọng tâm.
+**Cơ chế: CHỌN và SẮP XẾP, không viết mới.** Mọi câu trên CV sinh ra đều là câu
+Vin đã viết. Hệ thống chỉ quyết định câu nào lên, thứ tự nào, bỏ câu nào — và
+luôn hiện lý do bỏ.
+
+**Bộ luật (áp cho mọi JD, không phải sửa tay một lần):**
+
+| Luật | Vì sao |
+|---|---|
+| Gạch đầu dòng, không đoạn văn | Vòng quét 6 giây phải có chỗ đậu mắt |
+| Câu trúng thứ JD đòi lên trước | Bước 2 đã tách sẵn yêu cầu |
+| **Bỏ thất bại về KẾT QUẢ** | Người đọc 200 CV chỉ nhớ câu tệ nhất |
+| **GIỮ kiến thức kỹ thuật** | Đây mới là thứ tách khỏi 40 người cùng khớp |
+| Bỏ ý kiến, giữ bằng chứng | *"Profit means nothing"* không chứng minh gì |
+| Bỏ nhóm Compute và Method | Dạy người đọc kiến thức cơ bản = tín hiệu non tay |
+| Câu nhạy cảm mà có số -> ĐÁNH DẤU, không vứt | Vứt cả câu thì mất luôn con số |
+
+**Phân biệt quan trọng nhất:**
+
+```
+"A random train/test split leaks"      -> KIẾN THỨC   -> giữ
+"Live drawdown ran 30% deeper"          -> KẾT QUẢ HỎNG -> chuyển sang trang project
+```
+
+Bản đầu tôi bắt cả chữ `leaks` nên bỏ mất phần chuyên môn giá trị nhất. Đã sửa,
+có test chặn tái phát.
+
+**Chạy trên tin thật:**
+
+```
+Point72 Quant Researcher Intern   thiếu: — (danh sách "hoặc" đã đủ)
+IMC Quant Researcher Equities     thiếu: derivatives, equities
+Jane Street Quant Researcher      thiếu: market data
+```
+
+Test: 28/28 qua. Không gọi LLM lần nào.
+
+**Chưa làm:** xuất PDF/DOCX. Hiện xem trên web, copy ra được.
 
 ## Bước 4 — PROJECT
 

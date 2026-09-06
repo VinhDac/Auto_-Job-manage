@@ -351,3 +351,58 @@ label.tick.on b{color:var(--acc)}
 .card.bdcard .note{border-top:1px solid var(--line);margin-top:10px;padding-top:10px;
   font-size:12px;color:var(--warn);line-height:1.5}
 .card.bdcard .note + .note{border-top:0;margin-top:6px;padding-top:0;color:var(--mute)}
+
+/* ---------------- CV tuỳ biến ---------------- */
+.cvpaper{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+  padding:26px 30px;margin:0 0 16px}
+.cvhead{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.cvline{font-size:12.5px;color:var(--dim)}
+.cvline:first-child{font-size:19px;font-weight:680;color:var(--ink);letter-spacing:-.02em;
+  margin-bottom:4px}
+.cvsum{font-size:13px;color:var(--ink);margin:0 0 6px;line-height:1.5}
+.cvsec{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--acc);
+  font-weight:700;margin:20px 0 8px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.cvrole{display:flex;align-items:baseline;gap:12px;margin:12px 0 4px;flex-wrap:wrap}
+.cvrole b{font-size:13.5px;font-weight:650}
+.cvmeta{margin-left:auto;font-size:11.5px;color:var(--mute);white-space:nowrap}
+ul.cvlist{margin:0;padding-left:16px;font-size:12.8px;line-height:1.55;color:var(--dim)}
+ul.cvlist li{margin-bottom:4px}
+ul.cvlist li.review{color:var(--warn)}
+.rv{display:block;font-size:11px;color:var(--mute);margin-top:2px}
+.cvskill{font-size:12.5px;color:var(--dim);margin-bottom:5px;line-height:1.5}
+.cvskill b{color:var(--ink);font-weight:600}
+.chiprow{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}
+ul.droplist{list-style:none;padding:0;margin:0}
+.droplist li{display:flex;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);
+  font-size:12.3px;align-items:flex-start}
+.droplist li:last-child{border-bottom:0}
+.dtext{flex:1;color:var(--mute);text-decoration:line-through;text-decoration-color:var(--line-2)}
+.dwhy{flex:none;max-width:44%;color:var(--warn);font-size:11.5px}
+
+/* ---------------- nhập CV + sức khoẻ CV ---------------- */
+.pval{display:block;white-space:pre-wrap;font-size:12.3px;color:var(--dim);
+  margin-top:5px;max-height:150px;overflow:auto;line-height:1.5}
+.frow > a.chip{text-decoration:none}
+.card.health{padding:13px 16px}
+.hhead{display:flex;gap:10px;align-items:baseline;margin-bottom:8px}
+.hhead b{font-size:13.5px}
+ul.hlist{list-style:none;padding:0;margin:0}
+.hl{display:grid;grid-template-columns:72px 1fr;gap:3px 10px;padding:7px 0;
+  border-top:1px solid var(--line);font-size:12.5px}
+.hl:first-child{border-top:0}
+.ht{color:var(--ink);line-height:1.5}
+.hw{grid-column:2;font-size:11.5px;color:var(--mute)}
+.hl.strong .ht{color:var(--ink)}
+.hl.thin .ht{color:var(--dim)}
+.hl.drop .ht{color:var(--mute);text-decoration:line-through;
+  text-decoration-color:var(--line-2)}
+.hl.review .ht{color:var(--warn)}
+.hbar{display:flex;height:9px;border-radius:5px;overflow:hidden;background:var(--line);
+  margin-bottom:10px}
+.seg.strong{background:var(--acc)} .seg.thin{background:var(--line-2)}
+.seg.review{background:var(--warn)} .seg.drop{background:var(--bad);opacity:.6}
+.hkey{display:inline-flex;align-items:center;gap:6px;margin-right:16px;font-size:12px;
+  color:var(--dim)}
+.hkey .dot{width:7px;height:7px;border-radius:2px;box-shadow:none}
+.dot.strong{background:var(--acc)} .dot.thin{background:var(--line-2)}
+.dot.review{background:var(--warn)} .dot.drop{background:var(--bad)}
