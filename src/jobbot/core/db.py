@@ -113,6 +113,20 @@ MIGRATIONS: list[str] = [
     CREATE INDEX message_kind ON message(kind);
     CREATE INDEX message_app  ON message(application_id);
     """,
+    # 4 — mốc thời gian dạng số. posted_at là chuỗi và mỗi nguồn một kiểu
+    # (ISO của Greenhouse/Lever, unix của Arbeitnow) nên SQL không so được.
+    """
+    ALTER TABLE posting ADD COLUMN posted_ts INTEGER NOT NULL DEFAULT 0;
+    CREATE INDEX posting_ts ON posting(posted_ts);
+    """,
+    # 5 — điểm khớp. score NULL = chưa chấm HOẶC không đọc được yêu cầu;
+    # score_conf phân biệt hai trường hợp đó.
+    """
+    ALTER TABLE posting ADD COLUMN score INTEGER;
+    ALTER TABLE posting ADD COLUMN score_conf TEXT NOT NULL DEFAULT '';
+    ALTER TABLE posting ADD COLUMN score_json TEXT NOT NULL DEFAULT '';
+    CREATE INDEX posting_score ON posting(score);
+    """,
 ]
 
 

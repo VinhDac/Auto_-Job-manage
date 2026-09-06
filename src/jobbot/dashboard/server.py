@@ -16,6 +16,7 @@ from ..core.paths import web_dir
 from ..profile import store
 from ..profile.schema import LONGTEXT, MULTI, SECTIONS, TEXT, section_by_id
 from . import layout, live, mock
+from .filters import JobFilter
 from .views import home, jobs, pipeline, profile, projects, settings, stats, queue
 
 HOST = "127.0.0.1"          # chỉ máy này truy cập được. Không mở ra mạng.
@@ -81,7 +82,9 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- định tuyến -------------------------------------------------------
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
+        query = parse_qs(parsed.query, keep_blank_values=True)
 
         if path == "/static/app.css":
             return self._send((web_dir() / "app.css").read_bytes(),
@@ -98,7 +101,10 @@ class Handler(BaseHTTPRequestHandler):
                         live.run_status(conn), live.counters(conn),
                         live.needs_you(conn), live.activity(conn), pending))
                 if path == "/jobs":
-                    return self._html(jobs.render(live.jobs(conn), pending))
+                    flt = JobFilter.from_query(query)
+                    return self._html(jobs.render(
+                        live.jobs(conn, flt), flt, live.job_counts(conn, flt),
+                        live.facets(conn), pending))
                 found = live.job_detail(conn, path.rsplit("/", 1)[-1])
                 return self._html(jobs.render_detail(found, pending)) if found else self._404()
             finally:

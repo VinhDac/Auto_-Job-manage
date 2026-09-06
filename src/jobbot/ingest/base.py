@@ -10,6 +10,7 @@ import json
 import re
 import urllib.error
 import urllib.request
+from html import unescape
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,12 +39,31 @@ _SUFFIX = re.compile(
 
 
 def strip_html(text: str) -> str:
-    text = re.sub(r"<br\s*/?>", "\n", text or "", flags=re.I)
-    text = re.sub(r"</p>", "\n\n", text, flags=re.I)
+    """Bóc HTML về chữ thuần, GIỮ cấu trúc xuống dòng và gạch đầu dòng.
+
+    LỖI ĐÃ SỬA: trước đây bỏ thẻ TRƯỚC rồi mới giải mã &lt; &gt; — nên thẻ bị
+    mã hoá (Greenhouse trả về kiểu này) biến thành thẻ thật sau khi đã bỏ xong,
+    và nằm nguyên trong mô tả. Phải giải mã trước, và lặp cho tới khi sạch.
+    """
+    if not text:
+        return ""
+    for _ in range(3):                       # nội dung mã hoá lồng nhiều lớp
+        before = text
+        text = unescape(text)
+        if text == before:
+            break
+
+    # giữ cấu trúc trước khi xoá thẻ — mất nó là mất luôn danh sách yêu cầu
+    text = re.sub(r"<\s*br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"<\s*/(p|div|h[1-6]|tr)\s*>", "\n\n", text, flags=re.I)
+    text = re.sub(r"<\s*li[^>]*>", "\n· ", text, flags=re.I)
+    text = re.sub(r"<\s*/(ul|ol)\s*>", "\n", text, flags=re.I)
     text = _TAG.sub("", text)
-    for entity, char in (("&amp;", "&"), ("&nbsp;", " "), ("&#39;", "'"),
-                         ("&quot;", '"'), ("&lt;", "<"), ("&gt;", ">")):
-        text = text.replace(entity, char)
+    text = unescape(text)                    # thực thể còn sót trong nội dung
+
+    text = text.replace("\xa0", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -62,6 +82,27 @@ def norm_title(title: str) -> str:
     title = re.sub(r"\([^)]*\)", " ", title or "")
     title = re.sub(r"\b(req|job|id|ref)[-_ ]?\d+\b", " ", title, flags=re.I)
     return norm(title)
+
+
+def to_ts(stamp: str) -> int:
+    """Đổi mọi kiểu ngày về unix. Không đọc được thì 0.
+
+    Greenhouse/Lever/Ashby trả ISO 8601; Arbeitnow trả unix dạng chuỗi.
+    """
+    if not stamp:
+        return 0
+    text = str(stamp).strip()
+    if text.isdigit():
+        value = int(text)
+        return value // 1000 if value > 10_000_000_000 else value    # ms hay s
+    try:
+        from datetime import datetime, timezone
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp())
+    except (ValueError, TypeError, OverflowError):
+        return 0
 
 
 # ---------------------------------------------------------------- Posting

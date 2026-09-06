@@ -1,0 +1,247 @@
+"""Chấm điểm khớp CV <-> JD, và LUÔN giải thích được vì sao ra điểm đó.
+
+Luật: điểm không giải thích được thì không dùng để quyết định nộp đơn.
+Vì vậy mọi hàm ở đây trả về kèm BẰNG CHỨNG — câu chữ lấy thẳng từ hồ sơ.
+
+Thang 100 điểm:
+    55  yêu cầu BẮT BUỘC đáp ứng được bao nhiêu
+    15  yêu cầu ĐIỂM CỘNG
+    20  đúng cấp bậc (nhắm graduate mà tin đòi senior thì trừ nặng)
+    10  chức danh trùng khớp
+
+Yêu cầu không phán được (không có từ khoá nào nhận ra) KHÔNG tính vào mẫu số —
+tính vào đó là tự bịa ra sự chắc chắn mình không có. Nó chỉ hạ độ tin cậy.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+
+from ..ingest.base import norm
+from . import extract
+from .vocab import ALIASES, DEGREE_WORDS, QUANT_FIELD, SKILLS, YEARS
+
+YEARS_BAND = {"0-1": 0.5, "1-3": 2, "3-5": 4, "5-8": 6.5, "8+": 10}
+JUNIOR_LEVELS = {"intern", "grad", "grad_scheme", "junior"}
+SENIOR_TITLE = re.compile(r"\b(senior|snr|lead|principal|staff|head of|director|vp)\b", re.I)
+JUNIOR_TITLE = re.compile(
+    r"\b(graduate|grad|junior|intern|internship|placement|entry|trainee|campus|"
+    r"academy|programme|program|scheme|rotational|analyst program)\b", re.I)
+
+
+@dataclass
+class Evidence:
+    """Một mẩu hồ sơ, kèm chỗ nó đến từ đâu — để còn trích dẫn lại.
+
+    `strong` phân biệt BẰNG CHỨNG với MONG MUỐN. "Từ khoá tìm kiếm" và "công nghệ
+    muốn làm" không chứng minh được gì — dùng chúng làm chứng cứ là lập luận vòng.
+    """
+    where: str
+    text: str
+    normal: str = ""
+    strong: bool = True
+
+
+@dataclass
+class Judged:
+    text: str
+    must: bool
+    met: bool | None          # None = không phán được
+    evidence: str = ""
+    signals: list[str] = field(default_factory=list)
+    weak_only: bool = False   # chỉ dựa vào từ khoá/mong muốn, không phải bằng chứng
+
+
+def build_index(answers: dict) -> list[Evidence]:
+    """Gom mọi thứ trong hồ sơ thành các mẩu bằng chứng tra cứu được."""
+    # Xếp theo độ MẠNH — hàm tra cứu lấy cái đầu tiên khớp, nên bằng chứng
+    # tốt nhất phải đứng trước.
+    fields = [
+        ("your strong skills", "skills_strong", True),
+        ("your CV", "cv_text", True),
+        ("your education", "education", True),
+        ("your certifications", "certifications", True),
+        ("skills you're still learning", "skills_weak", False),
+        ("a keyword you set (not proof)", "search_keywords", False),
+        ("tech you want to move into (not proof)", "stack_want", False),
+    ]
+    out = []
+    for label, key, strong in fields:
+        value = answers.get(key)
+        if not value:
+            continue
+        text = " ".join(value) if isinstance(value, list) else str(value)
+        out.append(Evidence(label, text.strip(), norm(text), strong))
+    return out
+
+
+def _signals(text: str) -> list[str]:
+    """Những kỹ năng/khái niệm mà dòng yêu cầu này thực sự đang đòi."""
+    low = f" {norm(text)} "
+    found = []
+    for alias, canonical in ALIASES.items():
+        needle = f" {alias.strip()} " if len(alias.strip()) <= 3 else alias.strip()
+        if needle in low and canonical not in found:
+            found.append(canonical)
+    return found
+
+
+def _find(signal: str, index: list[Evidence]) -> tuple[bool, str, bool]:
+    """Hồ sơ có bằng chứng cho tín hiệu này không, ở đâu, và có MẠNH không."""
+    forms = SKILLS.get(signal, {signal})
+    for ev in index:
+        for form in forms | {signal}:
+            needle = f" {form.strip()} " if len(form.strip()) <= 3 else form.strip()
+            if needle in f" {ev.normal} ":
+                snippet = ev.text.strip().replace("\n", " ")
+                if len(snippet) > 80:
+                    snippet = snippet[:80] + "…"
+                return True, f"{ev.where} — {snippet}", ev.strong
+    return False, "", False
+
+
+def _years_needed(text: str) -> int | None:
+    found = YEARS.search(text)
+    return int(found.group(1)) if found else None
+
+
+def _degrees_needed(text: str) -> list[str]:
+    """MỌI bằng cấp được nhắc tới, không phải cái cao nhất.
+
+    LỖI ĐÃ SỬA: trước đây lấy bằng cao nhất rồi đòi đúng cái đó, nên dòng
+    "Undergraduate, MS, or PhD candidates" bị chấm trượt dù có MSc — JD viết
+    "hoặc", mình đọc thành "phải là PhD".
+    """
+    low = f" {norm(text)} "
+    return [level for level in ("phd", "masters", "bachelors")
+            if any(f" {word.strip()} " in low for word in DEGREE_WORDS[level])]
+
+
+def judge_one(req: extract.Requirement, index: list[Evidence], answers: dict) -> Judged:
+    text = req.text
+
+    # --- yêu cầu số năm ---
+    needed = _years_needed(text)
+    if needed is not None:
+        have = YEARS_BAND.get(str(answers.get("years_real") or ""), 0)
+        met = have >= needed
+        return Judged(text, req.must, met,
+                      f"you have about {have:g} years, they ask for {needed}+",
+                      [f"{needed}+ years"])
+
+    # --- yêu cầu bằng cấp ---
+    levels = _degrees_needed(text)
+    if levels:
+        education = norm(str(answers.get("education") or ""))
+        padded = f" {education} "
+        has = {"phd": any(f" {w} " in padded for w in ("phd", "doctorate")),
+               "masters": any(f" {w} " in padded for w in ("msc", "master", "masters", "mba")),
+               "bachelors": any(f" {w} " in padded for w in
+                                ("bsc", "ba", "bachelor", "bachelors", "msc", "master", "phd"))}
+        quant = any(f in education for f in QUANT_FIELD)
+        met = any(has[level] for level in levels)      # JD viết "hoặc" thì là hoặc
+        note = "quantitative field" if quant else "field not obviously quantitative"
+        raw = str(answers.get("education") or "").splitlines()[0][:80]
+        return Judged(text, req.must, met,
+                      f"{raw} — {note}" if raw else "nothing on your profile about education",
+                      levels)
+
+    # --- yêu cầu kỹ năng ---
+    signals = _signals(text)
+    if not signals:
+        return Judged(text, req.must, None, "no recognisable skill in this line", [])
+
+    hits = [(s, *_find(s, index)) for s in signals]
+    strong = [(s, e) for s, ok, e, is_strong in hits if ok and is_strong]
+    weak = [(s, e) for s, ok, e, is_strong in hits if ok and not is_strong]
+    if strong:
+        return Judged(text, req.must, True, strong[0][1], signals)
+    if weak:
+        # Chỉ có bằng chứng yếu -> tính là ĐẠT NHƯNG đánh dấu, vì nó dựa trên
+        # thứ Vin khai muốn làm chứ không phải thứ chứng minh được.
+        return Judged(text, req.must, True, weak[0][1], signals, weak_only=True)
+    return Judged(text, req.must, False,
+                  f"nothing on your profile mentions: {', '.join(signals[:4])}", signals)
+
+
+def _level_fit(title: str, answers: dict) -> tuple[float, str]:
+    wants = set(answers.get("seniority") or [])
+    junior = bool(wants & JUNIOR_LEVELS)
+    senior_ad = bool(SENIOR_TITLE.search(title))
+    junior_ad = bool(JUNIOR_TITLE.search(title))
+    if junior and senior_ad and not junior_ad:
+        return 0.0, "posting is senior level, you target graduate/junior"
+    if junior and junior_ad:
+        return 1.0, "posting is explicitly graduate/junior — matches your target"
+    return 0.6, "level not stated in the title"
+
+
+def _title_fit(title: str, answers: dict) -> tuple[float, str]:
+    targets = [norm(t) for t in str(answers.get("job_titles") or "").splitlines() if t.strip()]
+    low = norm(title)
+    hit = next((t for t in targets if t and t in low), None)
+    if hit:
+        return 1.0, f"title contains your target '{hit}'"
+    words = set(low.split())
+    best, name = 0.0, ""
+    for t in targets:
+        tw = set(t.split())
+        if tw:
+            overlap = len(words & tw) / len(tw)
+            if overlap > best:
+                best, name = overlap, t
+    return best, (f"partly matches '{name}'" if best else "no overlap with your target titles")
+
+
+def score_job(title: str, description: str, answers: dict) -> dict:
+    reqs = extract.requirements(description)
+    confidence = extract.confidence(reqs)
+    if confidence == "none":
+        return {"score": None, "confidence": "none", "requirements": [],
+                "reason": "Could not read any requirements from this posting — read it yourself.",
+                "breakdown": {}}
+
+    index = build_index(answers)
+    judged = [judge_one(r, index, answers) for r in reqs]
+
+    must = [j for j in judged if j.must and j.met is not None]
+    nice = [j for j in judged if not j.must and j.met is not None]
+    unknown = [j for j in judged if j.met is None]
+
+    must_ratio = (sum(1 for j in must if j.met) / len(must)) if must else 0.5
+    nice_ratio = (sum(1 for j in nice if j.met) / len(nice)) if nice else 0.5
+    level_ratio, level_why = _level_fit(title, answers)
+    title_ratio, title_why = _title_fit(title, answers)
+
+    points = (55 * must_ratio + 15 * nice_ratio + 20 * level_ratio + 10 * title_ratio)
+
+    # chặn trần chỉ khi PhD là bằng DUY NHẤT được chấp nhận
+    blockers = [j.text for j in must if j.met is False
+                and (_years_needed(j.text) or _degrees_needed(j.text) == ["phd"])]
+    capped = False
+    if blockers:
+        # Đòi PhD, hoặc số năm mình không có -> dù mọi thứ khác khớp cũng khó qua vòng lọc
+        if points > 55:
+            capped = True
+        points = min(points, 55)
+
+    return {
+        "score": int(round(points)),
+        "confidence": confidence,
+        "requirements": [
+            {"text": j.text, "met": j.met, "must": j.must, "evidence": j.evidence}
+            for j in judged],
+        "blockers": blockers,
+        "capped": capped,
+        "weak_evidence": sum(1 for j in judged if j.weak_only),
+        "unknown": len(unknown),
+        "breakdown": {
+            "must": {"met": sum(1 for j in must if j.met), "total": len(must),
+                     "points": round(55 * must_ratio, 1)},
+            "nice": {"met": sum(1 for j in nice if j.met), "total": len(nice),
+                     "points": round(15 * nice_ratio, 1)},
+            "level": {"points": round(20 * level_ratio, 1), "why": level_why},
+            "title": {"points": round(10 * title_ratio, 1), "why": title_why},
+        },
+    }

@@ -16,6 +16,7 @@ from .ingest import arbeitnow, ashby, greenhouse, lever, remotive
 from .ingest import filter as jobfilter
 from .ingest.base import Posting
 from .profile import store
+from .scoring.run import score_all
 
 Log = Callable[[str], None]
 
@@ -81,11 +82,15 @@ def run_scan(pages: int = 3, log: Log | None = None) -> dict:
         n_rows, n_groups = group.regroup(conn)
         say(f"  gộp: {n_rows} tin -> {n_groups} việc duy nhất")
 
+        marks = score_all(conn)
+        say(f"  chấm: {marks['scored']} tin có điểm, "
+            f"{marks['unscorable']} không đọc được yêu cầu")
+
         summary = (f"thấy {total_seen} · mới {total_new} · "
                    f"giữ {kept} · {n_groups} việc duy nhất")
         postings.log(conn, "scan_finished", summary)
         return {"ok": True, "summary": summary, "seen": total_seen, "new": total_new,
-                "kept": kept, "groups": n_groups,
+                "kept": kept, "groups": n_groups, "scored": marks["scored"],
                 "new_matches": max(0, kept - before_kept)}
     finally:
         conn.close()

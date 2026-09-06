@@ -1,0 +1,122 @@
+"""Từ vựng để nhận ra một dòng yêu cầu đang đòi cái gì.
+
+Không có LLM ở đây. Cố ý:
+  - Chạy trên 4.000 tin mà không tốn xu nào
+  - Cùng đầu vào luôn cho cùng đầu ra -> test được -> bắt được lỗi
+  - LLM để dành cho chỗ so chuỗi bó tay (bước 2b)
+
+Từ vựng nghiêng về mảng quant / tài chính / dữ liệu — đúng dải của người dùng.
+Thiếu từ thì thêm vào đây, không sửa chỗ khác.
+"""
+
+from __future__ import annotations
+
+import re
+
+# --------------------------------------------------------------- kỹ năng
+# key = tên chuẩn, value = các cách viết khác (đã thường hoá)
+SKILLS: dict[str, set[str]] = {
+    # ngôn ngữ
+    "python": {"python", "python3"},
+    "c++": {"c++", "cpp"},
+    "java": {"java"},
+    "scala": {"scala"},
+    "go": {"go", "golang"},
+    "rust": {"rust"},
+    "r": {" r ", "r language"},
+    "matlab": {"matlab"},
+    "sql": {"sql", "postgres", "postgresql", "mysql", "t-sql"},
+    "kdb": {"kdb", "kdb+", "q language"},
+    "javascript": {"javascript", "typescript", "js"},
+    "excel": {"excel", "vba"},
+    # dữ liệu / ML
+    "pandas": {"pandas"},
+    "numpy": {"numpy"},
+    "scipy": {"scipy"},
+    "scikit-learn": {"scikit-learn", "sklearn", "scikit learn"},
+    "pytorch": {"pytorch", "torch"},
+    "tensorflow": {"tensorflow", "keras"},
+    "spark": {"spark", "pyspark"},
+    "machine learning": {"machine learning", "ml ", "supervised learning"},
+    "deep learning": {"deep learning", "neural network", "neural networks"},
+    "nlp": {"nlp", "natural language processing", "llm", "large language model"},
+    "time series": {"time series", "time-series", "timeseries"},
+    "statistics": {"statistics", "statistical", "econometric", "econometrics"},
+    "probability": {"probability", "stochastic"},
+    "optimisation": {"optimisation", "optimization", "convex"},
+    "bayesian": {"bayesian"},
+    "data pipeline": {"etl", "data pipeline", "airflow", "dbt", "kafka"},
+    "visualisation": {"visualisation", "visualization", "tableau", "power bi", "matplotlib"},
+    # tài chính
+    "portfolio": {"portfolio", "asset allocation"},
+    "derivatives": {"derivative", "derivatives", "options", "futures", "swaps"},
+    "equities": {"equity", "equities", "stocks"},
+    "fixed income": {"fixed income", "bonds", "credit"},
+    "risk": {"risk management", "market risk", "credit risk", "var ", "value at risk"},
+    "alpha research": {"alpha", "signal research", "systematic trading", "quant research"},
+    "backtesting": {"backtest", "backtesting", "walk-forward"},
+    "market data": {"market data", "bloomberg", "refinitiv", "reuters"},
+    "asset pricing": {"asset pricing", "pricing model", "valuation"},
+    "factor models": {"factor model", "factor models", "fama"},
+    "cfa": {"cfa"},
+    "frm": {"frm"},
+    # hạ tầng
+    "linux": {"linux", "unix", "bash", "shell scripting"},
+    "docker": {"docker", "container"},
+    "kubernetes": {"kubernetes", "k8s"},
+    "cloud": {"aws", "gcp", "azure", "cloud"},
+    "git": {"git", "version control"},
+    "ci/cd": {"ci/cd", "continuous integration", "jenkins"},
+}
+
+# --------------------------------------------------------- bằng cấp / năm
+DEGREE_WORDS = {
+    "phd": {"phd", "ph.d", "doctorate", "doctoral"},
+    "masters": {"master", "masters", "msc", "ms", "m.sc", "mba", "postgraduate", "meng"},
+    "bachelors": {"bachelor", "bachelors", "bsc", "b.sc", "ba", "beng",
+                  "undergraduate", "degree"},
+}
+QUANT_FIELD = {"mathematics", "maths", "math", "physics", "statistics", "computer science",
+               "engineering", "quantitative", "computational", "economics", "finance",
+               "econometrics", "operations research", "stem"}
+
+YEARS = re.compile(r"(\d+)\s*(?:\+|\s*-\s*\d+)?\s*(?:or more\s*)?year", re.I)
+
+# ------------------------------------------------------------- phân loại
+# Tiêu đề mở đầu một phần YÊU CẦU
+REQ_HEADS = re.compile(
+    r"^\s*(requirements?|qualifications?|what we(?:'re| are)? looking for|"
+    r"who you are|about you|you(?:'ll| will)? have|you have|your profile|"
+    r"skills? (?:and|&) experience|experience required|what you(?:'ll| will)? bring|"
+    r"ideal candidate|must[- ]haves?|essential|the ideal)", re.I)
+
+# Tiêu đề mở đầu phần ĐIỂM CỘNG
+NICE_HEADS = re.compile(
+    r"^\s*(nice[- ]to[- ]haves?|bonus|preferred|desirable|advantageous|"
+    r"plus(?:es)?|it would be great|good to have)", re.I)
+
+# Tiêu đề KHÔNG phải yêu cầu — phải loại, nếu không sẽ chấm điểm dựa trên
+# phúc lợi công ty ("we offer 25 days holiday")
+STOP_HEADS = re.compile(
+    r"^\s*(what we offer|benefits?|perks?|our offer|compensation|salary|"
+    r"about (?:us|the (?:company|team|firm))|why join|diversity|equal opportunit|"
+    r"how to apply|application process|next steps|our values?|life at)", re.I)
+
+# Dấu hiệu bắt buộc / không bắt buộc ngay trong câu
+MUST_WORDS = re.compile(r"\b(must|required|essential|strong|proven|solid|demonstrated)\b", re.I)
+NICE_WORDS = re.compile(
+    r"\b(nice to have|bonus|preferred|desirable|advantage|a plus|would be great|"
+    r"ideally|familiarity)\b", re.I)
+
+
+def alias_map() -> dict[str, str]:
+    """Mọi cách viết -> tên chuẩn."""
+    out: dict[str, str] = {}
+    for canonical, forms in SKILLS.items():
+        out[canonical] = canonical
+        for form in forms:
+            out[form.strip()] = canonical
+    return out
+
+
+ALIASES = alias_map()

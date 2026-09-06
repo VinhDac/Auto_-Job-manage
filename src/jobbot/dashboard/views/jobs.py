@@ -4,20 +4,50 @@ from __future__ import annotations
 
 from html import escape as esc
 
+from ..filters import BAND, DAYS, LOC, PER_PAGE, SHOW, SORT, JobFilter
 from ..layout import badge, card, empty, h1, page, score_bar
 
 STATE_BADGE = {
     "new": ("new", ""),
+    "dropped": ("filtered out", "warn"),
     "queued": ("in queue", "ok"),
     "rejected": ("rejected", "muted"),
     "applied": ("applied", "ok"),
 }
 
 
+def _chips(label: str, name: str, options, current: str, flt) -> str:
+    """Hàng chip chọn-một. Là radio thật nên bàn phím và trình đọc màn hình vẫn dùng được."""
+    items = "".join(
+        f"<label class=chip><input type=radio name={esc(name)} value='{esc(v)}'"
+        f"{' checked' if v == current else ''} onchange='this.form.submit()'>"
+        f"<span>{esc(l)}</span></label>" for v, l in options)
+    return f"<div class=frow><b class=flabel>{esc(label)}</b>{items}</div>"
+
+
+def _ticks(label: str, name: str, options, flt) -> str:
+    """Cột ô tích chọn-nhiều, kèm số lượng."""
+    items = "".join(
+        f"<label class='tick{' on' if flt.has(name, v) else ''}'>"
+        f"<input type=checkbox name={esc(name)} value='{esc(v)}'"
+        f"{' checked' if flt.has(name, v) else ''} onchange='this.form.submit()'>"
+        f"<span>{esc(l)}</span>{f'<b>{n}</b>' if n else ''}</label>"
+        for v, l, n in options)
+    return (f"<div class=tickcol><b class=flabel>{esc(label)}</b>"
+            f"<div class=ticklist>{items}</div></div>")
+
+
+CONF_NOTE = {"high": "", "medium": "few requirements found",
+             "low": "requirements guessed from prose", "none": ""}
+
+
 def _score(job: dict) -> str:
-    """Chưa chấm điểm (bước 2) thì nói thẳng, không hiện số 0 giả."""
-    return score_bar(job["score"]) if job.get("score") is not None else \
-        '<span class=muted>not scored yet</span>'
+    """Không chấm được thì NÓI THẲNG. Điểm bịa còn tệ hơn không có điểm."""
+    if job.get("score") is None:
+        return "<span class=noscore>can&#39;t read requirements — judge it yourself</span>"
+    note = CONF_NOTE.get(job.get("confidence", ""), "")
+    tail = f"<span class=conf>{esc(note)}</span>" if note else ""
+    return score_bar(job["score"]) + tail
 
 
 def _row(job: dict) -> str:
@@ -25,6 +55,8 @@ def _row(job: dict) -> str:
     sources = "".join(badge(s, "src") for s in job["sources"])
     merged = job.get("merged", len(job["sources"]))
     dup = (f"<span class=muted>{merged} postings merged</span>" if merged > 1 else "")
+    why = (f"<div class=dropwhy>Filtered out — {esc(job['drop_reason'])}</div>"
+           if job.get("drop_reason") else "")
     closes = f"<span class=warn-t>closes {esc(job['closes'])}</span>" if job["closes"] else ""
     return card(
         f"<a class=jobhead href='/jobs/{esc(job['id'])}'>"
@@ -34,31 +66,110 @@ def _row(job: dict) -> str:
         f"<span class=spacer></span>"
         f"<span class=muted>{esc(job['salary'])}</span></div>"
         f"<div class=jfoot>{sources}{dup}<span class=spacer></span>"
-        f"<span class=muted>{esc(job['posted'])}</span>{closes}</div>",
-        "job",
+        f"<span class=muted>{esc(job['posted'])}</span>{closes}</div>{why}",
+        "job" + (" out" if job.get("drop_reason") else ""),
     )
 
 
-def render(jobs: list[dict], pending: int) -> str:
-    body = "".join(_row(j) for j in jobs) if jobs else empty("Nothing found yet.")
-    filters = (
-        "<div class=filters><span class='chip on'>All</span>"
-        "<span class=chip>Graduate / junior</span><span class=chip>London</span>"
-        "<span class=spacer></span>"
-        f"<span class=muted>{len(jobs)} unique jobs</span></div>"
-    )
+def _range(flt: JobFilter, shown: int, total: int) -> str:
+    if not shown:
+        return "0 results"
+    start = (flt.page - 1) * PER_PAGE + 1
+    return f"{start}–{start + shown - 1} of {total:,}"
+
+
+def _pager(flt: JobFilter, total: int) -> str:
+    pages = max(1, -(-total // PER_PAGE))
+    if pages < 2:
+        return ""
+    prev = (f"<a class=chip href='{esc(flt.url(page=flt.page - 1))}'>← Previous</a>"
+            if flt.page > 1 else "<span class='chip off'>← Previous</span>")
+    nxt = (f"<a class=chip href='{esc(flt.url(page=flt.page + 1))}'>Next →</a>"
+           if flt.page < pages else "<span class='chip off'>Next →</span>")
+    return (f"<div class=pager>{prev}"
+            f"<span class=muted>Page {flt.page} of {pages:,}</span>{nxt}</div>")
+
+
+def render(jobs: list[dict], flt: JobFilter, counts: dict, facets: dict,
+           pending: int) -> str:
+    total = counts.get(flt.show, len(jobs))
+    body = "".join(_row(j) for j in jobs) if jobs else empty(
+        "Nothing matches these filters. Try widening them, or switch Show to "
+        "\"Filtered out\" to see what the scan discarded and why.")
+
+    show_opts = [(v, f"{l}  {counts.get(v, 0):,}") for v, l in SHOW]
+    company_opts = [(c, c, n) for c, n in facets["companies"]]
+    source_opts = [(s, s, 0) for s in facets["sources"]]
+
+    panel = (
+        "<form class=filters method=get action='/jobs'>"
+        f"<div class=frow><input class=search type=search name=q value='{esc(flt.q)}' "
+        f"placeholder='Search title or company…'>"
+        f"<button class=primary type=submit>Search</button></div>"
+        + _chips("Show", "show", show_opts, flt.show, flt)
+        + _chips("Where", "loc", LOC, flt.loc, flt)
+        + _chips("When", "days", DAYS, flt.days, flt)
+        + _chips("Score", "band", BAND, flt.band, flt)
+        + _chips("Sort", "sort", SORT, flt.sort, flt)
+        + "<div class=tickwrap>"
+        + _ticks("Company", "company", company_opts, flt)
+        + _ticks("Source", "source", source_opts, flt)
+        + "</div></form>")
+
+    chips = flt.active()
+    active = ("<div class=activebar><span class=muted>Filtering by</span>" + "".join(
+        f"<a class='chip on' href='{esc(url)}'>{esc(label)} ✕</a>" for label, url in chips)
+        + f"<a class=clear href='/jobs'>Clear all</a></div>") if chips else ""
+
     return page(
         "Jobs",
-        h1("Jobs", "Pulled from every source, deduplicated, filtered to your target "
-                  "titles. Scoring is step 2.")
-        + filters + body,
+        h1("Jobs", "Everything pulled, deduplicated, and filtered. Nothing is deleted — "
+                   "switch Show to see what the scan discarded and why.")
+        + panel + active
+        + f"<div class=resultcount>{_range(flt, len(jobs), total)}</div>"
+        + body + _pager(flt, total),
         active="/jobs", pending=pending, status="Running",
     )
 
 
+def _breakdown(job: dict) -> str:
+    """Điểm đến từ đâu. Không giải thích được thì không dùng để quyết định nộp."""
+    data = job.get("explain")
+    if not data or data.get("score") is None:
+        return ""
+    b = data["breakdown"]
+    rows = "".join(
+        f"<div class=bdrow><span class=bdl>{esc(label)}</span>"
+        f"<span class=bdtrack><span class=bdfill style='width:{pts / cap * 100:.0f}%'></span></span>"
+        f"<b>{pts:g}<i>/{cap}</i></b><span class=muted>{esc(why)}</span></div>"
+        for label, pts, cap, why in [
+            ("Must-have requirements", b["must"]["points"], 55,
+             f"{b['must']['met']}/{b['must']['total']} met"),
+            ("Nice-to-haves", b["nice"]["points"], 15,
+             f"{b['nice']['met']}/{b['nice']['total']} met"),
+            ("Level fit", b["level"]["points"], 20, b["level"]["why"]),
+            ("Title match", b["title"]["points"], 10, b["title"]["why"]),
+        ])
+    notes = []
+    if data.get("capped"):
+        notes.append("Score capped at 55 — this posting asks for experience or a "
+                     "qualification you do not have, so it is unlikely to pass screening "
+                     "however well the rest matches.")
+    if data.get("unknown"):
+        notes.append(f"{data['unknown']} lines could not be judged automatically "
+                     "(soft skills, culture fit) — left out of the maths entirely "
+                     "rather than guessed at.")
+    if data.get("weak_evidence"):
+        notes.append(f"{data['weak_evidence']} matches rest on keywords you set rather than "
+                     "evidence in your CV. Filling in your skills and CV would firm these up.")
+    tail = "".join(f"<div class=note>{esc(n)}</div>" for n in notes)
+    return card(f"<div class=bd>{rows}</div>{tail}", "bdcard")
+
+
 def render_detail(job: dict, pending: int) -> str:
     reqs = "".join(
-        f"<li class='{'met' if r['met'] else 'miss'}'><b>{esc(r['text'])}</b>"
+        f"<li class='{'met' if r['met'] else ('unk' if r['met'] is None else 'miss')}'>"
+        f"<b>{esc(r['text'])}</b>"
         f"<span>{esc(r['evidence'])}</span></li>"
         for r in job["requirements"]
     )
@@ -71,8 +182,10 @@ def render_detail(job: dict, pending: int) -> str:
         + f"<div class=jmeta>{_score(job)}"
           f"<span class=spacer></span><span class=muted>{esc(job['posted'])}</span></div>"
         + "<h2>Why this score</h2>"
+        + _breakdown(job)
         + (card(f"<ul class=reqs>{reqs}</ul>") if reqs
-           else empty("Not scored yet — that is step 2."))
+           else empty("Could not read any requirements from this posting. "
+                      "Read it yourself — the system will not guess."))
         + "<h2>What would change in your CV</h2>"
         + (card(f"<ul class=changes>{changes}</ul>") if changes
            else empty("No CV variant yet — that is step 3."))

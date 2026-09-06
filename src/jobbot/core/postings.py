@@ -16,7 +16,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Iterable
 
-from ..ingest.base import Posting
+from ..ingest.base import Posting, to_ts
 
 
 def now() -> str:
@@ -57,10 +57,11 @@ def save_batch(conn: sqlite3.Connection, source: str, items: Iterable[Posting]) 
         raw_id = int(cur.lastrowid)
         conn.execute(
             "INSERT INTO posting (raw_id, source, title, company, location, remote,"
-            " salary, url, posted_at, description, fingerprint)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " salary, url, posted_at, posted_ts, description, fingerprint)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (raw_id, source, item.title, item.company, item.location, int(item.remote),
-             item.salary, item.url, item.posted_at, item.description, item.fingerprint()),
+             item.salary, item.url, item.posted_at, to_ts(item.posted_at),
+             item.description, item.fingerprint()),
         )
         new += 1
     conn.commit()

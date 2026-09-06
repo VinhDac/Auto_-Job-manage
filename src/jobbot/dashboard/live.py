@@ -9,6 +9,7 @@ Còn dùng giả: proposals · pipeline · projects · stats   (bước 4-6)
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 
@@ -56,34 +57,73 @@ def counters(conn: sqlite3.Connection) -> list[dict]:
     total = postings.count(conn)
     kept = postings.count(conn, kept_only=True)
     unique = postings.count_groups(conn)
+    strong = int(conn.execute("SELECT COUNT(*) FROM posting WHERE kept=1 AND score >= 75").fetchone()[0])
     return [
         {"value": f"{total:,}", "label": "Postings pulled", "note": "all sources"},
         {"value": f"{kept:,}", "label": "Match your titles", "note": f"{total - kept:,} filtered out"},
         {"value": f"{unique:,}", "label": "Unique jobs", "note": f"{kept - unique} duplicates merged"},
-        {"value": "—", "label": "Scored", "note": "step 2"},
+        {"value": f"{strong}", "label": "Scored 75+", "note": "strong matches"},
         {"value": "—", "label": "Applications", "note": "step 5"},
         {"value": "—", "label": "Replies", "note": "step 6"},
     ]
 
 
-def jobs(conn: sqlite3.Connection) -> list[dict]:
-    out = []
-    for g in group.groups(conn):
-        p = g["posting"]
-        out.append({
-            "id": str(p["id"]),
-            "title": p["title"], "company": p["company"],
-            "location": p["location"] or "not stated",
-            "salary": p["salary"] or "not stated",
-            "score": None,                      # chưa chấm — bước 2
-            "posted": _ago(p["posted_at"]) if p["posted_at"] else "",
-            "closes": "",
-            "sources": g["sources"],
-            "merged": g["count"],
-            "state": "new",
-            "url": p["url"],
-        })
+def jobs(conn: sqlite3.Connection, flt) -> list[dict]:
+    """Lọc theo ý người dùng, RỒI mới gộp trùng — gộp trước thì lọc sai nhóm."""
+    where, args = flt.where()
+    per, offset = flt.limit()
+    rows = conn.execute(
+        f"SELECT * FROM posting{where} ORDER BY {flt.order()} LIMIT ? OFFSET ?",
+        [*args, per, offset]).fetchall()
+
+    seen: dict[str, dict] = {}
+    for row in rows:
+        key = row["group_id"] or f"solo{row['id']}"
+        found = seen.get(key)
+        if found is None:
+            seen[key] = {
+                "id": str(row["id"]),
+                "title": row["title"], "company": row["company"],
+                "location": row["location"] or "not stated",
+                "salary": row["salary"] or "not stated",
+                "score": row["score"],
+                "confidence": row["score_conf"],
+                "posted": _ago(row["posted_at"]) if row["posted_at"] else "",
+                "closes": "",
+                "sources": [row["source"]],
+                "merged": 1,
+                "state": "new" if row["kept"] else "dropped",
+                "drop_reason": row["drop_reason"],
+                "url": row["url"],
+            }
+        else:
+            found["merged"] += 1
+            if row["source"] not in found["sources"]:
+                found["sources"].append(row["source"])
+    return list(seen.values())
+
+
+def job_counts(conn: sqlite3.Connection, flt) -> dict:
+    """Số lượng cho từng lựa chọn 'Show' — người dùng thấy trước khi bấm."""
+    out = {}
+    for value, _label in (("matched", ""), ("dropped", ""), ("all", "")):
+        where, args = type(flt)(**{**flt.__dict__, "show": value}).where()
+        out[value] = int(conn.execute(
+            f"SELECT COUNT(DISTINCT COALESCE(group_id, CAST(id AS TEXT)))"
+            f" FROM posting{where}", args).fetchone()[0])
     return out
+
+
+def facets(conn: sqlite3.Connection) -> dict:
+    """Giá trị có thật trong DB để đổ vào dropdown — không bịa lựa chọn rỗng."""
+    sources = [r["s"] for r in conn.execute(
+        "SELECT DISTINCT substr(source, 1, CASE WHEN instr(source,':')>0"
+        " THEN instr(source,':')-1 ELSE length(source) END) AS s"
+        " FROM posting ORDER BY s")]
+    companies = [(r["company"], r["n"]) for r in conn.execute(
+        "SELECT company, COUNT(*) n FROM posting WHERE kept=1"
+        " GROUP BY company ORDER BY n DESC, LOWER(company) LIMIT 40")]
+    return {"sources": sources, "companies": companies}
 
 
 def job_detail(conn: sqlite3.Connection, job_id: str) -> dict | None:
@@ -97,14 +137,25 @@ def job_detail(conn: sqlite3.Connection, job_id: str) -> dict | None:
         "id": str(row["id"]), "title": row["title"], "company": row["company"],
         "location": row["location"] or "not stated",
         "salary": row["salary"] or "not stated",
-        "score": None, "posted": _ago(row["posted_at"]) if row["posted_at"] else "",
+        "score": row["score"], "confidence": row["score_conf"],
+        "posted": _ago(row["posted_at"]) if row["posted_at"] else "",
         "sources": sorted({r["source"] for r in same}),
         "merged": len(same), "url": row["url"],
         "jd": row["description"] or "(no description from this source)",
-        "requirements": [],                     # bước 2
+        "requirements": _reqs(row),
+        "explain": json.loads(row["score_json"]) if row["score_json"] else None,
         "cv_changes": [],                       # bước 3
         "project": None,                        # bước 4
     }
+
+
+def _reqs(row) -> list[dict]:
+    """Yêu cầu trong JD kèm bằng chứng — hình dạng đúng như views/jobs.py cần."""
+    if not row["score_json"]:
+        return []
+    data = json.loads(row["score_json"])
+    return [{"text": r["text"], "met": r["met"], "must": r["must"],
+             "evidence": r["evidence"] or "—"} for r in data.get("requirements", [])]
 
 
 def needs_you(conn: sqlite3.Connection) -> list[dict]:

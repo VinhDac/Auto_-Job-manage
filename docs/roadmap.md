@@ -71,20 +71,37 @@ Test: 21/21 qua (`python3 tests/test_ingest.py`).
 
 **Board rỗng đã loại:** `marshallwace`, `optiver` trả 200 nhưng 0 tin.
 
-## Bước 2 — CHẤM
+## Bước 2 — CHẤM   *(xong)*
 
 Chấm điểm khớp, và **giải thích được vì sao**.
 
 | | Việc | Thư mục |
 |---|---|---|
-| | Tách yêu cầu ra khỏi văn bản JD | `scoring/` |
-| | Đối chiếu từng yêu cầu với hồ sơ, kèm bằng chứng | `scoring/` |
-| | Điểm tổng + ngưỡng, hiệu chỉnh bằng dữ liệu thật | `scoring/` |
+|x| Tách yêu cầu khỏi JD — theo tiêu đề phần + gạch đầu dòng | `scoring/extract.py` |
+|x| Vòng dự phòng cho JD viết văn xuôi, loại câu phúc lợi | `scoring/extract.py` |
+|x| Đối chiếu từng yêu cầu, kèm bằng chứng trích từ hồ sơ | `scoring/score.py` |
+|x| Phân biệt bằng chứng MẠNH (CV, học vấn) và YẾU (từ khoá) | `scoring/score.py` |
+|x| Điểm 100 chia 4 phần, giải thích được từng phần | `scoring/score.py` |
+|x| Lọc + sắp theo điểm trên giao diện | `dashboard/` |
 
-**Xong khi:** vào `/jobs/<id>` thấy mỗi yêu cầu trong JD có ✓ hoặc —,
-kèm câu bằng chứng lấy thẳng từ hồ sơ. Điểm không giải thích được thì không dùng.
+**Thang điểm:** 55 yêu cầu bắt buộc · 15 điểm cộng · 20 đúng cấp bậc · 10 chức danh.
 
-**Cần từ Vin:** **CV đầy đủ** — nhất là phần mô tả WorldQuant. Không có thì chấm dựa trên không khí.
+**Không bịa:** yêu cầu không nhận ra được KHÔNG tính vào mẫu số. JD không đọc
+được yêu cầu thì `score = NULL` và nói thẳng *"can't read requirements"*.
+
+Chạy 24 tin trong **12ms**, không gọi LLM lần nào. Test: 31/31 qua.
+
+**Ba lỗi thật đã sửa:**
+
+1. `strip_html` bỏ thẻ TRƯỚC rồi mới giải mã `&lt;` -> thẻ mã hoá biến thành thẻ
+   thật sau khi đã bỏ xong. **1.522 tin dính HTML nguyên trong mô tả.**
+2. Lấy bằng cấp CAO NHẤT được nhắc rồi đòi đúng cái đó -> dòng *"Undergraduate,
+   MS, or PhD"* bị chấm trượt dù có MSc. JD viết "hoặc" thì phải là hoặc.
+3. `"ba"` và `"ms"` so kiểu chuỗi con -> `"database"` thành bằng BA, `"systems"`
+   thành bằng MS. Đổi sang so theo ranh giới từ.
+
+**Còn thiếu:** CV đầy đủ của Vin. Hiện nhiều bằng chứng phải dựa vào *từ khoá tìm
+kiếm* thay vì CV — hệ thống có đánh dấu chỗ nào yếu, nhưng điền CV vào là chắc hẳn.
 
 ## Bước 3 — SỬA CV
 
