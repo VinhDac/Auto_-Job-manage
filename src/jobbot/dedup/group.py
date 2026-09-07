@@ -12,8 +12,12 @@ from __future__ import annotations
 import sqlite3
 
 
-def regroup(conn: sqlite3.Connection) -> tuple[int, int]:
-    """Gán group_id cho mọi tin đang giữ. Trả về (số tin, số nhóm)."""
+def regroup(conn: sqlite3.Connection, commit: bool = True) -> tuple[int, int]:
+    """Gán group_id cho mọi tin đang giữ. Trả về (số tin, số nhóm).
+
+    `commit=False` khi bên gọi đang giữ một giao dịch lớn hơn — tự commit ở đây
+    sẽ cắt ngang giao dịch đó và làm mất tính nguyên tử.
+    """
     rows = conn.execute(
         "SELECT id, fingerprint FROM posting WHERE kept = 1 ORDER BY id").fetchall()
     first_seen: dict[str, int] = {}
@@ -23,7 +27,8 @@ def regroup(conn: sqlite3.Connection) -> tuple[int, int]:
         "UPDATE posting SET group_id = ? WHERE id = ?",
         [(str(first_seen[r["fingerprint"]]), r["id"]) for r in rows],
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return len(rows), len(first_seen)
 
 

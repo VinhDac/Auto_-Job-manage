@@ -24,6 +24,7 @@ def fetch_board(board: str) -> list[Posting]:
             url=row.get("hostedUrl") or row.get("applyUrl", ""),
             posted_at=str(row.get("createdAt") or ""),
             description=body.strip()[:20000],
+            raw_body=body.strip()[:60000],
             payload={"board": board, "id": row.get("id"),
                      "commitment": cat.get("commitment"), "team": cat.get("team")},
         ))

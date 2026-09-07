@@ -113,6 +113,17 @@ class Handler(BaseHTTPRequestHandler):
                 found = live.job_detail(conn, parts[1])
                 if not found:
                     return self._404()
+                if len(parts) == 3 and parts[2] == "project":
+                    import json as _json
+                    from ..cv.build import wanted_skills
+                    from ..profile import store as pstore
+                    from ..projects.page import build as build_page, health
+                    answers = pstore.load(conn)
+                    explain = (_json.loads(found["score_json"])
+                               if found.get("score_json") else None)
+                    doc = build_page(answers, found["title"], found["company"],
+                                     wanted_skills(explain, found["jd"]))
+                    return self._html(projects.render_page(found, doc, health(doc), pending))
                 if len(parts) == 3 and parts[2] == "cv":
                     import json as _json
                     from ..cv.build import build as build_cv
@@ -131,11 +142,26 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/pipeline":
             return self._html(pipeline.render(mock.pipeline(), mock.STAGES, pending))
         if path == "/projects":
-            return self._html(projects.render(mock.projects(), mock.project_page(), pending))
+            conn = db.connect()
+            try:
+                from ..cv.blocks import parse as parse_cv
+                from ..projects.cluster import build as cluster_jobs
+                answers = store.load(conn)
+                mine = [b for b in parse_cv(answers.get("cv_text") or "")
+                        if b.kind == "project"]
+                return self._html(projects.render(cluster_jobs(conn, mine), mine, pending))
+            finally:
+                conn.close()
         if path == "/stats":
             return self._html(stats.render(mock.stats(), pending))
         if path == "/settings":
-            return self._html(settings.render(mock.sources(), pending))
+            conn = db.connect()
+            try:
+                return self._html(settings.render(
+                    live.sources(conn), live.chrome_status(),
+                    live.company_stats(conn), live.last_runs(conn), pending))
+            finally:
+                conn.close()
 
         # --- profile: đã nối backend thật ---
         conn = db.connect()

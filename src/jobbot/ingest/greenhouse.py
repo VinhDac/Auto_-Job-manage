@@ -27,6 +27,7 @@ def fetch_board(board: str) -> list[Posting]:
             # (Jane Street có tin first_published 2020). updated_at mới cho biết còn sống.
             posted_at=str(row.get("updated_at") or row.get("first_published") or ""),
             description=strip_html(row.get("content", ""))[:20000],
+            raw_body=(row.get("content") or "")[:60000],
             payload={"board": board, "id": row.get("id"),
                      "departments": [d.get("name") for d in row.get("departments") or []],
                      "deadline": row.get("application_deadline"),

@@ -43,8 +43,10 @@ Kéo tin thật về, gộp trùng, lưu cache.
 |x| Lọc theo hồ sơ, LUÔN ghi lý do bỏ | `ingest/filter.py` |
 |x| Gộp trùng theo vân tay công ty + chức danh | `dedup/group.py` |
 |x| Nối `/` và `/jobs` vào dữ liệu thật | `dashboard/live.py` |
+|x| **Chrome tự lái** — client WebSocket + CDP tự viết | `browser/` |
+|x| **eFinancialCareers** — board tài chính lớn nhất London | `ingest/web/` |
 | | **Adzuna GB** — cần key miễn phí của Vin | `ingest/adzuna.py` |
-| | Nguồn qua Chrome (grad scheme UK không có API) | `browser/` |
+| | Bright Network · Milkround · Prospects | `ingest/web/` |
 
 **Kết quả lần chạy 04/09/2026:**
 
@@ -57,7 +59,71 @@ Analyst Program · Zopa 2027 Graduate Analyst · Man Group Quantitative Develope
 Squarepoint Junior Credit Research Analyst · GSA · Winton · Quadrature · IMC.
 Tất cả ở London, tất cả đúng dải graduate/junior.
 
-Test: 21/21 qua (`python3 tests/test_ingest.py`).
+### Chrome — bổ sung sau khi rõ định hướng
+
+Nút thắt nằm ở phía nhà tuyển dụng: họ mất **một tuần** mới trả lời. Máy nhanh
+gấp trăm lần cũng không rút ngắn được ngày nào. Nên ngân sách đúng cho mỗi tin
+là **hàng giờ máy chạy**, không phải vài giây — và điều đó mở ra việc đọc kỹ.
+
+| | |
+|---|---|
+| `browser/ws.py` | Client WebSocket ~120 dòng, thư viện chuẩn. Không cài gì |
+| `browser/chrome.py` | Chrome RIÊNG, profile riêng, cổng 9333 |
+| `browser/cdp.py` | Mở trang, chờ, chạy JS, cuộn, bấm |
+| `ingest/web/` | Một file một trang, trả về đúng kiểu `Posting` |
+
+**Headed, không headless.** Headless bị Cloudflare chặn (`Just a moment…`, `403`).
+Chrome thường thì vào bình thường — đây là dùng trình duyệt thật, không phải kỹ
+thuật né tránh.
+
+**Hai luật an toàn, có test chặn:**
+
+1. Hộp cookie: **luôn bấm Reject, không bao giờ Accept.** Hệ thống không có quyền
+   đồng ý điều khoản thay người dùng.
+2. Trang nào trả về thử thách chống bot thì **ghi nhận rồi bỏ qua** — trang đó
+   đang nói không với máy, không cãi lại.
+
+### Đi thẳng nhà tuyển dụng, bỏ trung gian
+
+Board trung gian có vấn đề: **19/28 tin lấy từ eFinancialCareers là của công ty
+môi giới**, không phải chủ việc. Họ viết lại JD, giấu tên công ty thật, và nộp
+qua đó là hồ sơ đi thêm một tầng lọc nữa.
+
+| | |
+|---|---|
+| `ingest/web/agency.py` | Nhận diện tin môi giới — tên hãng + chữ trong JD |
+| `ingest/web/careers.py` | Dò trang tuyển dụng của công ty, xác minh đúng chủ |
+| `ingest/web/companies.py` | Bảng công ty mục tiêu, **tự lớn lên** |
+| `config/companies.toml` | 55 công ty hạt giống: quỹ, quản lý tài sản, fintech UK |
+
+**Tự mở rộng:** mỗi lần quét, chủ việc thật thấy trong tin được thêm vào bảng và
+tự dò ATS. `boards.toml` gõ tay giờ chỉ còn là hạt giống.
+
+**Kết quả:** 24/65 công ty dò ra ATS — thêm Qube Research (197 tin), Ebury (173),
+Jump Trading (109), Schonfeld (67), Thought Machine (41), Quantexa (30).
+
+```
+việc khớp   20  →  68        (49 trực tiếp · 19 qua môi giới)
+```
+
+**Hai lỗi thật đã sửa:**
+
+1. `norm_company` cắt cả `"Group"`, `"Capital"` — đúng khi so khớp tên nhưng sai
+   khi đoán slug. *"Man Group"* thành `man`, mất `mangroup`.
+2. Đoán slug bắt nhầm board công ty khác: *"London Stock Exchange Group"* → slug
+   `london`. Giờ xác minh bằng tên công ty mà board tự khai.
+
+**Kết quả trước đó:** eFinancialCareers cho **66 tin**, việc khớp từ 20 lên **48**.
+Vòng đọc kỹ mở từng tin lấy mô tả đầy đủ: 66 tin trong **144 giây**.
+
+Top bảng giờ có cả nguồn mới: *Eka Finance — Junior Quantitative Researcher* **100 điểm**.
+
+**Lỗi thật đã sửa:** cache chặn luôn cả việc **bổ sung**. Vòng quét nhanh ghi tin
+không mô tả, vòng đọc kỹ lấy được mô tả nhưng `INSERT OR IGNORE` bỏ qua nên không
+ghi vào đâu được. Giờ: đã có mà đang thiếu mô tả thì cập nhật, và không bao giờ
+đè mô tả dài bằng mô tả ngắn.
+
+Test: 24/24 (`test_ingest`) + 28/28 (`test_browser`).
 
 **Ba lỗi thật đã sửa trong lúc làm:**
 
@@ -148,21 +214,46 @@ Test: 28/28 qua. Không gọi LLM lần nào.
 
 **Chưa làm:** xuất PDF/DOCX. Hiện xem trên web, copy ra được.
 
-## Bước 4 — PROJECT
+## Bước 4 — PROJECT   *(xong)*
 
-Gom JD thành nhóm, mỗi nhóm một project, mỗi JD một trang kết quả.
+|x| Gom JD thành nhóm bằng greedy set cover | `projects/cluster.py` |
+|x| Đối chiếu project đã có với từng nhóm, chỉ ra chỗ trống | `projects/cluster.py` |
+|x| Dựng trang kết quả 5 phần cho từng JD | `projects/page.py` |
+|x| Báo trang còn thiếu gì (số đo, đánh đổi, link code) | `projects/page.py` |
 
-| | Việc |
-|---|---|
-| | Gom cụm JD (200 tin ≈ 5–8 nhóm) |
-| | Chọn project cho mỗi nhóm |
-| | Sinh trang kết quả 5 phần cho từng JD |
+**Vòng lặp khép ở đây.** Những câu `cv/rules.py` CẮT khỏi CV — tự phê bình, kể thất
+bại — chính là nguyên liệu cho phần *"What I gave up, and got wrong"*. Không mất gì,
+chỉ đổi tầng:
 
-**Xong khi:** có **một** project thật, đang chạy, kèm **một** trang kết quả viết riêng
-cho một JD cụ thể.
+```
+CV        -> bỏ chỗ làm sai   -> qua vòng lọc
+Trang này -> chỗ làm sai là điểm mạnh nhất -> được gọi phỏng vấn
+```
 
-> Phần xây project là **việc người làm**, không phải việc hệ thống.
-> Chạy song song được, không cần đợi bước 1–3.
+Có test chặn: mọi câu bị CV cắt phải rơi đúng vào phần Đánh đổi.
+
+**Gom nhóm dùng greedy set cover, KHÔNG dùng k-means** — vì nó giải thích được:
+*"nhóm này tồn tại vì 10 tin cùng đòi alpha research"*.
+
+**Kết quả trên 24 tin thật:**
+
+```
+python + alpha research + statistics    10 tin   ✓ Quant Trading Studio
+python + machine learning + statistics   6 tin   ✓ Quant Trading Studio
+python + rust                            2 tin   ⚠ chưa project nào trả lời
+portfolio + statistics                   2 tin   ✓ Quant Trading Studio
+```
+
+**Hai lỗi thật đã sửa:**
+
+1. Greedy set cover lấy kỹ năng phổ biến nhất làm khoá -> `python` có ở 19/24 tin
+   nên nuốt gọn tất cả vào một nhóm. Bỏ kỹ năng xuất hiện >60% khỏi danh sách khoá.
+2. Từ vựng thiếu hẳn nhóm **validation** (`out-of-sample`, `look-ahead bias`,
+   `data leakage`, `overfitting`) và `efficient frontier`, `sharpe`, `drawdown` —
+   đúng phần chuyên môn phân biệt người biết việc với người mới học. Thêm rồi thì
+   project mới khớp được với nhóm.
+
+Test: 21/21 qua.
 
 ## Bước 5 — GỬI
 

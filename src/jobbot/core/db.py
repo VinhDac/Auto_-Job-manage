@@ -127,6 +127,83 @@ MIGRATIONS: list[str] = [
     ALTER TABLE posting ADD COLUMN score_json TEXT NOT NULL DEFAULT '';
     CREATE INDEX posting_score ON posting(score);
     """,
+    # 6 — công ty mục tiêu. Đi thẳng trang tuyển dụng của họ thay vì qua
+    # board trung gian: tên công ty không mơ hồ, JD nguyên bản, và có sẵn
+    # đúng form để nộp ở bước 5.
+    """
+    CREATE TABLE company (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT    NOT NULL,
+        key          TEXT    NOT NULL UNIQUE,     -- tên đã chuẩn hoá
+        domain       TEXT    NOT NULL DEFAULT '',
+        careers_url  TEXT    NOT NULL DEFAULT '',
+        ats          TEXT    NOT NULL DEFAULT '', -- greenhouse|lever|ashby|workday|...
+        ats_slug     TEXT    NOT NULL DEFAULT '',
+        is_agency    INTEGER NOT NULL DEFAULT 0,  -- 1 = môi giới, không phải chủ việc
+        checked_at   TEXT    NOT NULL DEFAULT '',
+        roles_found  INTEGER NOT NULL DEFAULT 0,
+        note         TEXT    NOT NULL DEFAULT ''
+    );
+    CREATE INDEX company_ats ON company(ats);
+    ALTER TABLE posting ADD COLUMN via_agency INTEGER NOT NULL DEFAULT 0;
+    """,
+    # 7 — `kept` mặc định 1 nghĩa là tin vừa nạp đã được coi là "giữ" trước khi
+    # vòng lọc chạy. Bất cứ ai đọc DB giữa hai bước đó đều thấy tin chưa lọc.
+    # Mặc định đúng là 0: chưa phán thì chưa hiện.
+    """
+    CREATE TABLE posting_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        raw_id INTEGER NOT NULL REFERENCES raw_posting(id) ON DELETE CASCADE,
+        source TEXT NOT NULL, title TEXT NOT NULL, company TEXT NOT NULL,
+        location TEXT NOT NULL DEFAULT '', remote INTEGER NOT NULL DEFAULT 0,
+        salary TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '',
+        posted_at TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+        fingerprint TEXT NOT NULL, group_id TEXT,
+        kept INTEGER NOT NULL DEFAULT 0,           -- 0 = chưa phán HOẶC đã bị lọc
+        drop_reason TEXT NOT NULL DEFAULT 'not judged yet',
+        posted_ts INTEGER NOT NULL DEFAULT 0,
+        score INTEGER, score_conf TEXT NOT NULL DEFAULT '',
+        score_json TEXT NOT NULL DEFAULT '',
+        via_agency INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (raw_id)
+    );
+    INSERT INTO posting_new SELECT id, raw_id, source, title, company, location,
+        remote, salary, url, posted_at, description, fingerprint, group_id, kept,
+        drop_reason, posted_ts, score, score_conf, score_json, via_agency FROM posting;
+    DROP TABLE posting;
+    ALTER TABLE posting_new RENAME TO posting;
+    CREATE INDEX posting_fp    ON posting(fingerprint);
+    CREATE INDEX posting_group ON posting(group_id);
+    CREATE INDEX posting_kept  ON posting(kept);
+    CREATE INDEX posting_ts    ON posting(posted_ts);
+    CREATE INDEX posting_score ON posting(score);
+    """,
+    # 8 — sửa ba lỗi LÕI, không phải vá:
+    #
+    # (a) Tầng raw không thật sự raw. `posting.description` là bản DUY NHẤT của
+    #     mô tả; strip_html sai là mất gốc, mà tin LinkedIn hết hạn thì không
+    #     fetch lại được. Giờ giữ nguyên văn trong raw_posting.body.
+    #
+    # (b) Phán quyết (kept/score) không gắn với PHIÊN BẢN hồ sơ và PHIÊN BẢN
+    #     luật đã sinh ra nó. Đổi hồ sơ hay đổi luật thì mọi phán quyết cũ
+    #     thành sai — im lặng, không ai biết cái nào còn dùng được.
+    #
+    # (c) Không có cách tính lại toàn bộ tầng suy diễn từ tầng raw.
+    """
+    ALTER TABLE raw_posting ADD COLUMN body TEXT NOT NULL DEFAULT '';
+    ALTER TABLE posting ADD COLUMN judged_profile INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE posting ADD COLUMN judged_rules TEXT NOT NULL DEFAULT '';
+    ALTER TABLE posting ADD COLUMN scored_rules TEXT NOT NULL DEFAULT '';
+    CREATE INDEX posting_judged ON posting(judged_profile, judged_rules);
+    """,
+    # 9 — nguồn hỏng phải TRÔNG khác nguồn chạy tốt.
+    # Trước đây vòng đọc kỹ nuốt mọi ngoại lệ (`except Exception: continue`),
+    # nên một nguồn đổi giao diện và hỏng 100% trông y hệt nguồn bình thường:
+    # ok=1, không có mô tả nào, không ai biết.
+    """
+    ALTER TABLE source_run ADD COLUMN attempted INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE source_run ADD COLUMN failed INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 
 

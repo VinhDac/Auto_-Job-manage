@@ -29,6 +29,7 @@ def fetch(pages: int = 3) -> list[Posting]:
                 url=row.get("url", ""),
                 posted_at=str(row.get("created_at", "")),
                 description=strip_html(row.get("description", ""))[:20000],
+                raw_body=(row.get("description") or "")[:60000],
                 payload={k: row.get(k) for k in
                          ("slug", "title", "company_name", "location", "remote", "tags", "job_types")},
             ))

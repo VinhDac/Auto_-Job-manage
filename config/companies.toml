@@ -1,0 +1,22 @@
+# Công ty mục tiêu — đi THẲNG trang tuyển dụng của họ, bỏ board trung gian.
+# Danh sách này chỉ là hạt giống: mỗi lần quét, chủ việc thật thấy trong tin
+# sẽ tự được thêm vào và tự dò ATS.
+
+[targets]
+names = [
+  # quỹ / prop trading
+  "Man Group", "Marshall Wace", "Winton", "GSA Capital", "Quadrature Capital",
+  "Squarepoint Capital", "Qube Research and Technologies", "Jane Street",
+  "Optiver", "IMC", "Point72", "Citadel", "Two Sigma", "DRW", "XTX Markets",
+  "Jump Trading", "Millennium", "Balyasny", "Brevan Howard", "G-Research",
+  "Aspect Capital", "Systematica Investments", "Schonfeld", "Maven Securities",
+  "Capula Investment Management", "Rokos Capital", "Eisler Capital",
+  "ExodusPoint", "Verition", "Florin Court Capital", "AHL",
+  # quản lý tài sản / ngân hàng
+  "Schroders", "Aviva Investors", "Janus Henderson", "Baillie Gifford",
+  "abrdn", "Invesco", "Legal and General", "Fidelity International",
+  "LSEG", "MSCI", "FactSet", "Bloomberg",
+  # fintech UK
+  "Revolut", "Monzo", "Starling Bank", "Wise", "Checkout.com", "Tide",
+  "GoCardless", "Zopa", "Ebury", "Thought Machine", "Quantexa", "Featurespace",
+]

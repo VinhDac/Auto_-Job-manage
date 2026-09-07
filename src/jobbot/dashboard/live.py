@@ -17,6 +17,16 @@ from ..core import postings
 from ..dedup import group
 
 
+STALE_DAYS = 45          # quá ngần này thì nhiều khả năng đã tuyển xong
+
+
+def _age_days(ts: int) -> int | None:
+    """Tin đăng bao nhiêu ngày rồi. None = không biết ngày."""
+    if not ts:
+        return None
+    return int((datetime.now(timezone.utc).timestamp() - ts) // 86400)
+
+
 def _ago(stamp: str) -> str:
     """Nguồn trả ngày theo 2 kiểu: ISO (Greenhouse/Lever) và Unix (Arbeitnow)."""
     if not stamp:
@@ -89,10 +99,12 @@ def jobs(conn: sqlite3.Connection, flt) -> list[dict]:
                 "score": row["score"],
                 "confidence": row["score_conf"],
                 "posted": _ago(row["posted_at"]) if row["posted_at"] else "",
+                "age_days": _age_days(row["posted_ts"]),
                 "closes": "",
                 "sources": [row["source"]],
                 "merged": 1,
                 "state": "new" if row["kept"] else "dropped",
+                "via_agency": bool(row["via_agency"]),
                 "drop_reason": row["drop_reason"],
                 "url": row["url"],
             }
@@ -192,3 +204,54 @@ def activity(conn: sqlite3.Connection) -> list[dict]:
          "text": f"{r['kind'].replace('_', ' ')}" + (f" — {r['detail']}" if r["detail"] else "")}
         for r in postings.recent_audit(conn, 12)
     ]
+
+
+# ---------------------------------------------------------------- settings
+
+CHROME_SOURCES = {"efinancialcareers", "linkedin"}
+
+
+def sources(conn: sqlite3.Connection) -> list[dict]:
+    """Mọi nguồn, kèm loại (api hay chrome) và lần chạy gần nhất."""
+    counts = {r["source"]: r["n"] for r in conn.execute(
+        "SELECT source, COUNT(*) n FROM posting GROUP BY source")}
+    runs = {r["source"]: r for r in postings.last_runs(conn)}
+
+    out = []
+    for name in sorted(set(counts) | set(runs)):
+        family = name.split(":")[0]
+        run = runs.get(name)
+        out.append({
+            "name": name,
+            "kind": "chrome" if family in CHROME_SOURCES else "api",
+            "on": bool(run and run["ok"]),
+            "last": _ago(run["at"]) if run else "never",
+            "found": counts.get(name, 0),
+            "note": (run["error"][:60] if run and not run["ok"] else ""),
+        })
+    out.sort(key=lambda s: (-s["found"], s["name"]))
+    return out
+
+
+def chrome_status() -> dict:
+    from ..browser import chrome as ch
+    from ..core.scheduler import HUMAN_WINDOW
+    from ..ingest.web import linkedin as li
+    alive = ch.alive()
+    return {
+        "alive": bool(alive),
+        "version": (alive or {}).get("Browser", "—"),
+        "profile": str(ch.profile_dir()),
+        "port": ch.PORT,
+        "window": f"{HUMAN_WINDOW[0]:02d}:00 – {HUMAN_WINDOW[1]:02d}:00",
+        "pace": f"{li.PAUSE[0]:g}–{li.PAUSE[1]:g}s between pages on LinkedIn",
+    }
+
+
+def company_stats(conn: sqlite3.Connection) -> dict:
+    from ..ingest.web import companies as co
+    return co.stats(conn)
+
+
+def last_runs(conn: sqlite3.Connection) -> list[dict]:
+    return [dict(r) for r in postings.last_runs(conn)]

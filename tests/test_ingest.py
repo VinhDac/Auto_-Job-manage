@@ -72,6 +72,28 @@ with tempfile.TemporaryDirectory() as tmp:
     check("chạy lại KHÔNG ghi trùng (đây là cache)", (seen, new) == (3, 0))
     check("số tin không đổi", postings.count(conn) == 3)
 
+    # LỖI ĐÃ SỬA: cache chặn cả việc bổ sung. Vòng quét nhanh ghi tin không mô tả,
+    # vòng đọc kỹ lấy được mô tả nhưng không ghi vào đâu được.
+    deep = P("Quantitative Analyst", "Monzo Bank Ltd")
+    deep.source_id, deep.description = "s0", "x" * 900
+    seen, new = postings.save_batch(conn, "test", [deep])
+    check("bổ sung KHÔNG tạo dòng mới", (seen, new) == (1, 0))
+    got = conn.execute("SELECT p.description FROM posting p"
+                       " JOIN raw_posting r ON p.raw_id = r.id"
+                       " WHERE r.source_id = 's0'").fetchone()[0]
+    check("mô tả được ghi vào tin đã có", len(got) == 900)
+
+    deep2 = P("Quantitative Analyst", "Monzo Bank Ltd")
+    deep2.source_id, deep2.description = "s0", "ngắn hơn nhiều"
+    postings.save_batch(conn, "test", [deep2])
+    kept_long = conn.execute("SELECT p.description FROM posting p"
+                             " JOIN raw_posting r ON p.raw_id = r.id"
+                             " WHERE r.source_id = 's0'").fetchone()[0]
+    check("KHÔNG đè mô tả dài bằng mô tả ngắn", len(kept_long) == 900)
+
+    # kept mặc định 0 (chưa phán) — vòng lọc thật mới bật lên
+    conn.execute("UPDATE posting SET kept = 1, drop_reason = ''")
+    conn.commit()
     n_rows, n_groups = group.regroup(conn)
     check("gộp Monzo Bank Ltd + Monzo Bank", (n_rows, n_groups) == (3, 2))
 

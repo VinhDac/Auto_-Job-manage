@@ -23,6 +23,7 @@ def fetch_board(board: str) -> list[Posting]:
             url=row.get("jobUrl") or row.get("applyUrl", ""),
             posted_at=str(row.get("publishedAt") or ""),
             description=(row.get("descriptionPlain") or "").strip()[:20000],
+            raw_body=(row.get("descriptionHtml") or row.get("descriptionPlain") or "")[:60000],
             payload={"board": board, "id": row.get("id"),
                      "team": row.get("team"), "employmentType": row.get("employmentType")},
         ))

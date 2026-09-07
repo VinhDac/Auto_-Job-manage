@@ -19,6 +19,37 @@ from typing import Iterable
 from ..ingest.base import Posting, to_ts
 
 
+# MỘT nơi duy nhất nối kiểu Posting với cột trong bảng.
+#
+# Trước đây câu INSERT viết tay liệt kê tên cột và giá trị ở hai chỗ tách rời,
+# nên thêm một trường vào Posting là phải sửa ba nơi, và không có gì báo nếu
+# quên. Giờ chỉ sửa bảng này — và test sẽ gãy nếu Posting có trường chưa khai.
+FIELD_MAP: dict[str, str] = {
+    "title": "title", "company": "company", "location": "location",
+    "salary": "salary", "url": "url", "posted_at": "posted_at",
+    "description": "description",
+}
+
+# Trường của Posting KHÔNG đi thẳng vào bảng posting, kèm lý do
+NOT_COLUMNS: dict[str, str] = {
+    "source_id": "khoá ở raw_posting",
+    "raw_body": "lưu ở raw_posting.body",
+    "payload": "lưu ở raw_posting.payload",
+    "remote": "phải ép về int, xử lý riêng",
+}
+
+
+def _row_values(source: str, raw_id: int, item: Posting) -> tuple[list[str], list]:
+    """Dựng (cột, giá trị) từ FIELD_MAP thay vì viết tay câu INSERT."""
+    columns = ["raw_id", "source", "remote", "fingerprint", "posted_ts"]
+    values: list = [raw_id, source, int(item.remote), item.fingerprint(),
+                    to_ts(item.posted_at)]
+    for attr, column in FIELD_MAP.items():
+        columns.append(column)
+        values.append(getattr(item, attr))
+    return columns, values
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -38,47 +69,85 @@ def recent_audit(conn: sqlite3.Connection, limit: int = 30) -> list[sqlite3.Row]
 
 # ---------------------------------------------------------------- ghi tin
 
-def save_batch(conn: sqlite3.Connection, source: str, items: Iterable[Posting]) -> tuple[int, int]:
+def save_batch(conn: sqlite3.Connection, source: str,
+               items: Iterable[Posting]) -> tuple[int, int]:
     """Ghi một lô tin. Trả về (số thấy, số mới).
 
-    Tin đã có thì bỏ qua — đó chính là cache. Không ghi đè, không sinh bản trùng.
+    Cache chặn tin TRÙNG, KHÔNG chặn việc BỔ SUNG.
+
+    Lỗi đã sửa: trước đây tin đã có thì bỏ qua hoàn toàn — nên vòng quét nhanh
+    ghi tin không mô tả, rồi vòng đọc kỹ lấy được mô tả cũng không ghi vào đâu
+    được. Giờ: đã có mà đang thiếu mô tả, lần này có -> cập nhật.
     """
     seen = new = 0
     for item in items:
         seen += 1
         cur = conn.execute(
-            "INSERT OR IGNORE INTO raw_posting (source, source_id, url, fetched_at, payload)"
-            " VALUES (?,?,?,?,?)",
+            "INSERT OR IGNORE INTO raw_posting"
+            " (source, source_id, url, fetched_at, payload, body) VALUES (?,?,?,?,?,?)",
             (source, item.source_id, item.url, now(),
-             json.dumps(item.payload, ensure_ascii=False)),
+             json.dumps(item.payload, ensure_ascii=False),
+             item.raw_body or item.description),      # nguyên văn, không đụng vào
         )
-        if not cur.rowcount:            # đã có -> bỏ qua, không xử lý lại
+        if not cur.rowcount:            # đã có
+            if item.raw_body:           # lần này có nguyên văn -> lưu nếu đang thiếu
+                conn.execute(
+                    "UPDATE raw_posting SET body = ? WHERE source = ? AND source_id = ?"
+                    "  AND length(COALESCE(body,'')) < 200",
+                    (item.raw_body, source, item.source_id))
+            if item.description:        # và mô tả đã bóc, nếu đang thiếu
+                conn.execute(
+                    "UPDATE posting SET description = ?, salary = COALESCE(NULLIF(?,''), salary),"
+                    " posted_at = COALESCE(NULLIF(?,''), posted_at),"
+                    " posted_ts = CASE WHEN ? > 0 THEN ? ELSE posted_ts END"
+                    " WHERE raw_id = (SELECT id FROM raw_posting WHERE source=? AND source_id=?)"
+                    "   AND length(COALESCE(description,'')) < 200",
+                    (item.description, item.salary, item.posted_at,
+                     to_ts(item.posted_at), to_ts(item.posted_at),
+                     source, item.source_id))
             continue
         raw_id = int(cur.lastrowid)
+        columns, values = _row_values(source, raw_id, item)
+        marks = ",".join("?" for _ in columns)
         conn.execute(
-            "INSERT INTO posting (raw_id, source, title, company, location, remote,"
-            " salary, url, posted_at, posted_ts, description, fingerprint)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (raw_id, source, item.title, item.company, item.location, int(item.remote),
-             item.salary, item.url, item.posted_at, to_ts(item.posted_at),
-             item.description, item.fingerprint()),
-        )
+            f"INSERT INTO posting ({','.join(columns)}) VALUES ({marks})", values)
         new += 1
     conn.commit()
     return seen, new
 
 
+# Hỏng quá tỉ lệ này thì coi như nguồn hỏng, dù có lấy về được vài tin.
+FAIL_THRESHOLD = 0.3
+
+
 def record_run(conn: sqlite3.Connection, source: str, ok: bool,
-               fetched: int = 0, new_rows: int = 0, error: str = "") -> None:
+               fetched: int = 0, new_rows: int = 0, error: str = "",
+               attempted: int = 0, failed: int = 0) -> None:
+    """Ghi lại một lần chạy nguồn.
+
+    Hỏng quá 30% số tin định đọc thì đánh dấu ok=0 KỂ CẢ khi vẫn lấy được ít
+    tin — nguồn đổi giao diện thường hỏng gần hết chứ không hỏng hẳn, và nếu
+    chỉ nhìn "có lấy được tin không" thì không bao giờ phát hiện ra.
+    """
+    if ok and attempted and failed / attempted > FAIL_THRESHOLD:
+        ok = False
+        error = error or (f"{failed}/{attempted} tin đọc hỏng "
+                          f"({failed * 100 // attempted}%) — trang có thể đã đổi")
     conn.execute(
-        "INSERT INTO source_run (source, started_at, ok, fetched, new_rows, error)"
-        " VALUES (?,?,?,?,?,?)",
-        (source, now(), int(ok), fetched, new_rows, error),
+        "INSERT INTO source_run (source, started_at, ok, fetched, new_rows, error,"
+        " attempted, failed) VALUES (?,?,?,?,?,?,?,?)",
+        (source, now(), int(ok), fetched, new_rows, error, attempted, failed),
     )
     conn.commit()
 
 
 # ---------------------------------------------------------------- đọc tin
+
+def unjudged(conn: sqlite3.Connection) -> int:
+    """Tin đã nạp nhưng vòng lọc chưa chạy qua. Nên luôn bằng 0 sau mỗi lần quét."""
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM posting WHERE drop_reason = 'not judged yet'").fetchone()[0])
+
 
 def count(conn: sqlite3.Connection, kept_only: bool = False) -> int:
     sql = "SELECT COUNT(*) FROM posting" + (" WHERE kept = 1" if kept_only else "")

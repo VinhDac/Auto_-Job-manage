@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from html import escape as esc
 
-from ..filters import BAND, DAYS, LOC, PER_PAGE, SHOW, SORT, JobFilter
+from ..filters import BAND, DAYS, LOC, PER_PAGE, SHOW, SORT, VIA, JobFilter
 from ..layout import badge, card, empty, h1, page, score_bar
 
 STATE_BADGE = {
@@ -57,12 +57,16 @@ def _row(job: dict) -> str:
     dup = (f"<span class=muted>{merged} postings merged</span>" if merged > 1 else "")
     why = (f"<div class=dropwhy>Filtered out — {esc(job['drop_reason'])}</div>"
            if job.get("drop_reason") else "")
+    agency = badge("via agency", "warn") if job.get("via_agency") else ""
+    age = job.get("age_days")
+    stale = (badge(f"{age}d old", "warn") if age is not None and age >= 45
+             else badge("no date", "muted") if age is None else "")
     closes = f"<span class=warn-t>closes {esc(job['closes'])}</span>" if job["closes"] else ""
     return card(
         f"<a class=jobhead href='/jobs/{esc(job['id'])}'>"
         f"<span class=jt>{esc(job['title'])}</span>"
         f"<span class=jc>{esc(job['company'])} · {esc(job['location'])}</span></a>"
-        f"<div class=jmeta>{_score(job)}{badge(label, kind)}"
+        f"<div class=jmeta>{_score(job)}{badge(label, kind)}{agency}{stale}"
         f"<span class=spacer></span>"
         f"<span class=muted>{esc(job['salary'])}</span></div>"
         f"<div class=jfoot>{sources}{dup}<span class=spacer></span>"
@@ -110,6 +114,7 @@ def render(jobs: list[dict], flt: JobFilter, counts: dict, facets: dict,
         + _chips("Where", "loc", LOC, flt.loc, flt)
         + _chips("When", "days", DAYS, flt.days, flt)
         + _chips("Score", "band", BAND, flt.band, flt)
+        + _chips("Posted by", "via", VIA, flt.via, flt)
         + _chips("Sort", "sort", SORT, flt.sort, flt)
         + "<div class=tickwrap>"
         + _ticks("Company", "company", company_opts, flt)
@@ -190,12 +195,11 @@ def render_detail(job: dict, pending: int) -> str:
                "Build a CV for this posting →</a>"
                "<div class=muted style='margin-top:6px'>Selects and orders lines from your "
                "own profile against what this posting asks for. Writes nothing new.</div>")
-        + "<h2>Project to attach</h2>"
-        + (card(f"<b>{esc(proj['title'])}</b>"
-                f"<div class=muted>Cluster: {esc(proj['cluster'])} · {esc(proj['status'])}</div>"
-                f"<p>{esc(proj['why'])}</p>"
-                "<a class=ghost href='/projects'>See the write-up</a>") if proj
-           else empty("No project yet — that is step 4."))
+        + "<h2>Project write-up</h2>"
+        + card(f"<a class=ghost href='/jobs/{esc(job['id'])}/project'>"
+               "Build a one-page write-up for this posting →</a>"
+               "<div class=muted style='margin-top:6px'>Five parts, 90 seconds to read. "
+               "Uses the lines the CV builder cut out — that is where they belong.</div>")
         + "<h2>The posting</h2>"
         + card(f"<pre class=jd>{esc(job['jd'])}</pre>")
         + "<div class=actbar><button class=primary>Queue for approval</button>"

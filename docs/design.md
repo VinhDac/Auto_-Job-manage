@@ -66,7 +66,34 @@ Người dùng ở **UK**, nhắm **UK + global**. Đã kiểm chứng thật:
 Nguồn không có API công khai (LinkedIn, Otta, Indeed): qua extension Chrome, chạy
 trong cửa sổ giống người — không 24/7.
 
-## 4. Dữ liệu & cache
+## 4. Kiến trúc dữ liệu
+
+```
+raw_posting   nguyên văn + body gốc     KHÔNG BAO GIỜ sửa
+      ↓  derive()  — một giao dịch, chỉ tính lại cái đã cũ
+posting       chuẩn hoá + phán quyết    tính lại được hoàn toàn từ raw
+```
+
+Ba tính chất bắt buộc:
+
+**Tính lại được.** `scripts/rebuild.py` dựng lại toàn bộ tầng suy diễn từ raw.
+Không có nó thì một lỗi trong `strip_html` là hỏng vĩnh viễn — mà nó đã sai
+hai lần, và tin LinkedIn hết hạn thì không fetch lại được.
+
+**Gắn phiên bản.** Mỗi phán quyết ghi rõ sinh ra từ hồ sơ phiên bản nào
+(`judged_profile`) và luật phiên bản nào (`judged_rules`, `scored_rules`).
+Đổi hồ sơ hay sửa `core/versions.py` -> tin cũ tự thành "cần tính lại".
+
+**Một giao dịch.** Lọc + gộp + chấm nằm trong một `derive()`. Web đọc giữa
+chừng thấy trạng thái CŨ trọn vẹn, không thấy trạng thái dở dang.
+
+**Một định nghĩa.** `core/postings.FIELD_MAP` là nơi duy nhất nối kiểu `Posting`
+với cột trong bảng. Có test gãy nếu hai bên lệch nhau.
+
+**Nguồn hỏng phải trông khác nguồn tốt.** Mỗi lần đọc trả về `Health(attempted,
+failed)`; hỏng quá 30% thì đánh dấu nguồn hỏng kể cả khi vẫn lấy được ít tin.
+
+## 5. Dữ liệu & cache
 
 Bốn tầng, tách bạch, **không trộn**:
 
@@ -84,7 +111,7 @@ Vì sao cache là bắt buộc, không phải tối ưu:
 3. Dedup cần lịch sử để so.
 4. Tiến trình 24/7 **phải khởi động lại được mà không mất gì**.
 
-## 5. Ngôn ngữ
+## 6. Ngôn ngữ
 
 | Chỗ nào | Ngôn ngữ | Vì sao |
 |---|---|---|
@@ -95,7 +122,7 @@ Vì sao cache là bắt buộc, không phải tối ưu:
 > Cần cân nhắc lại nếu repo này thành portfolio: người đọc ở UK sẽ không đọc được
 > chú thích tiếng Việt. Chưa quyết — xem §7.
 
-## 6. Hình dạng app
+## 7. Hình dạng app
 
 **App macOS thật, không phải tab trình duyệt.** Cùng cách Discord/Slack/VS Code làm:
 nội dung là HTML, nhưng nằm trong `NSWindow` + `WKWebView` native.
@@ -122,7 +149,7 @@ WebKit không có bindings dựng sẵn trong PyObjC của Anaconda, nên nạp 
 launchd giữ cho nó sống: `KeepAlive={SuccessfulExit: false}` — crash thì bật lại,
 nhưng bấm Quit thì dừng hẳn. Dùng `KeepAlive=true` là mỗi lần Quit nó lại tự bật.
 
-## 7. Giao diện
+## 8. Giao diện
 
 Bố cục **app desktop**, không phải trang web:
 
@@ -146,7 +173,7 @@ Bảng màu — dark theme dứt khoát, **chỉ một tông**, không theo them
 Toàn bộ CSS chạy bằng biến, nên đổi tông là sửa đúng khối `:root`.
 Nền cửa sổ native đặt khớp `--bg` để không nháy trắng lúc mở.
 
-## 8. Stack
+## 9. Stack
 
 | Chọn | Vì sao |
 |---|---|
@@ -157,7 +184,7 @@ Nền cửa sổ native đặt khớp `--bg` để không nháy trắng lúc m�
 **Không dùng:** Docker, Postgres, message queue, microservice.
 Thêm vào chỉ tốn công bảo trì, không giải quyết gì ở quy mô một người.
 
-## 9. Quyết định đã chốt
+## 10. Quyết định đã chốt
 
 - [x] Một vòng lặp `Proposal` duy nhất cho mọi module
 - [x] Mọi hành động không đảo ngược được đều qua cổng Yes/No
@@ -165,7 +192,7 @@ Thêm vào chỉ tốn công bảo trì, không giải quyết gì ở quy mô m
 - [x] Không lấy LinkedIn làm trung tâm — nó chỉ là một nguồn trong nhiều nguồn
 - [x] Làm đến đâu test được đến đấy (xem `roadmap.md`)
 
-## 10. Đã bỏ (có lý do)
+## 11. Đã bỏ (có lý do)
 
 **Đối chiếu sponsor register gov.uk** — Vin đang có Graduate visa nên không cần lọc
 theo công ty được phép bảo lãnh. Bỏ khỏi bước 1.
@@ -174,7 +201,7 @@ Dữ liệu vẫn có sẵn nếu cần bật lại: `gov.uk/government/publicat
 CSV 143.082 tổ chức, cập nhật hàng ngày. Đáng bật lại khi Graduate visa còn ~9 tháng —
 lúc đó công ty không bảo lãnh được là công ty không giữ được Vin.
 
-## 11. Chưa quyết
+## 12. Chưa quyết
 
 - [ ] Engine chấm điểm: keyword/BM25 thuần, embedding, hay LLM — quyết sau khi có dữ liệu thật ở M5
 - [ ] Framework dashboard cụ thể

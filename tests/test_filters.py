@@ -19,6 +19,12 @@ def check(name, cond):
 
 Q = lambda **kw: JobFilter.from_query({k: [str(v)] for k, v in kw.items()})
 
+print("\n[lọc môi giới]")
+check("mặc định chỉ hiện chủ việc trực tiếp", "via_agency = 0" in Q().where()[0])
+check("'all' thì không lọc", "via_agency" not in Q(via="all").where()[0])
+check("'agency' thì chỉ hiện môi giới", "via_agency = 1" in Q(via="agency").where()[0])
+check("giá trị lạ -> về mặc định direct", Q(via="hack").via == "direct")
+
 print("\n[đọc URL]")
 check("mặc định là 'matched'", Q().show == "matched")
 check("giá trị lạ bị vứt", Q(show="'; DROP TABLE--").show == "matched")
@@ -56,6 +62,7 @@ with tempfile.TemporaryDirectory() as tmp:
         p = Posting(source_id=f"s{i}", title=title, company=comp, location=loc, posted_at=when)
         items.append(p)
     postings.save_batch(conn, "greenhouse:test", items)
+    conn.execute("UPDATE posting SET kept = 1, drop_reason = ''")
     conn.execute("UPDATE posting SET kept=0, drop_reason='title does not match'"
                  " WHERE title='Product Manager'")
     conn.commit()

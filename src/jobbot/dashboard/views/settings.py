@@ -1,4 +1,8 @@
-"""Settings — nguồn, nhịp chạy, engine LLM, và ranh giới an toàn."""
+"""Settings — nguồn, Chrome, nhịp chạy, ranh giới an toàn.
+
+Trang này phải trả lời được: hệ thống ĐANG làm gì, với ai, và cái gì nó
+KHÔNG được phép làm. Không giấu gì.
+"""
 
 from __future__ import annotations
 
@@ -7,56 +11,79 @@ from html import escape as esc
 from ..layout import badge, card, h1, page
 
 
-def render(sources: list[dict], pending: int) -> str:
+def _srow(label: str, value: str, note: str = "") -> str:
+    return (f"<div class=srow><span>{esc(label)}</span><span>{value}</span>"
+            + (f"<span class=muted>{esc(note)}</span>" if note else "") + "</div>")
+
+
+def render(sources: list[dict], chrome: dict, companies: dict,
+           runs: list[dict], pending: int) -> str:
     rows = "".join(
         f"<tr><td>{esc(s['name'])}</td>"
+        f"<td>{badge(s['kind'], 'ok' if s['kind'] == 'api' else '')}</td>"
         f"<td>{badge('on', 'ok') if s['on'] else badge('off', 'muted')}</td>"
-        f"<td>{badge('needs key', 'warn') if s['key'] else '<span class=muted>no key</span>'}</td>"
-        f"<td class=muted>{esc(s['last'])}</td><td>{s['found']:,}</td></tr>"
+        f"<td class=muted>{esc(s['last'])}</td>"
+        f"<td>{s['found']:,}</td>"
+        f"<td class=muted>{esc(s['note'])}</td></tr>"
         for s in sources)
 
-    engines = card(
-        "<b>Matching engine</b>"
-        "<label class=opt><input type=radio name=engine value=none>"
-        "<span><span class=lbl>Keywords only — no LLM</span>"
-        "<span class=note>Deterministic, testable, free. Runs 24/7.</span></span></label>"
-        "<label class=opt><input type=radio name=engine value=claude_code checked>"
-        "<span><span class=lbl>Claude in this session</span>"
-        "<span class=note>No API key. Requests queue up and are answered in-session.</span></span></label>"
-        "<label class=opt><input type=radio name=engine value=api>"
-        "<span><span class=lbl>Anthropic API</span>"
-        "<span class=note>Needs a key. For running unattended, or sharing the app.</span></span></label>",
-        "engine")
+    live = badge("running", "ok") if chrome["alive"] else badge("not running", "muted")
+    chrome_card = card(
+        "<b>Chrome</b>"
+        + _srow("Status", live, chrome["version"])
+        + _srow("Profile", f"<code>{esc(chrome['profile'])}</code>",
+                "separate from your everyday Chrome — it is never touched")
+        + _srow("Signed in", badge("no — public pages only", "ok"),
+                "no account means no account to lose")
+        + _srow("Window", "headed", "headless is blocked by Cloudflare on these sites")
+        + _srow("Port", str(chrome["port"]), "not the default 9222")
+        + "<div class=note>A Chrome window appearing is the system actually working. "
+          "It reads public pages at human pace, the same pages you would open yourself."
+          "</div>", "notice")
 
-    safety = card(
-        "<b>Safety boundary</b>"
-        "<div class=muted>Which actions stop for your approval. "
-        "Anything that cannot be undone should stay on.</div>"
-        "<table class=data>"
-        "<tr><td>Search, dedup, score, measure</td><td>" + badge("runs freely", "ok") + "</td></tr>"
-        "<tr><td>Build a CV variant</td><td>" + badge("runs freely", "ok") + "</td></tr>"
-        "<tr><td>Send an application</td><td>" + badge("always asks", "warn") + "</td></tr>"
-        "<tr><td>Send a follow-up email</td><td>" + badge("always asks", "warn") + "</td></tr>"
-        "<tr><td>Post or connect on LinkedIn</td><td>" + badge("always asks", "warn") + "</td></tr>"
-        "</table>", "safety")
+    limits = card(
+        "<b>What Chrome is allowed to do</b>"
+        + _srow("Read public job pages", badge("yes", "ok"), "")
+        + _srow("Sign in to your accounts", badge("never", "warn"),
+                "LinkedIn, eFC — no credentials are stored or entered")
+        + _srow("Read profiles, connections, messages", badge("never", "warn"),
+                "job postings only")
+        + _srow("Cookie banners", badge("reject only", "ok"),
+                "never Accept — the system cannot agree to terms for you")
+        + _srow("When a site blocks it", badge("stop and log", "ok"),
+                "it does not retry or work around the block")
+        + _srow("Hours", esc(chrome["window"]),
+                "outside these hours only public APIs run; a manual scan ignores this")
+        + _srow("Pace", esc(chrome["pace"]), "")
+        , "safety")
 
-    schedule = card(
-        "<b>When it runs</b>"
-        "<div class=srow><span>Public APIs</span>"
-        "<span class=muted>24/7 — no reason to hold back</span></div>"
-        "<div class=srow><span>Sources without an API (Chrome)</span>"
-        "<span class=muted>08:00 – 22:00, with gaps and days off</span></div>"
-        "<div class=note>Nobody browses at 3am every night. The rhythm gives it away "
-        "long before the click speed does.</div>", "sched")
+    comp = card(
+        "<b>Target companies</b>"
+        + _srow("Known", f"{companies['total']:,}", "grows itself from postings found")
+        + _srow("Resolved to an ATS", f"{companies['resolved']:,}",
+                "these are read directly, bypassing job boards")
+        + _srow("Marked as agencies", f"{companies['agencies']:,}",
+                "hidden by default on the Jobs page")
+        + "<div class=note>Every real employer seen in a posting is added here and "
+          "probed for its own careers board. The seed list is only a starting point."
+          "</div>")
+
+    last = "".join(
+        f"<tr><td>{esc(r['source'])}</td>"
+        f"<td>{badge('ok', 'ok') if r['ok'] else badge('failed', 'warn')}</td>"
+        f"<td>{r['fetched']:,}</td><td>{r['new_rows']:,}</td>"
+        f"<td class=muted>{esc(r['error'][:70])}</td></tr>" for r in runs)
 
     return page(
         "Settings",
-        h1("Settings")
+        h1("Settings", "What the system is doing, and what it is not allowed to do.")
+        + "<h2>Chrome</h2>" + chrome_card
+        + "<h2>Boundaries</h2>" + limits
+        + "<h2>Companies</h2>" + comp
         + "<h2>Sources</h2>"
-        + "<table class=data><tr><th>Source</th><th></th><th>API key</th>"
-          "<th>Last run</th><th>Found</th></tr>" + rows + "</table>"
-        + "<h2>Engine</h2>" + engines
-        + "<h2>Schedule</h2>" + schedule
-        + "<h2>Safety</h2>" + safety,
-        active="/settings", pending=pending, mock=True, status="Running",
-    )
+        + "<table class=data><tr><th>Source</th><th>Kind</th><th></th>"
+          "<th>Last run</th><th>Found</th><th></th></tr>" + rows + "</table>"
+        + "<h2>Last run per source</h2>"
+        + "<table class=data><tr><th>Source</th><th></th><th>Seen</th>"
+          "<th>New</th><th>Error</th></tr>" + last + "</table>",
+        active="/settings", pending=pending, status="Running")

@@ -72,9 +72,24 @@ def norm(text: str) -> str:
     return _WS.sub(" ", _PUNCT.sub(" ", (text or "").lower())).strip()
 
 
+# Đuôi dính liền vào tên, không tách bằng dấu cách: "ocadogroup", "manGroup"
+_GLUED = re.compile(r"(group|holdings?|capital|partners?|global|international|"
+                    r"technologies|solutions|labs?|ltd|inc|plc)$")
+
+
 def norm_company(name: str) -> str:
-    """Bỏ đuôi pháp lý. 'Monzo Bank Ltd' -> 'monzo bank'."""
-    return _WS.sub(" ", _SUFFIX.sub(" ", norm(name))).strip()
+    """Bỏ đuôi pháp lý và đuôi mô tả. 'Monzo Bank Ltd' -> 'monzo bank'.
+
+    Cắt cả đuôi VIẾT LIỀN: arbeitnow trả về "ocadogroup" còn Greenhouse trả về
+    "Ocado Group" — không cắt thì hai bản của cùng một việc không gộp được.
+    """
+    out = _WS.sub(" ", _SUFFIX.sub(" ", norm(name))).strip()
+    words = out.split()
+    if len(words) == 1 and len(words[0]) >= 8:
+        trimmed = _GLUED.sub("", words[0])
+        if len(trimmed) >= 4:
+            return trimmed
+    return out
 
 
 def norm_title(title: str) -> str:
@@ -119,6 +134,7 @@ class Posting:
     url: str = ""
     posted_at: str = ""
     description: str = ""
+    raw_body: str = ""          # NGUYÊN VĂN trước khi bóc HTML — không bao giờ sửa
     payload: dict = field(default_factory=dict)
 
     def fingerprint(self) -> str:

@@ -23,6 +23,10 @@ DAYS = [("", "Any time"), ("7", "Last 7 days"), ("30", "Last 30 days"), ("90", "
 SORT = [("score", "Best match"), ("new", "Newest first"), ("old", "Oldest first"),
         ("company", "Company"), ("title", "Title")]
 BAND = [("", "Any score"), ("75", "75+"), ("60", "60+"), ("none", "Not scorable")]
+# Dùng "all", KHÔNG dùng chuỗi rỗng: chuỗi rỗng bị coi là "chưa chọn" nên rơi
+# về mặc định, và người dùng không có cách nào bảo "cho tôi xem cả hai".
+VIA = [("direct", "Direct employers"), ("all", "Include agencies"),
+       ("agency", "Agencies only")]
 
 UK_LIKE = ("london", "united kingdom", "england", "scotland", "wales", "manchester",
            "edinburgh", "cambridge", "oxford", "bristol", "leeds", "birmingham")
@@ -42,6 +46,7 @@ class JobFilter:
     loc: str = ""
     days: str = ""
     band: str = ""
+    via: str = "direct"
     sort: str = "score"
     page: int = 1
 
@@ -68,6 +73,7 @@ class JobFilter:
             loc=one("loc"),
             days=one("days"),
             band=one("band"),
+            via=one("via", "direct"),
             sort=one("sort", "score"),
         )
         try:
@@ -80,6 +86,7 @@ class JobFilter:
         found.loc = valid(found.loc, LOC)
         found.days = valid(found.days, DAYS)
         found.band = valid(found.band, BAND)
+        found.via = found.via if found.via in {v for v, _ in VIA} else "direct"
         found.sort = valid(found.sort, SORT) or "score"
         return found
 
@@ -118,6 +125,12 @@ class JobFilter:
             clauses.append("NOT (" + " OR ".join("LOWER(location) LIKE ?" for _ in UK_LIKE) + ")")
             args += [f"%{w}%" for w in UK_LIKE]
 
+        if self.via == "direct":
+            clauses.append("via_agency = 0")
+        elif self.via == "agency":
+            clauses.append("via_agency = 1")
+        # "all" -> không thêm điều kiện nào
+
         if self.band == "none":
             clauses.append("score IS NULL")
         elif self.band:
@@ -144,15 +157,15 @@ class JobFilter:
         from urllib.parse import urlencode
         state: dict = {"q": self.q, "show": self.show, "source": list(self.source),
                        "company": list(self.company), "loc": self.loc,
-                       "days": self.days, "band": self.band, "sort": self.sort,
-                       "page": self.page}
+                       "days": self.days, "band": self.band, "via": self.via,
+                       "sort": self.sort, "page": self.page}
         # đổi bộ lọc thì về trang 1 — trừ khi chính nó đang đổi trang
         if "page" not in changes:
             state["page"] = ""
         state.update(changes)
         if str(state.get("page", "")) in ("", "1"):
             state["page"] = ""
-        default = {"show": "matched", "sort": "score"}
+        default = {"show": "matched", "sort": "score", "via": "direct"}
 
         pairs: list[tuple[str, str]] = []
         for key, value in state.items():
@@ -193,4 +206,6 @@ class JobFilter:
             out.append((dict(DAYS)[self.days], self.url(days="")))
         if self.band:
             out.append((dict(BAND)[self.band], self.url(band="")))
+        if self.via != "direct":
+            out.append((dict(VIA)[self.via], self.url(via="direct")))
         return out
