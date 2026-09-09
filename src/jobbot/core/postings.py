@@ -69,6 +69,28 @@ def recent_audit(conn: sqlite3.Connection, limit: int = 30) -> list[sqlite3.Row]
 
 # ---------------------------------------------------------------- ghi tin
 
+# Mô tả ngắn hơn ngần này thì coi như CHƯA đọc được — đọc lại lần sau.
+# Cùng ngưỡng với chỗ save_batch quyết định có bổ sung mô tả hay không.
+HAVE_DESC = 200
+
+
+def already_read(conn: sqlite3.Connection, source: str) -> set[str]:
+    """id bên nguồn của những tin ĐÃ có mô tả tử tế.
+
+    Vòng đọc kỹ dùng cái này để BỎ QUA. Không có nó thì mỗi lần quét lại mở
+    lại từng trang đã đọc: đo trên máy thật là 194/196 tin LinkedIn đã có mô
+    tả, tức 97% công của vòng đọc kỹ là làm lại việc đã làm — và chính chỗ
+    thừa đó kéo theo cả chuỗi: 8-16 phút mỗi giờ -> ~4.600 lượt gọi mỗi ngày
+    -> bị bóp 40-82% -> phải nghỉ lâu hơn -> phải cắt bớt chức danh đi tìm.
+
+    Tin đọc hỏng (mô tả rỗng) KHÔNG nằm trong đây — lần sau thử lại.
+    """
+    return {r[0] for r in conn.execute(
+        "SELECT r.source_id FROM raw_posting r JOIN posting p ON p.raw_id = r.id"
+        " WHERE r.source = ? AND length(COALESCE(p.description,'')) >= ?",
+        (source, HAVE_DESC))}
+
+
 def save_batch(conn: sqlite3.Connection, source: str,
                items: Iterable[Posting]) -> tuple[int, int]:
     """Ghi một lô tin. Trả về (số thấy, số mới).

@@ -42,7 +42,10 @@ def render(status: dict, counters: list[dict], needs: list[dict],
            activity: list[dict], *,
            days: list, chances: list, funnel: list) -> str:
     needs_html = "".join(
-        f"<a class='need {esc(n['kind'])}' href='{esc(n['href'])}'>"
+        # href="#settings" -> mở MENU cài đặt tại chỗ, không rời trang. Cài
+        # đặt không còn là một trang để mà đi tới.
+        f"<a class='need {esc(n['kind'])}' href='{esc(n['href'])}'"
+        f"{' data-settings' if n['href'] == '#settings' else ''}>"
         f"<span class=tag>{esc(TAG.get(n['kind'], 'Ghi chú'))}</span>"
         f"<b>{esc(n['text'])}</b><span class=muted>{esc(n['note'])}</span></a>"
         for n in needs) or empty("Không có gì đang chờ bạn.")

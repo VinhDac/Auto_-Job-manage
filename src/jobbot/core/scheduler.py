@@ -19,13 +19,43 @@ from . import prefs
 from .journal import SEARCH, SYSTEM, log as jlog
 from .db import connect
 
+# Mặc định. Người dùng đổi được ở menu Cài đặt; hai hằng số này chỉ còn là
+# giá trị khởi điểm khi bảng pref chưa có gì.
 SCAN_EVERY_MIN = 60
 HUMAN_WINDOW = (8, 22)          # giờ địa phương, cho nguồn qua Chrome
+
+MIN_EVERY, MAX_EVERY = 5, 1440  # 5 phút tới 24 giờ
+
+
+def _pref(key: str, low: int, high: int) -> int:
+    """Đọc LÚC CHẠY, không phải lúc nạp module.
+
+    Import theo giá trị thì con số đóng băng: đổi 60 -> 15 phút phải khởi động
+    lại app mới ăn. Đọc hỏng thì trả mặc định — người dùng gõ gì vào ô cũng
+    không được làm chết vòng quét nền.
+    """
+    try:
+        conn = connect()
+        try:
+            return prefs.num(conn, key, low, high)
+        finally:
+            conn.close()
+    except Exception:                       # noqa: BLE001
+        return int(prefs.DEFAULTS.get(key, low))
+
+
+def scan_every_min() -> int:
+    return _pref(prefs.SCAN_EVERY, MIN_EVERY, MAX_EVERY)
+
+
+def human_window() -> tuple[int, int]:
+    return (_pref(prefs.HOURS_FROM, 0, 23), _pref(prefs.HOURS_TO, 1, 24))
 
 
 def in_human_window(now: datetime | None = None) -> bool:
     hour = (now or datetime.now()).hour
-    return HUMAN_WINDOW[0] <= hour < HUMAN_WINDOW[1]
+    low, high = human_window()
+    return low <= hour < high
 
 
 class Scheduler:
@@ -116,6 +146,9 @@ class Scheduler:
     def _loop(self) -> None:
         time.sleep(5)                       # để server lên trước
         while not self.stop_flag.is_set():
+            # Đọc lại nhịp MỖI vòng, không phải lúc khởi tạo: đổi 60 -> 15
+            # phút ở menu Cài đặt là ăn ngay, không phải mở lại app.
+            self.scan_every = scan_every_min() * 60
             if not self.paused and time.time() - self.last_scan >= self.scan_every:
                 self.scan_once()
             self.stop_flag.wait(30)

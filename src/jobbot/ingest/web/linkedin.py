@@ -112,18 +112,70 @@ def _from_row(row: dict) -> Posting | None:
         payload={"guest": True})
 
 
-def fetch(tab, queries: list[str], location: str = "London",
+# Thị trường trong hồ sơ -> chỗ LinkedIn hiểu. Trước đây địa điểm là chuỗi
+# cứng "London" trong chữ ký hàm và KHÔNG ai truyền vào — nên ô Thị trường
+# người dùng chọn chưa bao giờ đi tới đâu.
+MARKET_PLACE = {
+    "uk_onsite": "United Kingdom",
+    "uk_remote": "United Kingdom",
+    "eu_remote": "European Union",
+    "us_remote": "United States",
+    "global_remote": "",            # rỗng = LinkedIn tìm toàn cầu
+    "relocate": "",
+}
+
+
+def places_for(markets: list[str]) -> list[str]:
+    """Cần tìm ở mấy nơi. Giữ thứ tự khai trong hồ sơ, bỏ trùng.
+
+    'United Kingdom' rộng hơn 'London' và bao cả London — chọn nơi rộng hơn
+    vì hồ sơ nói uk_onsite + uk_remote, không nói riêng London.
+    """
+    out: list[str] = []
+    for m in markets or []:
+        place = MARKET_PLACE.get(m)
+        if place is not None and place not in out:
+            out.append(place)
+    return out or ["United Kingdom"]
+
+
+# Chức danh gửi đi mỗi vòng. Có TRẦN, và trần đó được GHI RA nhật ký khi
+# chạm — không cắt lặng lẽ như `titles[:5]` trước đây.
+MAX_QUERIES = 20
+
+
+def fetch(tab, queries: list[str], location: str = "United Kingdom",
           levels: list[str] | None = None, pages: int = 3,
-          deep: bool = True) -> list[Posting]:
+          deep: bool = True, skip: frozenset[str] = frozenset()) -> list[Posting]:
+    """Tìm rồi đọc kỹ tin LinkedIn.
+
+    skip = id những tin ĐÃ có mô tả. Vòng đọc kỹ bỏ qua chúng.
+
+    Đây là chỗ sửa quan trọng nhất của cả bước 1: trước đây vòng đọc kỹ mở
+    lại TOÀN BỘ tin tìm được, mỗi giờ. Trên máy thật 194/196 tin đã có mô tả
+    từ trước, nên 97% thời gian là đọc lại thứ đã đọc — 8-16 phút mở Chrome
+    liên tục mỗi tiếng, ~4.600 lượt gọi mỗi ngày, và LinkedIn bóp lại 40-82%.
+    """
+    if len(queries) > MAX_QUERIES:
+        jlog.warn(SEARCH, f"chỉ tìm {MAX_QUERIES}/{len(queries)} chức danh"
+                          f" — bỏ: {', '.join(queries[MAX_QUERIES:])}")
+        queries = queries[:MAX_QUERIES]
     exp = ",".join(sorted({e for lv in (levels or ["grad", "junior"])
                            for e in EXPERIENCE.get(lv, "2").split(",")}))
     found: dict[str, Posting] = {}
 
-    for qn, query in enumerate(queries, 1):
-        jlog.progress(SEARCH, f"tìm LinkedIn — {query}", qn, len(queries))
+    # Ghép sẵn từng cặp (chức danh, nơi) rồi chạy MỘT vòng — lồng hai vòng
+    # vào nhau thì thân vòng thụt thêm một tầng và lệch cả file.
+    places = location if isinstance(location, list) else [location]
+    pairs = [(q, p) for q in queries for p in places]
+
+    for step, (query, place) in enumerate(pairs, 1):
+        jlog.progress(SEARCH, f"tìm LinkedIn — {query}"
+                              + (f" · {place}" if len(places) > 1 else ""),
+                      step, len(pairs))
         for page in range(pages):
             url = GUEST.format(q=urllib.parse.quote(query),
-                               loc=urllib.parse.quote(location),
+                               loc=urllib.parse.quote(place),
                                exp=urllib.parse.quote(exp), start=page * PER_PAGE)
             open_page(tab, url, timeout=30)          # Blocked -> ném lên trên, không cãi
             rows = grab(tab, LIST_JS)
@@ -138,13 +190,17 @@ def fetch(tab, queries: list[str], location: str = "London",
     if not deep:
         return list(found.values()), Health(0, 0)
 
-    health = Health(attempted=len(found), failed=0)
     items = list(found.values())
-    jlog.emit(SEARCH, f"linkedin: tìm được {len(items)} tin, bắt đầu đọc kỹ")
-    for index, item in enumerate(items):
-        # Đây là chỗ vòng quét đứng lâu nhất — 192 tin, mỗi tin nghỉ 2.5-5 giây.
-        # Không báo tiến độ ở đây thì màn hình im lặng suốt 8-16 phút.
-        jlog.progress(SEARCH, "đọc kỹ LinkedIn", index + 1, len(items))
+    fresh = [i for i in items if i.source_id not in skip]
+    health = Health(attempted=len(fresh), failed=0)
+    jlog.emit(SEARCH, f"linkedin: tìm được {len(items)} tin"
+                      + (f", {len(items) - len(fresh)} đã đọc từ trước"
+                         f" -> chỉ đọc kỹ {len(fresh)}" if skip else
+                         f", đọc kỹ cả {len(fresh)}"))
+    for index, item in enumerate(fresh):
+        # Chỗ vòng quét đứng lâu nhất — mỗi tin nghỉ 2.5-5 giây. Không báo
+        # tiến độ ở đây thì màn hình im lặng suốt.
+        jlog.progress(SEARCH, "đọc kỹ LinkedIn", index + 1, len(fresh))
         try:
             open_page(tab, GUEST_JOB.format(jid=item.source_id), timeout=30)
             detail = grab(tab, DETAIL_JS)
@@ -160,8 +216,8 @@ def fetch(tab, queries: list[str], location: str = "London",
             # Dừng hẳn, không cãi lại — nhưng phải NÓI RA là đã dừng, và số
             # tin còn lại chưa đọc được tính vào phần hỏng. Chỉ note() rồi
             # break thì failed=0 và lần quét này trông y hệt một lần thành công.
-            health.block(f"bị chặn ở tin {index + 1}/{len(items)}",
-                         unread=len(items) - index)
+            health.block(f"bị chặn ở tin {index + 1}/{len(fresh)}",
+                         unread=len(fresh) - index)
             break
         except Exception as exc:           # noqa: BLE001
             health.failed += 1

@@ -19,14 +19,20 @@ from html import escape as esc
 # (đường dẫn, nhãn, ký hiệu)
 # Thứ tự = thứ tự công việc chạy thật, không phải thứ tự chữ cái.
 # Tab có (rt) là tab CÓ THỜI GIAN CHẠY -> dùng khuôn views/runtime.py.
+# Thứ tự = thứ tự công việc chạy thật, không phải thứ tự chữ cái.
+# Tab có (rt) là tab CÓ THỜI GIAN CHẠY -> dùng khuôn views/runtime.py.
+#
+# ĐÃ BỎ: Settings (thành menu bánh răng trên thanh trên — nó không phải một
+# việc, chỉ là mấy công tắc mở ra chỉnh rồi đóng), Jobs và Score. Danh sách việc sẽ nằm trong Search — "tìm" và "xem
+# kết quả tìm" là một việc. Chấm điểm không phải một hệ chạy riêng, nó là
+# giai đoạn cuối của cùng một lần quét.
+# /jobs/<id>, /jobs/<id>/cv, /jobs/<id>/project VẪN SỐNG — danh sách mới sẽ
+# trỏ tới đó.
 NAV = [
     ("/",          "Home",     "◈"),
     ("/search",    "Search",   "⌕"),      # rt — bước 1
-    ("/jobs",      "Jobs",     "◆"),      #      kết quả bước 1+2
-    ("/score",     "Score",    "▤"),      # rt — bước 2
     ("/projects",  "Projects", "▦"),      # rt — bước 4
     ("/profile",   "Profile",  "◇"),
-    ("/settings",  "Settings", "⚙"),
 ]
 
 
@@ -54,7 +60,12 @@ def page(title: str, body: str, active: str = "", wide: bool = False,
            "<div class=masters>"
            "<button class=mbtn data-act=run>Chạy ngay</button>"
            "<button class=mbtn data-act=pause>Tắt tự quét</button>"
-           "</div></header>")
+           "<button class='mbtn gear' data-settings title='Cài đặt'>⚙</button>"
+           "</div></header>"
+           # Tấm phủ cho menu Cài đặt. Rỗng cho tới khi bấm bánh răng —
+           # nạp nội dung lúc đó, để mọi trang khác không phải mang theo dữ
+           # liệu cài đặt mà chúng không dùng.
+           "<div class=sheet hidden data-sheet><div class=sheetbox></div></div>")
 
     # Đọc lựa chọn gập/mở NGAY trong <head>, trước khi vẽ. Để xuống cuối trang
     # thì mỗi lần chuyển tab thanh bên bung ra rồi mới co lại — nháy một cái.
@@ -138,9 +149,18 @@ def widget(title: str, body: str, tools: str = "", span: int = 1,
             f"<div class=wbody>{body}</div></section>")
 
 
-def grid(*widgets: str, cols: int = 3) -> str:
-    return (f"<div class=wgrid style='grid-template-columns:repeat({cols},1fr)'>"
-            + "".join(widgets) + "</div>")
+def grid(*widgets: str, cols: int = 3,
+         columns: str = "", rows: str = "") -> str:
+    """Lưới ô. Mặc định chia đều; truyền columns/rows để chia theo ý.
+
+    Chia đều là mặc định ĐÚNG cho phần lớn tab. Nhưng có tab mà mấy ô không
+    ngang vai nhau — danh sách việc đáng chiếm gấp đôi ô lưới lọc, và dải
+    nhật ký chỉ cần cao bằng ba dòng chứ không bằng một hàng đầy.
+    """
+    style = f"grid-template-columns:{columns or f'repeat({cols},1fr)'}"
+    if rows:
+        style += f";grid-template-rows:{rows}"
+    return f"<div class=wgrid style='{style}'>" + "".join(widgets) + "</div>"
 
 
 def journal_box(stream: str = "") -> str:

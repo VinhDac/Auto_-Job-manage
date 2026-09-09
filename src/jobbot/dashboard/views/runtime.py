@@ -63,9 +63,9 @@ def _rows_needed(panels: list[tuple], width: int, run_span: int = 0) -> int:
     """
     # Ô "Đang chạy" nằm ở hàng 1; nếu nó không chiếm trọn hàng thì ô nội dung
     # đầu tiên xếp ngay cạnh nó, không xuống hàng mới.
-    run_span = run_span or width
-    row, col, tall = 1, run_span, 1
-    for _title, _body, span, rows in panels:
+    # run_span=0 -> không có ô "Đang chạy" ở hàng 1, nội dung xếp từ đầu.
+    row, col, tall = 1, (run_span if run_span else 0), 1
+    for _title, _body, span, rows, *_rest in panels:
         if col + span > width:        # hết chỗ -> xuống hàng mới
             row += tall
             col, tall = 0, 1
@@ -74,29 +74,74 @@ def _rows_needed(panels: list[tuple], width: int, run_span: int = 0) -> int:
     return row + tall - 1
 
 
-def panel(title: str, body: str, span: int = 1, rows: int = 1) -> tuple:
-    """Một ô nội dung riêng của tab. Khuôn lo phần chung, tab lo phần ruột."""
-    return (title, body, span, rows)
+def panel(title: str, body: str, span: int = 1, rows: int = 1,
+          at: tuple[int, int] | None = None) -> tuple:
+    """Một ô nội dung riêng của tab. Khuôn lo phần chung, tab lo phần ruột.
+
+    at=(cột, hàng) đặt ô vào đúng chỗ. Để None thì trình duyệt tự xếp — đủ
+    cho tab mà mấy ô ngang vai nhau. Tab nào cần bố cục riêng (Search: nhật
+    ký nằm dưới ô lưới, danh sách kéo suốt chiều cao) thì nói rõ ra.
+    """
+    return (title, body, span, rows, at)
 
 
 def render(*, title: str, active: str, stream: str, panels: list[tuple],
            note: str = "", cols: int = 3, run_span: int | None = None,
-           run_extra: str = "") -> str:
+           run_extra: str = "", journal: str = "column",
+           columns: str = "", journal_h: str = "118px",
+           rows_tpl: str = "", journal_at: tuple[int, int] = (1, 2)) -> str:
     """Khuôn chung cho mọi tab CÓ THỜI GIAN CHẠY.
 
-    Cố định hai ô, vì tab runtime nào cũng cần đúng hai thứ đó:
-        "Đang chạy"  — tiến độ của luồng này
-        "Nhật ký"    — sự kiện của luồng này, cao nguyên cột phải
+    journal="column"  nhật ký chiếm trọn cột cuối, cạnh nội dung
+    journal="bottom"  nhật ký là DẢI NGANG DẸT dưới đáy, gộp cả thanh tiến độ
 
-    Phần còn lại do tab tự xếp. Trước đây khuôn ép cứng sáu ô cùng kích thước,
-    nên tab Search phải nhét hai thẻ "cách tìm" vào một ô cao 180px và cụt mất
-    thẻ thứ hai. Hình dạng nên dùng chung; kích thước thì tuỳ nội dung.
+    Chọn "bottom" khi nội dung chính cần cả bề ngang — như danh sách việc:
+    nhật ký là thứ liếc mắt, không phải thứ đọc lâu, nên ba dòng là đủ. Muốn
+    xem nhiều thì bấm nút mở to.
     """
     head = f"<div class=tnote>{esc(note)}</div>" if note else ""
+
+    if journal == "corner":
+        # Nhật ký nằm GÓC DƯỚI TRÁI, dưới ô điều khiển — không kéo hết bề
+        # ngang. Nó là thứ liếc mắt, chiếm cả chiều ngang là ăn mất chỗ của
+        # danh sách, mà danh sách mới là kết quả.
+        # Tab tự đặt cột/hàng và vị trí từng ô: bố cục này không đều nhau nên
+        # để trình duyệt tự xếp là ra lệch.
+        boxes = [widget(t, body, span=sp, rows=rw, at=at)
+                 for t, body, sp, rw, at in panels]
+        boxes.append(widget(
+            f"Nhật ký · {title.lower()}",
+            f"<div class=jflat><div class=jprog>{progress_box(stream)}</div>"
+            f"<div class=jfeed>{journal_box(stream)}</div></div>",
+            span=1, cls="flat corner", at=journal_at))
+        return page(title, head + grid(*boxes, cols=cols, columns=columns,
+                                       rows=rows_tpl),
+                    active=active, flow=False)
+
+    if journal == "bottom":
+        rows = _rows_needed(panels, cols, 0)
+        boxes = [widget(t, body, span=sp, rows=rw)
+                 for t, body, sp, rw, *_ in panels]
+        # Hàng nội dung co giãn, hàng nhật ký cao cố định. Không ghim thì lưới
+        # chia đều và dải nhật ký chiếm nguyên một hàng — cao gấp đôi thứ nó
+        # cần, và ăn mất chỗ của danh sách.
+        row_tpl = " ".join(["1fr"] * rows) + f" {journal_h}"
+        # Dải nhật ký: tiến độ bên trái, dòng sự kiện bên phải. Hai thứ cùng
+        # trả lời "nó đang làm gì", tách ra hai ô là chia đôi một câu hỏi.
+        boxes.append(widget(
+            f"Nhật ký · {title.lower()}",
+            f"<div class=jflat><div class=jprog>{progress_box(stream)}</div>"
+            f"<div class=jfeed>{journal_box(stream)}</div></div>",
+            span=cols, cls="flat", at=(1, rows + 1)))
+        return page(title, head + grid(*boxes, cols=cols, columns=columns,
+                                       rows=row_tpl),
+                    active=active, flow=False)
+
     boxes = [widget("Đang chạy", progress_box(stream) + run_extra,
                     span=run_span if run_span else cols - 1),
              widget(f"Nhật ký · {title.lower()}", journal_box(stream), span=1,
                     rows=_rows_needed(panels, cols - 1, run_span or 0),
                     cls="tall", at=(cols, 1))]
-    boxes += [widget(t, body, span=sp, rows=rw) for t, body, sp, rw in panels]
+    boxes += [widget(t, body, span=sp, rows=rw)
+              for t, body, sp, rw, *_ in panels]
     return page(title, head + grid(*boxes, cols=cols), active=active, flow=False)

@@ -3,7 +3,7 @@
 Khác với `ingest/filter.py`: cái kia chạy lúc quét, quyết định tin nào GIỮ trong DB.
 Cái này chạy lúc xem, quyết định tin nào HIỆN ra — không xoá gì, đổi ý là bấm lại.
 
-Trạng thái nằm hết trên URL (`/jobs?q=quant&show=dropped`) nên:
+Trạng thái nằm hết trên URL (`/search?q=quant&show=dropped`) nên:
   - nút Back của trình duyệt chạy đúng
   - lưu được link về đúng bộ lọc đang xem
   - không cần JavaScript, không cần lưu session
@@ -184,7 +184,8 @@ class JobFilter:
                 pairs += [(key, v) for v in value]
             elif value and default.get(key) != value:
                 pairs.append((key, str(value)))
-        return "/jobs" + (f"?{urlencode(pairs)}" if pairs else "")
+        # Danh sách việc nằm trong tab Search — tab Jobs đã bỏ.
+        return "/search" + (f"?{urlencode(pairs)}" if pairs else "")
 
     def toggle(self, key: str, value: str) -> str:
         """URL sau khi bật/tắt một ô tích."""

@@ -276,10 +276,6 @@ label.chip input:checked + span{background:var(--acc);color:var(--acc-ink);
   border-color:var(--acc);font-weight:600}
 
 /* ô tích chọn nhiều */
-.tickwrap{display:grid;grid-template-columns:1.6fr 1fr;gap:14px;margin-top:12px;
-  padding-top:12px;border-top:1px solid var(--line)}
-.tickcol .flabel{display:block;margin-bottom:7px}
-.ticklist{display:flex;flex-direction:column;gap:1px;max-height:186px;overflow-y:auto}
 label.tick{display:flex;align-items:center;gap:8px;padding:4px 7px;border-radius:6px;
   cursor:pointer;font-size:12.5px;color:var(--dim)}
 label.tick:hover{background:var(--panel-2);color:var(--ink)}
@@ -299,8 +295,6 @@ label.tick.on b{color:var(--acc)}
 .card.job.out:hover{opacity:1}
 .dropwhy{margin-top:9px;padding-top:9px;border-top:1px solid var(--line);
   font-size:12px;color:var(--warn)}
-.pager{display:flex;align-items:center;gap:10px;justify-content:center;margin:18px 0 0}
-.pager .chip{text-decoration:none}
 .chip.off{opacity:.35;cursor:default}
 
 /* ---------------- điểm khớp ---------------- */
@@ -536,41 +530,6 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px
 .alert span{font-size:11px;color:var(--dim);overflow-wrap:anywhere}
 
 
-/* ---------------- Search: hai cách tìm ---------------- */
-.method{border:1px solid var(--line);border-radius:9px;padding:11px 13px;
-  margin-bottom:10px;background:rgba(255,255,255,.012)}
-.mhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px}
-.mhead b{font-size:13px;font-weight:600}
-.mhead .muted{font-size:11px;color:var(--mute)}
-.mnums{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:9px}
-.mnums span{display:flex;align-items:baseline;gap:5px;font-size:11px;color:var(--dim);
-  background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
-.mnums b{font-size:14px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
-.hi-t{color:var(--acc)}
-.mblind{font-size:11.5px}
-.mblind u{text-decoration:none;color:var(--mute);font-size:10.5px;font-weight:700;
-  letter-spacing:.07em;text-transform:uppercase}
-.mblind ul{margin:5px 0 0;padding-left:15px;color:var(--dim);display:flex;
-  flex-direction:column;gap:2px}
-.mblind b{color:var(--warn);font-weight:700}
-.overlap{font-size:11.5px;color:var(--mute);padding:7px 2px}
-.overlap b{color:var(--ink)}
-
-/* ---------------- Search: danh sách công ty ---------------- */
-.watch{display:flex;flex-direction:column;gap:1px}
-.crow{display:grid;grid-template-columns:14px 1fr 74px 34px 46px 62px;
-  align-items:center;gap:7px;padding:3.5px 0;font-size:11.5px;
-  border-bottom:1px solid rgba(255,255,255,.03)}
-.crow.quiet{opacity:.45}
-.crow .own{color:var(--acc);font-style:normal;font-size:9px}
-.crow .learn{color:var(--mute);font-style:normal}
-.cname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
-.cats{color:var(--mute);font-size:10.5px}
-.ckept{text-align:right;font-variant-numeric:tabular-nums;color:var(--acc)}
-.crow.quiet .ckept{color:var(--mute)}
-.cpull{color:var(--mute);font-variant-numeric:tabular-nums;font-size:10.5px}
-.cwhen{color:var(--mute);font-size:10.5px;text-align:right}
-
 .kgroup{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
   color:var(--mute);padding:11px 0 4px;border-bottom:1px solid var(--line)}
 .krows > .kgroup:first-child{padding-top:0}
@@ -614,3 +573,153 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px
 .runsched{margin-top:11px;padding-top:9px;border-top:1px solid var(--line);
   font-size:11.5px;color:var(--dim)}
 .runsched b{color:var(--ink);font-weight:600}
+
+/* ================================================================
+   SEARCH — ba ô: danh sách việc · lưới lọc · nhật ký dẹt
+   ================================================================ */
+
+/* ---------------- nút XEM (bấm là đổi, không qua Áp dụng) ---------------- */
+.vbar{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+.vbar:last-of-type{margin-bottom:11px}
+.vchip{font-size:11.5px;color:var(--dim);text-decoration:none;padding:3px 9px;
+  border-radius:20px;border:1px solid var(--line);background:var(--bg);
+  white-space:nowrap}
+.vchip:hover{border-color:var(--line-2);color:var(--ink)}
+.vchip.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink);
+  font-weight:600}
+
+/* ---------------- một dòng việc ---------------- */
+.jlist{display:flex;flex-direction:column;gap:1px}
+.jrow{display:grid;grid-template-columns:76px 1fr auto;gap:12px;align-items:start;
+  padding:9px 8px;border-radius:8px;text-decoration:none;color:inherit;
+  border-bottom:1px solid rgba(255,255,255,.04)}
+.jrow:hover{background:var(--panel-2)}
+.jrow.dropped{opacity:.6}
+.jscore{padding-top:1px}
+.noscore{color:var(--mute);font-size:13px}
+.jtitle{font-size:13px;font-weight:600;color:var(--ink);line-height:1.35}
+.jsub{font-size:11.5px;color:var(--mute);margin-top:2px}
+.jsub b{color:var(--dim);font-weight:600}
+.dropwhy{font-size:11px;color:var(--warn);margin-top:3px}
+.jtags{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;
+  max-width:250px}
+
+.chance{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:20px;
+  background:var(--line);color:var(--dim);white-space:nowrap}
+.chance.ok{background:var(--acc-bg);color:var(--acc)}
+.chance.warn{background:var(--warn-bg);color:var(--warn)}
+
+/* badge nguồn — nhìn dòng nào cũng biết cách nào tìm ra nó */
+.src{display:inline-flex;align-items:center;gap:4px;font-style:normal;
+  font-size:10.5px;color:var(--dim);border:1px solid var(--line);
+  border-radius:5px;padding:1.5px 6px;white-space:nowrap}
+.src b{font-weight:600}
+.src.chrome{color:#8FA9C9;border-color:rgba(143,169,201,.3)}
+.src.api{color:var(--acc);border-color:rgba(85,201,141,.3)}
+.src.agency{color:var(--warn);border-color:rgba(216,161,94,.3)}
+.merged{font-size:10.5px;color:var(--mute)}
+.jwhen{font-size:10.5px;color:var(--mute);white-space:nowrap}
+
+/* ---------------- ô lưới lọc (form thật) ---------------- */
+.sieve{display:flex;flex-direction:column;gap:4px}
+.slab{display:flex;flex-direction:column;gap:2px;font-size:11.5px;
+  color:var(--dim);margin-top:9px}
+.slab:first-child{margin-top:0}
+.slab span{font-size:10.5px;color:var(--mute);line-height:1.4}
+/* ô thẻ: gõ chức danh rồi Enter là thêm */
+.tagbox{display:flex;flex-wrap:wrap;gap:4px;align-items:center;
+  background:var(--bg);border:1px solid var(--line);border-radius:7px;
+  padding:6px 7px;cursor:text}
+.tagbox:focus-within{border-color:var(--acc-2)}
+.tag{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;
+  color:var(--acc);background:var(--acc-bg);border:1px solid rgba(85,201,141,.28);
+  border-radius:5px;padding:3px 4px 3px 8px;white-space:nowrap}
+.untag{font:inherit;font-size:13px;line-height:1;color:var(--acc);cursor:pointer;
+  background:none;border:0;padding:0 3px;opacity:.55}
+.untag:hover{opacity:1}
+.taginput{flex:1;min-width:110px;font:inherit;font-size:12px;color:var(--ink);
+  background:none;border:0;padding:4px 3px}
+.taginput:focus{outline:none}
+.taginput::placeholder{color:var(--mute)}
+.ticks{display:flex;flex-wrap:wrap;gap:4px}
+.tick{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;
+  color:var(--dim);background:var(--bg);border:1px solid var(--line);
+  border-radius:6px;padding:4px 8px;cursor:pointer}
+.tick:hover{border-color:var(--line-2);color:var(--ink)}
+.tick input{accent-color:var(--acc);margin:0}
+.tick:has(input:checked){background:var(--acc-bg);border-color:var(--acc-2);
+  color:var(--acc)}
+/* Nút Áp dụng DÍNH đáy ô: nó là hành động chính, mà ô lưới cuộn được nên
+   nếu để nó trôi theo nội dung thì phần lớn thời gian nó nằm khuất.
+   Thanh dính CHE mất phần cuối nội dung, nên form phải chừa chỗ bên dưới —
+   nếu không nhóm "Thị trường" nằm khuất sau nó và không ai bấm được. */
+.sieve{padding-bottom:2px}
+.sieve .stick{position:sticky;bottom:calc(-1 * var(--wpad, 12px));
+  background:var(--panel);padding:11px 0;margin-top:9px;
+  border-top:1px solid var(--line)}
+.wid .wbody:has(.sieve){padding-bottom:0}
+.mbtn.apply{background:var(--acc-bg);border-color:var(--acc-2);
+  color:var(--acc);padding:7px 14px;width:100%}
+.mbtn.apply:hover{background:var(--acc-bg-2)}
+.applynote{font-size:10.5px;color:var(--mute);margin-top:7px;line-height:1.45}
+.applynote b{color:var(--dim)}
+
+/* ---------------- nhật ký dẹt dưới đáy ---------------- */
+.wid.flat .wbody{padding:9px 12px}
+.jflat{display:grid;grid-template-columns:260px 1fr;gap:16px;height:100%}
+.jprog{border-right:1px solid var(--line);padding-right:16px;overflow:auto}
+.jfeed{overflow:auto;min-width:0}
+
+/* Nhật ký ở GÓC dưới trái thì hẹp — xếp ngang hai khối là mỗi khối còn
+   ~160px, không đọc nổi dòng nào. Xếp DỌC: tiến độ một dòng trên, còn lại
+   nhường hết cho dòng sự kiện. */
+.wid.corner .jflat{grid-template-columns:1fr;grid-template-rows:auto 1fr;gap:7px}
+.wid.corner .jprog{border-right:0;border-bottom:1px solid var(--line);
+  padding:0 0 6px;overflow:visible}
+.wid.corner .jprog .pidle{font-size:11px}
+.wid.corner .jfeed .jline{gap:7px}
+.wid.corner .jfeed .jtime{font-size:10.5px}
+.pager{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:12px 4px 4px;margin-top:6px;border-top:1px solid var(--line)}
+.pager .muted{font-size:11.5px;color:var(--mute)}
+.vchip.off{opacity:.35}
+
+/* ---------------- menu Cài đặt (tấm phủ, không phải tab) ---------------- */
+.mbtn.gear{font-size:14px;line-height:1;padding:5px 10px}
+.sheet{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.5);
+  backdrop-filter:blur(2px);display:flex;align-items:flex-start;
+  justify-content:flex-end;padding:calc(var(--top) + 8px) 14px 14px}
+.sheetbox{width:400px;max-width:calc(100vw - 28px);max-height:100%;overflow:auto;
+  background:var(--panel);border:1px solid var(--line-2);border-radius:12px;
+  box-shadow:0 24px 70px rgba(0,0,0,.6)}
+.sheetwait{padding:26px;color:var(--mute);font-size:12px;text-align:center}
+
+.setform{padding:16px 18px 18px}
+.setform h3{margin:0 0 14px;font-size:12px;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--dim)}
+.setform .srow{display:flex;align-items:center;justify-content:space-between;
+  gap:12px;padding:7px 0;font-size:12.5px;color:var(--dim);
+  border-bottom:1px solid rgba(255,255,255,.04)}
+.setform input[type=number]{width:74px;font:inherit;font-size:12.5px;
+  color:var(--ink);background:var(--bg);border:1px solid var(--line);
+  border-radius:6px;padding:5px 8px;text-align:right}
+.setform select{font:inherit;font-size:12.5px;color:var(--ink);background:var(--bg);
+  border:1px solid var(--line);border-radius:6px;padding:5px 8px;max-width:210px}
+.setform input:focus,.setform select:focus{outline:none;border-color:var(--acc-2)}
+.setform .unit{color:var(--mute);font-size:11.5px;margin-left:7px}
+.setfoot{display:flex;align-items:center;gap:11px;margin-top:15px;flex-wrap:wrap}
+.setfoot .mbtn.apply{width:auto;padding:7px 18px}
+.setfoot .applynote{margin:0;flex:1;min-width:150px}
+
+.sthead{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mute);margin:20px 0 6px;padding-top:13px;
+  border-top:1px solid var(--line)}
+.stlist{display:flex;flex-direction:column;gap:1px}
+.strow{display:flex;justify-content:space-between;gap:12px;font-size:11.5px;
+  color:var(--mute);padding:3px 0}
+.strow b{color:var(--dim);font-weight:600}
+.safe{font-size:11.5px;color:var(--mute);line-height:1.55}
+.forced{font-size:11px;color:var(--warn);background:var(--warn-bg);
+  border-left:2px solid var(--warn);border-radius:0 5px 5px 0;
+  padding:5px 8px;margin:6px 0}
+.forced code{font-size:10.5px}

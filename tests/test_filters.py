@@ -46,8 +46,9 @@ print("\n[dựng URL]")
 f = Q(q="quant", loc="london", page="3")
 check("giữ bộ lọc khi đổi trang", "q=quant" in f.url(page=4) and "page=4" in f.url(page=4))
 check("đổi bộ lọc thì về trang 1", "page" not in f.url(loc="uk"))
-check("bỏ giá trị mặc định khỏi URL", f.url(q="", loc="", page=1) == "/jobs")
-check("chip tắt được từng cái", any(u == "/jobs?loc=london&page=3" or "q=" not in u
+# Danh sách việc chuyển vào tab Search — tab Jobs đã bỏ.
+check("bỏ giá trị mặc định khỏi URL", f.url(q="", loc="", page=1) == "/search")
+check("chip tắt được từng cái", any(u == "/search?loc=london&page=3" or "q=" not in u
                                     for _, u in f.active()))
 
 print("\n[lọc trên dữ liệu thật]")

@@ -19,12 +19,11 @@ from ..core.paths import web_dir
 from ..profile import store
 from ..profile.schema import LONGTEXT, MULTI, SECTIONS, TEXT, section_by_id
 from . import layout, live
-from .filters import JobFilter
 from . import upload
 from .views import cv as cvview
 from .views import cvhealth, importcv
-from .views import (home, jobs, profile, projects,
-                    score, search, settings)
+from .filters import JobFilter
+from .views import home, jobs, profile, projects, search, settings
 
 HOST = "127.0.0.1"          # chỉ máy này truy cập được. Không mở ra mạng.
 DEFAULT_PORT = 8765
@@ -158,7 +157,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(_state_payload())
 
         # --- ĐÃ NỐI DỮ LIỆU THẬT (bước 1) ---
-        if path in ("/", "/jobs") or path.startswith("/jobs/"):
+        if path == "/" or path.startswith("/jobs/"):
             conn = db.connect()
             try:
                 if path == "/":
@@ -167,11 +166,6 @@ class Handler(BaseHTTPRequestHandler):
                         live.needs_you(conn), live.activity(conn),
                         days=live.per_day(conn), chances=live.chances(conn),
                         funnel=live.funnel(conn)))
-                if path == "/jobs":
-                    flt = JobFilter.from_query(query)
-                    return self._html(jobs.render(
-                        live.jobs(conn, flt), flt, live.job_counts(conn, flt),
-                        live.facets(conn)))
                 parts = _segments(path)
                 found = live.job_detail(conn, parts[1])
                 if not found:
@@ -242,32 +236,20 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/search":
             conn = db.connect()
             try:
+                flt = JobFilter.from_query(query)
                 return self._html(search.render(
-                    sources=live.sources(conn), reach=live.search_reach(conn),
-                    watch=live.watchlist(conn),
-                    chrome_set=live.chrome_settings(conn),
-                    api_set=live.api_settings(conn),
-                    chrome=live.chrome_status()))
-            finally:
-                conn.close()
-
-        if path == "/score":
-            conn = db.connect()
-            try:
-                return self._html(score.render(
-                    stats=live.score_stats(conn), hist=live.score_hist(conn),
-                    chances=live.chances(conn),
-                    settings=live.score_settings(conn)))
+                    jobs=live.jobs(conn, flt), flt=flt,
+                    counts=live.job_counts(conn, flt),
+                    sieve=live.sieve(conn)))
             finally:
                 conn.close()
 
         if path == "/settings":
+            # Trả MẢNH HTML, không phải cả trang: live.js nạp nó vào tấm phủ.
+            # Cài đặt là menu bấm ra rồi đóng lại, không phải một tab.
             conn = db.connect()
             try:
-                return self._html(settings.render(
-                    live.sources(conn), live.chrome_status(),
-                    live.company_stats(conn), live.last_runs(conn),
-                    live.health(conn)))
+                return self._html(settings.render(**live.settings(conn)))
             finally:
                 conn.close()
 
@@ -325,23 +307,55 @@ class Handler(BaseHTTPRequestHandler):
                              name="scan-manual").start()
             return self._json({"ok": True, "state": "running"})
 
-        if path == "/api/rescore":
-            # Chấm lại TOÀN BỘ. Chạy nền: 208 tin mất vài giây, nhưng người
-            # bấm không nên phải ngồi nhìn trình duyệt quay.
-            def _rescore():
+        if path == "/settings":
+            conn = db.connect()
+            try:
+                from ..core import llm, prefs
+                prefs.put(conn, prefs.SCAN_EVERY, form.get("every", ["60"])[0])
+                prefs.put(conn, prefs.HOURS_FROM, form.get("from", ["8"])[0])
+                prefs.put(conn, prefs.HOURS_TO, form.get("to", ["22"])[0])
+                engine = form.get("engine", [""])[0]
+                prefs.put(conn, prefs.LLM_ENGINE,
+                          engine if engine in llm.ENGINES else "")
+                journal.log.emit(journal.SYSTEM, "cài đặt đã đổi")
+                return self._html(settings.render(**live.settings(conn)))
+            finally:
+                conn.close()
+
+        if path == "/api/sieve":
+            # Lưới GIỮ/BỎ nằm trong HỒ SƠ. Lưu xong thì mọi tin tự thành cần
+            # phán lại (judged_profile lệch phiên bản) — derive lo phần đó.
+            conn = db.connect()
+            try:
+                store.save(conn, {
+                    # Ô thẻ gửi lên MỘT DANH SÁCH giá trị, mỗi thẻ một cái.
+                    # Bỏ trùng, giữ thứ tự người dùng xếp.
+                    "job_titles": "\n".join(dict.fromkeys(
+                        t.strip() for t in form.get("job_titles", []) if t.strip())),
+                    "seniority": form.get("seniority", []),
+                    "markets": form.get("markets", []),
+                }, note="lưới lọc sửa ở tab Search")
+            finally:
+                conn.close()
+
+            def _rejudge():
                 from ..core.derive import derive
                 conn = db.connect()
                 try:
-                    journal.log.emit(journal.SCORE, "chấm lại toàn bộ theo yêu cầu")
-                    derive(conn, force=True)
+                    journal.log.emit(journal.SEARCH, "lưới lọc đổi — phán lại tất cả")
+                    derive(conn)
                 except Exception as exc:            # noqa: BLE001
-                    journal.log.error(journal.SCORE,
-                                      f"chấm lại hỏng: {type(exc).__name__} — {exc}")
+                    journal.log.error(journal.SEARCH,
+                                      f"phán lại hỏng: {type(exc).__name__} — {exc}")
                 finally:
+                    journal.log.done(journal.SEARCH)
                     journal.log.done(journal.SCORE)
                     conn.close()
-            threading.Thread(target=_rescore, daemon=True, name="rescore").start()
-            return self._json({"ok": True, **_state_payload()})
+
+            # Chạy nền rồi quay lại ngay: 1,1 giây vẫn là 1,1 giây trình duyệt
+            # đứng hình, mà nhật ký hiện tiến độ rồi nên không cần chờ.
+            threading.Thread(target=_rejudge, daemon=True, name="rejudge").start()
+            return self._redirect("/search")
 
         if path == "/api/pause":
             runner = sched.current()

@@ -16,7 +16,15 @@ import sqlite3
 # kịp vào Settings là sai. Người dùng bật khi nào họ thấy đã cấu hình xong.
 AUTORUN = "autorun"
 
-DEFAULTS = {AUTORUN: "0"}
+# Ba núm người dùng thật sự đổi. Mọi thứ khác giữ nguyên trong code — bày ra
+# một cái núm mà không ai muốn vặn thì đó là rác, không phải lựa chọn.
+SCAN_EVERY = "scan_every_min"    # quét lại mỗi bao nhiêu phút
+HOURS_FROM = "hours_from"        # Chrome chỉ chạy trong khung giờ này
+HOURS_TO = "hours_to"
+LLM_ENGINE = "llm_engine"        # trước đây chỉ đặt được bằng biến môi trường
+
+DEFAULTS = {AUTORUN: "0", SCAN_EVERY: "60",
+            HOURS_FROM: "8", HOURS_TO: "22", LLM_ENGINE: ""}
 
 
 def get(conn: sqlite3.Connection, key: str) -> str:
@@ -43,3 +51,15 @@ def put(conn: sqlite3.Connection, key: str, value: str) -> None:
 
 def set_flag(conn: sqlite3.Connection, key: str, on: bool) -> None:
     put(conn, key, "1" if on else "0")
+
+
+def num(conn: sqlite3.Connection, key: str, low: int, high: int) -> int:
+    """Số nguyên trong khoảng. Giá trị hỏng -> về mặc định, không nổ.
+
+    Người dùng gõ được gì vào ô cũng không được làm chết vòng quét nền.
+    """
+    try:
+        value = int(get(conn, key))
+    except (TypeError, ValueError):
+        value = int(DEFAULTS.get(key, low))
+    return max(low, min(high, value))

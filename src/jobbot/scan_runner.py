@@ -100,9 +100,17 @@ def _chrome_pass(conn, answers: dict, log: Log, deep: bool,
 
     # eFinancialCareers đã BỎ: 67% tin của nó là môi giới (LinkedIn 24%), mà chỉ
     # cho 5 tin đạt 75+ so với 20 của LinkedIn. Bẩn gấp ba, ít hơn bốn lần.
+    # titles[:5] ĐÃ BỎ: nó cắt 7/12 chức danh của hồ sơ mà không báo gì, và
+    # nó tồn tại chỉ vì vòng đọc kỹ chạy quá lâu. Sửa gốc rồi thì không cần
+    # cắt nữa — trần bây giờ nằm ở li.MAX_QUERIES và có ghi nhật ký khi chạm.
+    places = li.places_for(answers.get("markets") or [])
+    seen = postings.already_read(conn, li.NAME)
+    jlog.emit(SEARCH, f"linkedin: {len(titles)} chức danh × {len(places)} nơi"
+                      f" · bỏ qua {len(seen)} tin đã đọc")
     sources = [
-        (li.NAME, lambda tab: li.fetch(tab, titles[:5], levels=levels,
-                                       pages=4, deep=deep)),
+        (li.NAME, lambda tab: li.fetch(tab, titles, location=places,
+                                       levels=levels, pages=4, deep=deep,
+                                       skip=frozenset(seen))),
     ]
 
     total_seen = total_new = 0

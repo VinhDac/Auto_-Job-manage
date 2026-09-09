@@ -30,9 +30,42 @@ class Answer:
     pending: bool = False       # claude_code: đã xếp hàng, chờ trả lời
 
 
+DEFAULT_ENGINE = "claude_code"
+
+
+def env_override() -> str:
+    """Máy đặt bằng biến môi trường, nếu có. Rỗng = không ai ép."""
+    name = os.environ.get("JOBBOT_LLM", "").strip()
+    return name if name in ENGINES else ""
+
+
 def engine_name() -> str:
-    name = os.environ.get("JOBBOT_LLM", "claude_code").strip()
-    return name if name in ENGINES else "none"
+    """Máy LLM đang dùng.
+
+    Thứ tự: biến môi trường -> menu Cài đặt -> mặc định.
+
+    Biến môi trường ĐỨNG TRƯỚC vì nó là lệnh ép cho riêng lần chạy này —
+    quy ước chung, và cũng là thứ bài test dùng để dựng tình huống. Đọc pref
+    trước thì test đặt JOBBOT_LLM=none xong vẫn lấy phải lựa chọn trong DB
+    thật của người dùng.
+
+    Menu Cài đặt phải NÓI RA khi bị biến môi trường đè, nếu không người dùng
+    chọn xong mà không có gì đổi.
+    """
+    forced = env_override()
+    if forced:
+        return forced
+    try:
+        from . import prefs
+        from .db import connect
+        conn = connect()
+        try:
+            chosen = prefs.get(conn, prefs.LLM_ENGINE).strip()
+        finally:
+            conn.close()
+    except Exception:                       # noqa: BLE001
+        chosen = ""
+    return chosen if chosen in ENGINES else DEFAULT_ENGINE
 
 
 def ensure_table(conn: sqlite3.Connection) -> None:

@@ -12,10 +12,10 @@ from jobbot.browser import chrome, ws
 from jobbot.ingest.web import base as webbase
 
 ok = fail = skip = 0
-def check(name, cond):
+def check(name, cond, extra=""):
     global ok, fail
     if cond: ok += 1; print(f"  ok   {name}")
-    else:    fail += 1; print(f"  FAIL {name}")
+    else:    fail += 1; print(f"  FAIL {name}{' — ' + extra if extra else ''}")
 
 print("\n[khung WebSocket]")
 class FakeSock:
@@ -92,6 +92,76 @@ for text in ("Just a moment...", "Attention Required! | Cloudflare",
     check(f"nhận ra chặn: {text[:28]}", bool(webbase.BLOCKED.search(text)))
 check("trang bình thường KHÔNG bị nhận nhầm",
       not webbase.BLOCKED.search("Quantitative Analyst jobs in London | LinkedIn"))
+
+print("\n[vòng đọc kỹ KHÔNG được đọc lại thứ đã đọc]")
+# GỐC RỄ của cả chuỗi lỗi bước 1. Trên máy thật 194/196 tin LinkedIn đã có mô
+# tả, mà vòng đọc kỹ vẫn mở lại tất cả — 97% công là làm lại. Chính chỗ thừa
+# đó đẻ ra: 17 phút mỗi vòng -> ~5.000 lượt gọi/ngày -> bị bóp 40-82% -> phải
+# nghỉ lâu hơn -> phải cắt 12 chức danh còn 5. Sửa một chỗ, cả chuỗi tan.
+from jobbot.ingest.web import linkedin as li
+
+class FakeTab:
+    """Trả danh sách 3 tin, và đếm xem vòng đọc kỹ mở bao nhiêu trang chi tiết."""
+    def __init__(self): self.detail_opens = []
+    def eval(self, js, timeout=None):
+        if "show-more-less-html__markup" in js:      # DETAIL_JS
+            return '[{"description":"' + "x" * 400 + '","criteria":""}]'
+        return ('[{"title":"Quant Analyst","company":"A","location":"London",'
+                '"url":"https://x/jobs/view/a-1000001","posted":""},'
+                '{"title":"Data Scientist","company":"B","location":"London",'
+                '"url":"https://x/jobs/view/b-1000002","posted":""},'
+                '{"title":"Risk Analyst","company":"C","location":"London",'
+                '"url":"https://x/jobs/view/c-1000003","posted":""}]')
+
+real_open, real_pause = li.open_page, li._pause
+opened = []
+li.open_page = lambda tab, url, timeout=30: opened.append(url)
+li._pause = lambda: None
+try:
+    opened.clear()
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=True)
+    all_read = sum(1 for u in opened if "jobPosting" in u)
+    check("chưa biết gì -> đọc kỹ cả 3 tin", all_read == 3, f"đọc {all_read}")
+
+    opened.clear()
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=True,
+             skip=frozenset({"1000001", "1000002"}))
+    again = sum(1 for u in opened if "jobPosting" in u)
+    check("đã đọc 2 tin -> chỉ đọc kỹ 1 tin còn lại", again == 1, f"đọc {again}")
+
+    opened.clear()
+    out = li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=True,
+                   skip=frozenset({"1000001", "1000002", "1000003"}))
+    check("đã đọc hết -> KHÔNG mở trang chi tiết nào",
+          sum(1 for u in opened if "jobPosting" in u) == 0)
+    check("nhưng vẫn TRẢ VỀ đủ tin tìm được", len(out[0]) == 3)
+finally:
+    li.open_page, li._pause = real_open, real_pause
+
+print("\n[địa điểm đọc từ hồ sơ, không phải chuỗi cứng]")
+check("uk_onsite + uk_remote -> United Kingdom (rộng hơn London)",
+      li.places_for(["uk_onsite", "uk_remote"]) == ["United Kingdom"])
+check("bỏ trùng", len(li.places_for(["uk_onsite", "uk_remote", "uk_onsite"])) == 1)
+check("global_remote -> để trống, LinkedIn tìm toàn cầu",
+      li.places_for(["global_remote"]) == [""])
+check("nhiều thị trường -> nhiều nơi",
+      li.places_for(["uk_onsite", "us_remote"]) == ["United Kingdom", "United States"])
+check("hồ sơ chưa chọn gì -> vẫn có mặc định", li.places_for([]) == ["United Kingdom"])
+check("KHÔNG còn 'London' cứng trong chữ ký hàm",
+      'location: str = "London"' not in Path("src/jobbot/ingest/web/linkedin.py").read_text())
+
+print("\n[trần chức danh: có, nhưng phải NÓI RA]")
+runner = Path("src/jobbot/scan_runner.py").read_text()
+# Bỏ dòng chú thích trước khi soi — nếu không thì chính lời giải thích về
+# cái lỗi vừa sửa lại làm bài test đỏ.
+code_only = "\n".join(l for l in runner.split("\n")
+                       if not l.strip().startswith("#"))
+check("bỏ hẳn titles[:5] khỏi CODE", "titles[:5]" not in code_only)
+check("nhưng giữ lời giải thích vì sao bỏ", "titles[:5]" in runner)
+li_src = Path("src/jobbot/ingest/web/linkedin.py").read_text()
+check("trần đặt tên rõ ràng", "MAX_QUERIES" in li_src)
+check("và chạm trần thì ghi nhật ký, không cắt lặng lẽ",
+      "chỉ tìm" in li_src and "jlog.warn" in li_src)
 
 print("\n[tắt Chrome: phải THẬT SỰ tắt, và chỉ tắt bản của app]")
 # LỖI THẬT: bản cũ gọi GET /json/close — endpoint đó cần kèm target id nên
