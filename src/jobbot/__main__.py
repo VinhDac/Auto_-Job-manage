@@ -1,8 +1,11 @@
-"""Khởi động jobbot.
+"""Khởi động jobbot. Chạy được trên macOS, Windows, Linux.
 
-    python3 run.py            app thật: cửa sổ riêng + icon Dock + icon thanh menu
-    python3 run.py --window   chạy trong Terminal, mở trình duyệt, Ctrl+C dừng
-    python3 run.py --scan     quét một lần rồi thoát
+    python run.py            cửa sổ app (macOS: NSWindow · còn lại: Chrome --app)
+    python run.py --window   chạy trong terminal, mở trình duyệt, Ctrl+C dừng
+    python run.py --scan     quét một lần rồi thoát
+
+Trên Windows dùng `python`, trên macOS/Linux thường là `python3`. Cần Python
+3.11 trở lên (tomllib).
 """
 
 from __future__ import annotations
@@ -11,33 +14,52 @@ import sys
 import threading
 import webbrowser
 
-from .core import db
+from . import shell
+from .core import db, journal
+from .core import scheduler
 from .core.paths import db_path
-from .core.scheduler import Scheduler
 from .dashboard.server import serve
 
 
-def run_window() -> int:
-    """Chế độ cửa sổ: server + scheduler, log hiện ra Terminal."""
+def run_window(app_window: bool = False) -> int:
+    """Server + scheduler chạy ở tiến trình này, log ra terminal.
+
+    app_window=True  mở cửa sổ Chrome --app (vỏ app trên Windows/Linux)
+    app_window=False mở trình duyệt mặc định
+    """
     ran = db.migrate(db.connect())
+    journal.log.open()                      # trước dòng này nhật ký chỉ ở bộ nhớ
     httpd, url = serve()
-    scheduler = Scheduler()
-    scheduler.start()
+    runner = scheduler.current()
+    runner.start()
 
     print(f"  jobbot  ->  {url}", flush=True)
     print(f"  DB      ->  {db_path()}", flush=True)
+    print(f"  vỏ      ->  {shell.describe()}", flush=True)
     if ran:
         print(f"  ran {ran} migration(s)", flush=True)
-    print("  scanning every 60 min · Ctrl+C to stop\n", flush=True)
+    print(f"  tự quét: {'BẬT' if not runner.paused else 'TẮT'}"
+          "  ·  Ctrl+C để dừng\n", flush=True)
 
-    threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+    window = None
+    if app_window:
+        window = shell.open_window(url)
+        if window is None:
+            print("  (không mở được cửa sổ Chrome — mở trình duyệt thay)")
+    if window is None:
+        threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n  stopped.")
     finally:
-        scheduler.stop()
+        runner.stop()
         httpd.server_close()
+        if window is not None:
+            window.terminate()
+        from .browser import chrome
+        chrome.shutdown()                   # đừng bỏ lại cửa sổ cào mồ côi
     return 0
 
 
@@ -53,13 +75,14 @@ def main() -> int:
     if "--window" in sys.argv:
         return run_window()
 
-    try:
-        from .app import run                   # cửa sổ app thật (PyObjC + WKWebView)
-        return run()
-    except (ImportError, AttributeError) as exc:
-        print(f"  (không dựng được cửa sổ app: {exc})")
-        print("  chuyển sang chế độ trình duyệt\n")
-        return run_window()
+    # macOS có PyObjC -> cửa sổ thật. Windows/Linux -> cửa sổ Chrome --app.
+    if shell.has_mac_native():
+        try:
+            from .app import run
+            return run()
+        except (ImportError, AttributeError) as exc:
+            print(f"  (không dựng được cửa sổ macOS: {exc})")
+    return run_window(app_window=True)
 
 
 if __name__ == "__main__":

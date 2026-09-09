@@ -147,6 +147,73 @@ with tempfile.TemporaryDirectory() as tmp:
     check("POST /profile/import rỗng -> không sập",
           post("/profile/import", b"") in (200, 303))
 
+    print("\n[gập thanh bên]")
+    _, home_html = get("/")
+    check("có nút gập", "data-nav" in home_html)
+    # Đọc localStorage phải nằm trong <head>, TRƯỚC khi vẽ. Để cuối trang thì
+    # mỗi lần chuyển tab thanh bên bung ra rồi mới co lại — nháy một cái.
+    head = home_html.split("</head>")[0]
+    check("đọc lựa chọn ngay trong <head>, không nháy", "navmin" in head)
+    check("và trước cả <body>", "navmin" not in home_html.split("<body>")[1][:200]
+          or home_html.index("navmin") < home_html.index("<body>"))
+    import re as _re2
+    _navlinks = _re2.findall(r"<a class='navlink[^>]*>", home_html)
+    check("mọi mục nav có title để lúc gập còn biết là gì",
+          bool(_navlinks) and all("title=" in a for a in _navlinks),
+          f"{sum('title=' not in a for a in _navlinks)}/{len(_navlinks)} thiếu")
+    check("dòng trạng thái dưới cùng cũng có title",
+          "class=navfoot title=" in home_html)
+    css = get("/static/app.css")[1]
+    check("gập thì ĐỔI --nav-w, không chỉnh sidebar rời khỏi nội dung",
+          ":root.navmin{--nav-w:" in css)
+    check("gập thì giấu chữ, giữ icon",
+          ".navmin .navlink span{display:none}" in css)
+
+    print("\n[Search: MỘT tab, hai cách tìm]")
+    from jobbot.dashboard.views.runtime import _rows_needed
+    # Nhật ký phải cao đúng bằng cột bên trái. CSS 'grid-row: 1/-1' không dùng
+    # được vì lưới dùng hàng ngầm, nên phải đếm — và đếm sai thì hoặc thừa một
+    # hàng trống, hoặc nhật ký bị cụt.
+    check("đếm hàng: ô cao 2 hàng",
+          _rows_needed([("a", "", 2, 2), ("b", "", 2, 1),
+                        ("c", "", 1, 1), ("d", "", 1, 1)], 2) == 5)
+    check("đếm hàng: toàn ô một hàng",
+          _rows_needed([("a", "", 2, 1), ("b", "", 2, 1),
+                        ("c", "", 1, 1), ("d", "", 1, 1)], 2) == 4)
+    check("không có ô nội dung -> đúng một hàng 'Đang chạy'",
+          _rows_needed([], 2) == 1)
+    # "Đang chạy" nhường nửa hàng cho ô khác thì ô đó xếp NGAY CẠNH nó,
+    # không xuống hàng mới.
+    check("Đang chạy chiếm nửa hàng -> ô đầu xếp cạnh",
+          _rows_needed([("a", "", 1, 1)], 2, 1) == 1)
+    check("Đang chạy chiếm trọn hàng -> ô đầu xuống hàng dưới",
+          _rows_needed([("a", "", 1, 1)], 2, 2) == 2)
+
+    _, search_html = get("/search")
+    check("hai cách tìm nằm CÙNG một tab",
+          "Chrome — tìm theo từ khoá" in search_html
+          and "API — theo dõi công ty" in search_html)
+    check("mỗi cách nói rõ nó CÒN MÙ ở đâu", search_html.count("còn mù") == 2)
+    check("nói đóng góp RIÊNG, không phải tỉ lệ gộp",
+          "chỉ nó tìm ra" in search_html and "1.9%" not in search_html)
+    check("hiện TỪNG công ty, không gộp thành một thanh nguồn",
+          "Công ty đang theo dõi" in search_html)
+    check("cài đặt tách làm HAI bảng, mỗi cách tìm một bảng",
+          "Cài đặt · Chrome search" in search_html
+          and "Cài đặt · API search" in search_html)
+    # API không có truy vấn — nó tải trọn board rồi mới lọc, nên BỘ LỌC chính
+    # là câu hỏi của nó. Cùng bộ tiêu chí đang hiện thành nút lọc ở tab Jobs.
+    check("bảng API nói rõ bộ lọc chính là câu hỏi",
+          "BỘ LỌC = CÂU HỎI" in search_html)
+    check("và phân biệt với bộ lọc hiển thị ở tab Jobs",
+          "chỉ lọc HIỂN THỊ" in search_html)
+    check("nói thẳng chỗ code đang bỏ qua hồ sơ",
+          "cứng trong code" in search_html
+          and "bỏ qua ô Thị trường" in search_html)
+    check("lịch quét là chuyện chung -> nằm ở ô Đang chạy",
+          "runsched" in search_html)
+    check("Search KHÔNG còn là trang cuộn", "class='wide flow'" not in search_html)
+
     print("\n[mọi liên kết trang tự vẽ ra đều phải mở được]")
     # Khoá cụm project là chữ thật ('machine learning'), trình duyệt mã hoá
     # khoảng trắng thành %20, còn server thì so khớp chuỗi thô -> 404.

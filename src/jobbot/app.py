@@ -83,6 +83,10 @@ class Delegate(NSObject):
 
     def doQuit_(self, _sender) -> None:
         self.scheduler.stop()
+        # Chrome chạy bằng profile riêng của app — thoát app mà bỏ nó lại thì
+        # nó thành cửa sổ mồ côi, không ai đóng.
+        from .browser import chrome
+        chrome.shutdown()
         AppHelper.stopEventLoop()
 
     # --- nhãn trên thanh menu ---------------------------------------------

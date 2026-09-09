@@ -348,47 +348,69 @@ def sources(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
-def source_yield(conn: sqlite3.Connection) -> list[dict]:
-    """Mỗi HỌ nguồn tải về bao nhiêu, dùng được bao nhiêu.
-
-    Gộp theo họ chứ không theo từng board: 62 dòng 'greenhouse:xxx' thì không
-    đọc ra điều gì, còn một dòng 'greenhouse 2937 -> 59' thì nói ngay là nguồn
-    này phải tải cả board rồi mới lọc.
-    """
-    rows = conn.execute(
-        "SELECT CASE WHEN instr(source,':')>0"
-        "         THEN substr(source,1,instr(source,':')-1) ELSE source END AS fam,"
-        "       COUNT(*) AS pulled, SUM(kept) AS kept"
-        " FROM posting GROUP BY fam ORDER BY kept DESC, pulled DESC").fetchall()
-    return [{"name": r["fam"], "pulled": r["pulled"], "kept": r["kept"] or 0,
-             "rate": round(100 * (r["kept"] or 0) / r["pulled"], 1) if r["pulled"] else 0.0}
-            for r in rows]
+def _warn(text: str) -> str:
+    return f"<span class=warn-t>{text}</span>"
 
 
-def search_settings(conn: sqlite3.Connection) -> list[tuple[str, str]]:
-    """Bước 1 đang tìm bằng CÁI GÌ — đọc từ hồ sơ và từ code, không gõ tay.
-
-    Chỗ nào code bỏ qua hồ sơ thì phải NÓI RA. Giấu đi thì người dùng chỉnh
-    ô Settings cả buổi mà không hiểu vì sao kết quả không đổi.
-    """
-    from ..core.scheduler import HUMAN_WINDOW, SCAN_EVERY_MIN
-    from ..ingest.web import linkedin as li
+def chrome_settings(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """Câu hỏi Chrome gửi đi. Đây là cách tìm DUY NHẤT có truy vấn thật."""
+    from ..core.scheduler import HUMAN_WINDOW
+    from ..ingest.web.linkedin import PAUSE, PER_PAGE
     from ..profile import store as pstore
 
     answers = pstore.load(conn)
-    titles = [t.strip() for t in (answers.get("job_titles") or "").splitlines() if t.strip()]
-    used = titles[:5]
+    titles = [t.strip() for t in (answers.get("job_titles") or "").splitlines()
+              if t.strip()]
     return [
-        ("Quét mỗi", f"{SCAN_EVERY_MIN} phút"),
-        ("Khung giờ Chrome", f"{HUMAN_WINDOW[0]}:00 – {HUMAN_WINDOW[1]}:00"),
-        ("Chức danh tìm", f"{len(used)}/{len(titles)} — <span class=warn-t>code cắt còn 5</span>"
-                          if len(titles) > len(used) else f"{len(used)}"),
-        ("Địa điểm LinkedIn", "London — <span class=warn-t>chuỗi cứng, không đọc hồ sơ</span>"),
-        ("Thị trường đã chọn", ", ".join(answers.get("markets") or []) or "—"),
-        ("Từ khoá kỹ năng", "<span class=warn-t>không dùng để tìm</span>"),
-        ("Số trang mỗi chức danh", "4 × 10 tin"),
+        ("Chức danh gửi đi",
+         f"{min(len(titles), 5)}/{len(titles)} " + _warn("code cắt còn 5")
+         if len(titles) > 5 else str(len(titles))),
+        ("Địa điểm", "London " + _warn("cứng trong code")),
+        ("Cấp bậc", ", ".join(answers.get("seniority") or []) or "—"),
+        ("Mỗi chức danh", f"4 trang × {PER_PAGE} tin"),
+        ("Nghỉ giữa hai tin", f"{PAUSE[0]}–{PAUSE[1]} giây"),
+        ("Khung giờ người", f"{HUMAN_WINDOW[0]}:00 – {HUMAN_WINDOW[1]}:00"),
+        ("Từ khoá kỹ năng", _warn("khai rồi nhưng không gửi đi")),
     ]
 
+
+def api_settings(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """API KHÔNG có câu hỏi — nó tải trọn board rồi mới lọc.
+
+    Nên BỘ LỌC chính là câu hỏi của nó: chức danh nào tính là khớp, cấp bậc
+    nào nhận, địa điểm nào giữ. Đúng bộ tiêu chí đang hiện thành các nút lọc
+    ở tab Jobs — chỉ khác tầm ảnh hưởng:
+
+        ở đây      quyết định GIỮ hay BỎ  -> đổi là phải phán lại 4.488 tin
+        ở tab Jobs quyết định HIỆN hay không -> đổi chỉ là đổi màn hình
+    """
+    from ..core.postings import FAIL_THRESHOLD
+    from ..ingest.filter import UK_WORDS
+    from ..profile import store as pstore
+    from ..scan_runner import load_boards, seed_boards
+
+    answers = pstore.load(conn)
+    titles = [t.strip() for t in (answers.get("job_titles") or "").splitlines()
+              if t.strip()]
+    boards = load_boards(conn)
+    mine = {s for v in seed_boards().values() for s in v}
+    total = len({s for v in boards.values() for s in v})
+    agencies = int(conn.execute(
+        "SELECT COUNT(*) FROM posting WHERE kept = 1 AND via_agency = 1").fetchone()[0])
+
+    return [
+        ("Board đang quét", f"{total} — trong đó {len(mine)} bạn tự chọn"),
+        ("Danh sách tự chọn", "config/boards.toml"),
+        ("Nguồn hỏng quá bao nhiêu thì coi là chết", f"{int(FAIL_THRESHOLD * 100)}%"),
+
+        ("— BỘ LỌC = CÂU HỎI —", ""),
+        ("Chức danh phải khớp", f"{len(titles)} chức danh trong hồ sơ"),
+        ("Cấp bậc nhận", ", ".join(answers.get("seniority") or []) or "—"),
+        ("Địa điểm giữ", f"{len(UK_WORDS)} từ khoá UK "
+                         + _warn("bỏ qua ô Thị trường của hồ sơ")),
+        ("Môi giới", f"đánh dấu, KHÔNG bỏ — đang giữ {agencies} tin"),
+        ("Cùng bộ tiêu chí này ở tab Jobs", "chỉ lọc HIỂN THỊ, không đổi giữ/bỏ"),
+    ]
 
 def score_hist(conn: sqlite3.Connection) -> list[tuple[str, int]]:
     """Phân bố điểm theo dải 10. Cột nào cao thì phần lớn tin nằm ở đó."""
@@ -454,6 +476,115 @@ def project_settings(conn: sqlite3.Connection) -> list[tuple[str, str]]:
 
 def cluster_sizes(conn: sqlite3.Connection, clusters: list) -> list[tuple[str, int]]:
     return [(c.key[:12], len(c.jobs)) for c in clusters if c.key != "other"]
+
+
+def watchlist(conn: sqlite3.Connection, limit: int = 60) -> list[dict]:
+    """Từng CÔNG TY đang theo dõi — không gộp thành một thanh 'greenhouse 1.9%'.
+
+    Một thanh gộp thì Point72 (9 việc) nằm chung với Betsson (0 việc, 131 lần
+    kéo về) rồi lấy trung bình. Nhìn vào không phân biệt được mỏ với hố.
+    """
+    from ..scan_runner import load_boards, seed_boards
+
+    mine = {s for v in seed_boards().values() for s in v}
+    got = {r["slug"]: r for r in conn.execute(
+        "SELECT substr(source, instr(source,':') + 1) AS slug,"
+        "       COUNT(*) AS pulled, SUM(kept) AS kept,"
+        "       MAX(CASE WHEN kept = 1 THEN posted_at ELSE '' END) AS last_hit"
+        " FROM posting WHERE instr(source,':') > 0 GROUP BY slug")}
+
+    out = []
+    for ats, slugs in load_boards(conn).items():
+        for slug in dict.fromkeys(slugs):
+            row = got.get(slug)
+            out.append({
+                "slug": slug, "ats": ats,
+                "mine": slug in mine,          # tôi tự chọn, hay máy nhặt
+                "pulled": row["pulled"] if row else 0,
+                "kept": (row["kept"] or 0) if row else 0,
+                "last_hit": _ago(row["last_hit"]) if row and row["last_hit"] else "",
+                "state": ("chưa quét" if not row else
+                          "im lặng" if not (row["kept"] or 0) else "có việc"),
+            })
+    out.sort(key=lambda c: (-c["kept"], not c["mine"], c["slug"]))
+    return out[:limit]
+
+
+def search_reach(conn: sqlite3.Connection) -> dict:
+    """Hai cách tìm với nhau ra sao — đo bằng TẦM VỚI, không phải tỉ lệ.
+
+    "greenhouse 1.9%" đọc ra là "nguồn kém", trong khi sự thật là nó phải tải
+    trọn board rồi mới lọc — và chính nó mang về Jane Street, Point72, Jump
+    Trading. Tỉ lệ là thước sai cho một danh sách theo dõi.
+
+    Thước đúng cho một cách tìm: nó CÒN MÙ Ở ĐÂU.
+    """
+    from ..core import prefs
+    from ..core.postings import FAIL_THRESHOLD
+    from ..core.scheduler import HUMAN_WINDOW, SCAN_EVERY_MIN
+    from ..ingest.web.linkedin import PER_PAGE, PAUSE
+    from ..profile import store as pstore
+    from ..scan_runner import load_boards, seed_boards
+
+    answers = pstore.load(conn)
+    titles = [t.strip() for t in (answers.get("job_titles") or "").splitlines()
+              if t.strip()]
+    used, pages = titles[:5], 4
+
+    # Đóng góp RIÊNG của mỗi cách: việc chỉ nó tìm ra, cách kia không thấy.
+    rows = conn.execute(
+        "WITH g AS (SELECT COALESCE(group_id, CAST(id AS TEXT)) gid,"
+        "                  MAX(source = 'linkedin') li,"
+        "                  MAX(source <> 'linkedin') api,"
+        "                  MAX(CASE WHEN score >= 70 AND realism <> 'unlikely'"
+        "                           THEN 1 ELSE 0 END) worth"
+        "           FROM posting WHERE kept = 1 GROUP BY gid)"
+        " SELECT SUM(li = 1 AND api = 0) chrome_only,"
+        "        SUM(api = 1 AND li = 0) api_only,"
+        "        SUM(li = 1 AND api = 1) ca_hai,"
+        "        SUM(worth = 1 AND li = 1 AND api = 0) chrome_worth,"
+        "        SUM(worth = 1 AND api = 1 AND li = 0) api_worth"
+        " FROM g").fetchone()
+
+    def side(is_linkedin: bool) -> dict:
+        op = "=" if is_linkedin else "<>"
+        r = conn.execute(
+            f"SELECT COUNT(*) pulled, SUM(kept) kept, SUM(kept * via_agency) ag"
+            f" FROM posting WHERE source {op} 'linkedin'").fetchone()
+        return {"pulled": r["pulled"], "kept": r["kept"] or 0, "agency": r["ag"] or 0}
+
+    boards = load_boards(conn)
+    seeded = {s for v in seed_boards().values() for s in v}
+    all_slugs = {s for v in boards.values() for s in v}
+    alive_slugs = {r[0] for r in conn.execute(
+        "SELECT DISTINCT substr(source, instr(source,':') + 1) FROM posting"
+        " WHERE instr(source,':') > 0 AND kept = 1")}
+    scanned = {r[0] for r in conn.execute(
+        "SELECT DISTINCT substr(source, instr(source,':') + 1) FROM posting"
+        " WHERE instr(source,':') > 0")}
+
+    return {
+        "chrome": {**side(True),
+                   "only": rows["chrome_only"] or 0,
+                   "worth": rows["chrome_worth"] or 0,
+                   "titles_used": len(used), "titles_all": len(titles),
+                   "titles_missed": titles[5:],
+                   "location": "London",
+                   "cap": len(used) * pages * PER_PAGE,
+                   "pause": f"{PAUSE[0]}–{PAUSE[1]}s",
+                   "window": f"{HUMAN_WINDOW[0]}:00–{HUMAN_WINDOW[1]}:00"},
+        "api": {**side(False),
+                "only": rows["api_only"] or 0,
+                "worth": rows["api_worth"] or 0,
+                "boards": len(all_slugs),
+                "mine": len(seeded),
+                "silent": len(scanned - alive_slugs),
+                "never_scanned": sorted(all_slugs - scanned),
+                "fail_at": f"{int(FAIL_THRESHOLD * 100)}%"},
+        "both": rows["ca_hai"] or 0,
+        "every": SCAN_EVERY_MIN,
+        "autorun": prefs.flag(conn, prefs.AUTORUN),
+    }
 
 
 def chrome_status() -> dict:

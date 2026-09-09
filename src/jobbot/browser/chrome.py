@@ -12,8 +12,10 @@ BA RÀNG BUỘC, cố ý:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -22,26 +24,57 @@ from pathlib import Path
 from ..core.paths import data_dir
 
 PORT = 9333
-CANDIDATES = [
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-]
+def _candidates() -> list[str]:
+    """Chỗ Chrome hay nằm, theo từng hệ điều hành.
+
+    Windows: đường dẫn có biến môi trường (%LOCALAPPDATA% khi cài cho riêng
+    một tài khoản, Program Files khi cài cho cả máy) nên phải dựng lúc chạy,
+    không hằng số hoá được.
+    """
+    if sys.platform == "win32":
+        roots = [os.environ.get("PROGRAMFILES", r"C:\Program Files"),
+                 os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"),
+                 os.environ.get("LOCALAPPDATA", "")]
+        out = []
+        for root in filter(None, roots):
+            out += [str(Path(root) / "Google/Chrome/Application/chrome.exe"),
+                    str(Path(root) / "Chromium/Application/chrome.exe"),
+                    str(Path(root) / "BraveSoftware/Brave-Browser/Application/brave.exe"),
+                    str(Path(root) / "Microsoft/Edge/Application/msedge.exe")]
+        return out
+    if sys.platform == "darwin":
+        return ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"]
+    return ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable",
+            "/usr/bin/chromium", "/usr/bin/chromium-browser",
+            "/snap/bin/chromium"]
+
+
+CANDIDATES = _candidates()
 
 
 class ChromeError(RuntimeError):
     pass
 
 
+# Tên lệnh để dò trong PATH, khi Chrome cài ở chỗ lạ.
+ON_PATH = ["google-chrome", "google-chrome-stable", "chromium",
+           "chromium-browser", "chrome", "msedge"]
+
+
 def binary() -> str:
-    for path in CANDIDATES:
+    for path in _candidates():
         if Path(path).is_file():
             return path
-    found = shutil.which("google-chrome") or shutil.which("chromium")
-    if found:
-        return found
-    raise ChromeError("Không tìm thấy Chrome. Cài Google Chrome rồi thử lại.")
+    for name in ON_PATH:
+        found = shutil.which(name)
+        if found:
+            return found
+    raise ChromeError(
+        "Không tìm thấy Chrome. Cài Google Chrome rồi thử lại "
+        f"(đã dò {len(_candidates())} chỗ quen thuộc trên {sys.platform}).")
 
 
 def profile_dir() -> Path:
@@ -87,9 +120,49 @@ def launch(headless: bool = True, port: int = PORT,
     raise ChromeError(f"Chrome không lên trong {wait:g}s")
 
 
-def shutdown(port: int = PORT) -> None:
-    """Đóng Chrome RIÊNG. Không đụng tới Chrome người dùng đang mở."""
+def shutdown(port: int = PORT, wait: float = 6.0) -> bool:
+    """Đóng Chrome RIÊNG. Không đụng tới Chrome người dùng đang mở.
+
+    Trả True nếu nó thật sự tắt.
+
+    LỖI ĐÃ SỬA: bản cũ gọi GET /json/close — endpoint đó cần kèm target id
+    (/json/close/<id>) nên trả 404, và lỗi bị nuốt trong except. Hàm chạy êm
+    ru, trả None, mà Chrome vẫn nguyên đó. Cách đúng là lệnh CDP Browser.close
+    trên WebSocket của TRÌNH DUYỆT, không phải của tab.
+
+    Vì sao không kill thẳng tiến trình: Chrome cá nhân của người dùng cũng là
+    tiến trình "Google Chrome". Đi qua cổng debug 9333 thì chỉ chạm đúng bản
+    chạy bằng profile riêng của app.
+    """
+    from .cdp import CDPError
+    from .ws import WebSocket, WSError
+
+    if not alive(port):
+        return True
     try:
-        urllib.request.urlopen(f"http://127.0.0.1:{port}/json/close", timeout=2)
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{port}/json/version", timeout=3) as r:
+            browser_ws = json.load(r)["webSocketDebuggerUrl"]
+        control = WebSocket(browser_ws)
+        try:
+            control.send(json.dumps({"id": 1, "method": "Browser.close"}))
+            # Không chờ trả lời: Chrome đóng kết nối NGAY khi nhận lệnh, nên
+            # recv() ở đây sẽ ném lỗi — đó là dấu hiệu thành công, không phải hỏng.
+            try:
+                control.recv()
+            except (WSError, OSError):
+                pass
+        finally:
+            try:
+                control.close()
+            except Exception:                      # noqa: BLE001
+                pass
     except Exception:                              # noqa: BLE001
-        pass
+        return False
+
+    deadline = time.time() + wait
+    while time.time() < deadline:
+        if not alive(port):
+            return True
+        time.sleep(0.3)
+    return not alive(port)

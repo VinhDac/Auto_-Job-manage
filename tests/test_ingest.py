@@ -119,5 +119,41 @@ for _loc_text, _co in [("Kyiv, Ukraine", ""), ("Köln", "teamZUKUNFT gGmbH"),
     check(f"loại {_loc_text!r} {_co}", not _loc(_P(_loc_text, _co), []))
 check("remote toàn cầu vẫn giữ", _loc(_P("Anywhere", "", True), []))
 
+print("\n[danh sách board: người chọn + máy học, KHÔNG bỏ bên nào]")
+# LỖI THẬT: boards.toml chỉ là DỰ PHÒNG khi bảng công ty rỗng. Bảng có 53 dòng
+# nên file không bao giờ được đọc — aqr, cohere, palantir, ramp, synthesia gõ
+# tay vào đó mà chưa từng được quét lần nào, và không có gì báo.
+import os as _os, tempfile as _tf
+from pathlib import Path as _P
+with _tf.TemporaryDirectory() as _tmp:
+    _os.environ["JOBBOT_DATA_DIR"] = _tmp
+    from jobbot.core import db as _db
+    from jobbot.scan_runner import load_boards, seed_boards
+
+    _conn = _db.connect(_P(_tmp) / "b.db")
+    seed = seed_boards()
+    seed_slugs = {s for v in seed.values() for s in v}
+    check("boards.toml đọc được", bool(seed_slugs))
+
+    # bảng công ty RỖNG -> vẫn phải ra danh sách gõ tay
+    got = {s for v in load_boards(_conn).values() for s in v}
+    check("bảng rỗng -> dùng danh sách gõ tay", seed_slugs <= got)
+
+    # bảng công ty CÓ dữ liệu -> danh sách gõ tay KHÔNG được biến mất
+    _conn.execute(
+        "INSERT INTO company (name, key, ats, ats_slug, is_agency, checked_at,"
+        " roles_found, note) VALUES (?,?,?,?,0,?,?,?)",
+        ("Máy Nhặt Được", "may nhat duoc", "greenhouse", "maynhat",
+         "2026-01-01", 5, "seen in a posting"))
+    _conn.commit()
+    got = {s for v in load_boards(_conn).values() for s in v}
+    check("bảng có dữ liệu -> vẫn giữ danh sách gõ tay", seed_slugs <= got)
+    check("và gộp thêm cái máy học được", "maynhat" in got)
+
+    every = [s for v in load_boards(_conn).values() for s in v]
+    check("không lặp slug", len(every) == len(set(every)))
+    _conn.close()
+    _os.environ.pop("JOBBOT_DATA_DIR", None)
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

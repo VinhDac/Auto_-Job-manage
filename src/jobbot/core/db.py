@@ -228,6 +228,14 @@ MIGRATIONS: list[str] = [
     ALTER TABLE audit ADD COLUMN level  TEXT NOT NULL DEFAULT 'info';
     CREATE INDEX audit_stream ON audit(stream, id);
     """,
+    # 13 — tuỳ chọn của APP (khác profile_answer: đó là hồ sơ NGƯỜI DÙNG).
+    # Chỗ để nhớ "có tự quét khi mở app không" qua các lần khởi động.
+    """
+    CREATE TABLE pref (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    );
+    """,
 ]
 
 

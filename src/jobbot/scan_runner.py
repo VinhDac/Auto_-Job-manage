@@ -22,19 +22,30 @@ from .scoring.run import score_all
 Log = Callable[[str], None]
 
 
-def load_boards(conn) -> dict[str, list[str]]:
-    """Board lấy từ BẢNG CÔNG TY, không phải file gõ tay.
-
-    Bảng đó tự lớn: chủ việc thật thấy trong tin -> thêm vào -> tự dò ATS.
-    boards.toml chỉ còn là hạt giống ban đầu.
-    """
-    from .ingest.web import companies as co
-    found = co.boards(conn)
-    if found:
-        return found
-    path = PROJECT_ROOT / "config" / "boards.toml"           # lùi về file nếu bảng rỗng
+def seed_boards() -> dict[str, list[str]]:
+    """Board Vin tự chọn, gõ tay trong config/boards.toml."""
+    path = PROJECT_ROOT / "config" / "boards.toml"
     raw = tomllib.loads(path.read_text()) if path.exists() else {}
     return {k: v.get("boards", []) for k, v in raw.items()}
+
+
+def load_boards(conn) -> dict[str, list[str]]:
+    """GỘP hai nguồn board: người chọn + máy học được.
+
+    LỖI ĐÃ SỬA: trước đây file chỉ là DỰ PHÒNG khi bảng công ty rỗng. Bảng có
+    53 dòng nên file không bao giờ được đọc — 5 board gõ tay (aqr, cohere,
+    palantir, ramp, synthesia) chưa từng được quét lần nào. Sửa boards.toml
+    xong không có gì xảy ra, mà cũng không báo gì.
+
+    Danh sách người chọn phải LUÔN được tôn trọng: đó là chỗ duy nhất Vin nói
+    được "tôi muốn theo dõi nhà này", kể cả khi nó chưa từng đăng tin nào.
+    """
+    from .ingest.web import companies as co
+    out = {k: list(v) for k, v in seed_boards().items()}
+    for ats, slugs in co.boards(conn).items():
+        out.setdefault(ats, [])
+        out[ats] += [s for s in slugs if s not in out[ats]]
+    return out
 
 
 def _run_source(conn, name: str, fn, *args, log: Log) -> tuple[int, int]:
@@ -126,6 +137,13 @@ def _chrome_pass(conn, answers: dict, log: Log, deep: bool,
         finally:
             if tab is not None:
                 tab.close()
+
+    # Đóng Chrome khi xong việc. Không đóng thì nó nằm trên màn hình cho tới
+    # lần quét sau — mà lần quét sau là MỘT TIẾNG nữa. Chrome chỉ tồn tại để
+    # phục vụ vòng quét, hết vòng là hết việc.
+    # Mở lại tốn ~2 giây, không đáng để đánh đổi một cửa sổ nằm lì cả tiếng.
+    if not chrome.shutdown():
+        jlog.warn(SEARCH, "không đóng được Chrome — nó vẫn đang mở")
     return total_seen, total_new
 
 

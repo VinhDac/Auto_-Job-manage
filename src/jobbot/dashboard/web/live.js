@@ -6,6 +6,7 @@
  *   [data-progress="search"]  khung thanh tiến độ, lọc theo luồng
  *   [data-state]              chỗ hiện đang chạy / tạm dừng / chờ
  *   [data-act="run"|"pause"]  nút master
+ *   [data-nav]                nút gập thanh bên
  *   [data-widget]             một ô; [data-expand] trong đó là nút mở to
  *
  * Không dùng polling: mở một kết nối SSE rồi để yên. Chạy 24/7 mà hỏi mỗi
@@ -72,13 +73,22 @@
   const progress = (all) => $('[data-progress]').forEach((b) => drawProgress(b, all));
 
   // --------------------------------------------------------------- trạng thái
-  const LABEL = { running: 'đang chạy', paused: 'tạm dừng', idle: 'chờ' };
+  // 'tạm dừng' lúc vừa mở app đọc ra như đang hỏng. Nói thẳng ra là tự quét
+  // đang tắt, và nút bên cạnh chính là chỗ bật.
+  function label(state, mins) {
+    if (state === 'running') return 'đang chạy';
+    if (state === 'paused') return 'tự quét: TẮT';
+    return mins > 0 ? 'chờ · quét sau ' + mins + ' phút' : 'chờ';
+  }
 
-  function setState(state) {
+  function setState(state, mins) {
     document.body.dataset.run = state;
-    $('[data-state]').forEach((el) => { el.textContent = LABEL[state] || state; });
+    $('[data-state]').forEach((el) => { el.textContent = label(state, mins); });
     $('[data-act="pause"]').forEach((b) => {
-      b.textContent = state === 'paused' ? 'Tiếp tục' : 'Tạm dừng';
+      b.textContent = state === 'paused' ? 'Bật tự quét' : 'Tắt tự quét';
+      b.title = state === 'paused'
+        ? 'Quét theo lịch. Lựa chọn được nhớ cho lần mở app sau.'
+        : 'Ngưng quét theo lịch. Nút Chạy ngay vẫn dùng được.';
     });
     $('[data-act="run"]').forEach((b) => { b.disabled = state === 'running'; });
   }
@@ -96,14 +106,14 @@
         $('[data-journal]').forEach((b) => { b.innerHTML = ''; });
         (m.events || []).forEach((e) => journal(e));
         progress(m.running || {});
-        setState(m.state);
+        setState(m.state, m.next_in);
       } else if (m.type === 'event') {
         journal(m);
       } else if (m.type === 'progress') {
         // Một luồng xong -> hỏi lại toàn cảnh, vì khung này vẽ TẤT CẢ luồng
         // đang chạy chứ không phải riêng luồng vừa báo.
         fetch('/api/state').then((r) => r.json()).then((s) => {
-          progress(s.running); setState(s.state);
+          progress(s.running); setState(s.state, s.next_in);
         }).catch(() => {});
       }
     };
@@ -113,13 +123,33 @@
   }
 
   // --------------------------------------------------------------- nút bấm
+  function syncNav() {
+    // Server luôn vẽ nhãn "Gập" vì nó không biết máy này đang gập hay mở —
+    // lựa chọn nằm ở localStorage. Sửa nhãn ngay khi trang lên, nếu không thì
+    // thanh đang gập mà nút vẫn mời "Gập thanh bên".
+    const min = document.documentElement.classList.contains('navmin');
+    $('[data-nav]').forEach((b) => {
+      b.title = min ? 'Mở thanh bên' : 'Gập thanh bên';
+    });
+  }
+
   function wire() {
     document.addEventListener('click', (e) => {
       const act = e.target.closest('[data-act]');
       if (act) {
         e.preventDefault();
         fetch('/api/' + act.dataset.act, { method: 'POST' })
-          .then((r) => r.json()).then((s) => setState(s.state)).catch(() => {});
+          .then((r) => r.json()).then((s) => setState(s.state, s.next_in))
+          .catch(() => {});
+        return;
+      }
+      const nav = e.target.closest('[data-nav]');
+      if (nav) {
+        e.preventDefault();
+        // Đổi class NGAY rồi mới ghi nhớ: bấm là thấy, không chờ gì cả.
+        const min = document.documentElement.classList.toggle('navmin');
+        try { localStorage.jobbotNav = min ? '1' : '0'; } catch (err) {}
+        syncNav();
         return;
       }
       const grow = e.target.closest('[data-expand]');
@@ -135,5 +165,6 @@
   }
 
   wire();
+  syncNav();
   connect();
 })();

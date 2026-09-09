@@ -535,16 +535,82 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px
 .alert b{font-size:12px;color:var(--warn)}
 .alert span{font-size:11px;color:var(--dim);overflow-wrap:anywhere}
 
-/* hiệu suất nguồn: nền = tải về, thanh đậm = dùng được */
-.yields{display:flex;flex-direction:column;gap:6px;margin-top:11px}
-.yrow{display:grid;grid-template-columns:104px 1fr 84px 44px;align-items:center;gap:9px}
-.yname{font-size:12px;color:var(--ink);overflow:hidden;text-overflow:ellipsis}
-.ytrack{position:relative;height:13px;border-radius:3px;background:var(--line)}
-.ytrack i{position:absolute;left:0;top:0;height:100%;border-radius:3px}
-.ytrack .yp{background:var(--line-2)}
-.ytrack .yk{background:var(--acc)}
-.ynum{font-size:11.5px;text-align:right;font-variant-numeric:tabular-nums}
-.ynum u{text-decoration:none;color:var(--mute);font-weight:400}
-.yrate{font-size:11px;color:var(--dim);text-align:right;font-variant-numeric:tabular-nums}
-.subhead{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--mute);margin:14px 0 8px}
+
+/* ---------------- Search: hai cách tìm ---------------- */
+.method{border:1px solid var(--line);border-radius:9px;padding:11px 13px;
+  margin-bottom:10px;background:rgba(255,255,255,.012)}
+.mhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px}
+.mhead b{font-size:13px;font-weight:600}
+.mhead .muted{font-size:11px;color:var(--mute)}
+.mnums{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:9px}
+.mnums span{display:flex;align-items:baseline;gap:5px;font-size:11px;color:var(--dim);
+  background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:4px 8px}
+.mnums b{font-size:14px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.hi-t{color:var(--acc)}
+.mblind{font-size:11.5px}
+.mblind u{text-decoration:none;color:var(--mute);font-size:10.5px;font-weight:700;
+  letter-spacing:.07em;text-transform:uppercase}
+.mblind ul{margin:5px 0 0;padding-left:15px;color:var(--dim);display:flex;
+  flex-direction:column;gap:2px}
+.mblind b{color:var(--warn);font-weight:700}
+.overlap{font-size:11.5px;color:var(--mute);padding:7px 2px}
+.overlap b{color:var(--ink)}
+
+/* ---------------- Search: danh sách công ty ---------------- */
+.watch{display:flex;flex-direction:column;gap:1px}
+.crow{display:grid;grid-template-columns:14px 1fr 74px 34px 46px 62px;
+  align-items:center;gap:7px;padding:3.5px 0;font-size:11.5px;
+  border-bottom:1px solid rgba(255,255,255,.03)}
+.crow.quiet{opacity:.45}
+.crow .own{color:var(--acc);font-style:normal;font-size:9px}
+.crow .learn{color:var(--mute);font-style:normal}
+.cname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.cats{color:var(--mute);font-size:10.5px}
+.ckept{text-align:right;font-variant-numeric:tabular-nums;color:var(--acc)}
+.crow.quiet .ckept{color:var(--mute)}
+.cpull{color:var(--mute);font-variant-numeric:tabular-nums;font-size:10.5px}
+.cwhen{color:var(--mute);font-size:10.5px;text-align:right}
+
+.kgroup{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--mute);padding:11px 0 4px;border-bottom:1px solid var(--line)}
+.krows > .kgroup:first-child{padding-top:0}
+.malert{font-size:11px;color:var(--warn);background:var(--warn-bg);
+  border-left:2px solid var(--warn);border-radius:0 5px 5px 0;
+  padding:4px 8px;margin-bottom:8px;overflow-wrap:anywhere}
+.malert b{color:var(--warn)}
+.method{padding:10px 12px;margin-bottom:8px}
+.mhead{margin-bottom:7px}
+.mnums{margin-bottom:7px}
+.methods{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+.methods .method{margin:0}
+.mnums{gap:5px}
+.mnums span{padding:3px 7px}
+
+/* ---------------- gập thanh bên ---------------- */
+.brandrow{display:flex;align-items:center;gap:6px;padding:6px 4px 14px 0}
+.brandrow .brand{padding:0 0 0 10px;flex:1;min-width:0;white-space:nowrap;
+  overflow:hidden}
+.navtoggle{font:inherit;font-size:13px;line-height:1;color:var(--mute);
+  cursor:pointer;background:none;border:0;border-radius:6px;padding:5px 7px;
+  flex:none}
+.navtoggle:hover{color:var(--ink);background:var(--panel-2)}
+
+/* Đổi biến --nav-w là cả sidebar LẪN vùng nội dung (main inset trái) cùng co,
+   không phải chỉnh hai chỗ rời nhau rồi lệch. */
+:root.navmin{--nav-w:58px}
+.navmin .brandrow{padding-right:0;justify-content:center}
+.navmin .brand{display:none}
+.navmin .navtoggle{transform:rotate(180deg)}
+.navmin .navlink{justify-content:center;padding:10px 0;gap:0}
+.navmin .navlink span{display:none}
+/* Lúc gập, icon là thứ DUY NHẤT để bấm — không được mờ như lúc có chữ bên cạnh. */
+.navmin .navlink i{width:auto;font-size:15px;color:var(--dim)}
+.navmin .navlink:hover i{color:var(--ink)}
+.navmin .navlink.on i{color:var(--acc)}
+.navmin .navtoggle{color:var(--dim)}
+.navmin .navfoot{justify-content:center;padding:11px 0}
+.navmin .navfoot span:not(.dot){display:none}
+.side,main{transition:width .12s ease,left .12s ease}
+.runsched{margin-top:11px;padding-top:9px;border-top:1px solid var(--line);
+  font-size:11.5px;color:var(--dim)}
+.runsched b{color:var(--ink);font-weight:600}

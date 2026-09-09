@@ -38,10 +38,13 @@ def page(title: str, body: str, active: str = "", wide: bool = False,
     links = ""
     for href, label, mark in NAV:
         on = " on" if href == active else ""
-        links += (f"<a class='navlink{on}' href='{esc(href)}'>"
+        # title= để lúc gập còn biết icon nào là gì
+        links += (f"<a class='navlink{on}' href='{esc(href)}'"
+                  f" title='{esc(label)}'>"
                   f"<i>{mark}</i><span>{esc(label)}</span></a>")
 
-    foot = (f"<div class=navfoot><span class=dot></span>{esc(status)}</div>"
+    foot = (f"<div class=navfoot title='{esc(status)}'>"
+            f"<span class=dot></span><span>{esc(status)}</span></div>"
             if status else "")
     # Thanh master. Trạng thái và nhãn nút do live.js ghi đè ngay khi SSE nối
     # được — chữ ở đây chỉ là thứ hiện trong tích tắc trước lúc đó.
@@ -50,15 +53,26 @@ def page(title: str, body: str, active: str = "", wide: bool = False,
            "<b data-state>đang nối…</b></div>"
            "<div class=masters>"
            "<button class=mbtn data-act=run>Chạy ngay</button>"
-           "<button class=mbtn data-act=pause>Tạm dừng</button>"
+           "<button class=mbtn data-act=pause>Tắt tự quét</button>"
            "</div></header>")
+
+    # Đọc lựa chọn gập/mở NGAY trong <head>, trước khi vẽ. Để xuống cuối trang
+    # thì mỗi lần chuyển tab thanh bên bung ra rồi mới co lại — nháy một cái.
+    # Đây là tuỳ chọn hiển thị của riêng máy này, không phải dữ liệu chung,
+    # nên để localStorage; không cần hỏi server, cũng không cần luồn tham số
+    # qua cả chục hàm render.
+    early = ("<script>try{if(localStorage.jobbotNav==='1')"
+             "document.documentElement.classList.add('navmin')}catch(e){}</script>")
 
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{esc(title)} · jobbot</title>"
-        "<link rel=stylesheet href='/static/app.css'></head><body>"
-        f"<aside class=side><div class=brand>jobbot</div>"
+        "<link rel=stylesheet href='/static/app.css'>"
+        f"{early}</head><body>"
+        f"<aside class=side>"
+        f"<div class=brandrow><div class=brand>jobbot</div>"
+        f"<button class=navtoggle data-nav title='Gập thanh bên'>«</button></div>"
         f"<nav>{links}</nav>{foot}</aside>"
         f"<main class='{'wide' if wide else ''}{' flow' if flow else ''}'>{top}"
         f"<div class=inner>{body}</div></main>"
@@ -104,7 +118,8 @@ def section(title: str, inner: str, action: str = "") -> str:
 # ---------------------------------------------------------------- ô (widget)
 
 def widget(title: str, body: str, tools: str = "", span: int = 1,
-           rows: int = 1, expand: bool = True, cls: str = "") -> str:
+           rows: int = 1, expand: bool = True, cls: str = "",
+           at: tuple[int, int] | None = None) -> str:
     """Một ô trong lưới. Tự cuộn bên trong, không đẩy trang dài ra.
 
     span = chiếm mấy cột. expand=True thì có nút mở to ra toàn màn hình để
@@ -112,8 +127,12 @@ def widget(title: str, body: str, tools: str = "", span: int = 1,
     """
     grow = ("<button class=wexp data-expand title='Mở to (Esc để thu)'>⤢</button>"
             if expand else "")
-    return (f"<section class='wid {cls}' data-widget"
-            f" style='grid-column:span {span};grid-row:span {rows}'>"
+    # at=(cột, hàng) đặt ô vào ĐÚNG chỗ. Không có thì để trình duyệt tự xếp —
+    # nhưng ô nào phải nằm cố định một cột (nhật ký ở cột cuối) thì tự xếp sẽ
+    # trôi vào chỗ trống đầu tiên nó gặp.
+    place = (f"grid-column:{at[0]} / span {span};grid-row:{at[1]} / span {rows}"
+             if at else f"grid-column:span {span};grid-row:span {rows}")
+    return (f"<section class='wid {cls}' data-widget style='{place}'>"
             f"<header class=whead><h3>{esc(title)}</h3>"
             f"<div class=wtools>{tools}{grow}</div></header>"
             f"<div class=wbody>{body}</div></section>")

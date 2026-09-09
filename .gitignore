@@ -29,3 +29,6 @@ venv/
 
 # macOS
 .DS_Store
+
+# Gói chuyển máy — sinh lại được
+jobbot-handover.zip

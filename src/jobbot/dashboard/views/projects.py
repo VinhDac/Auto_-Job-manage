@@ -68,18 +68,21 @@ def render(clusters: list, have: list, *, stats: dict, settings: list,
         title="Projects", active="/projects", stream="project",
         note="Bước 4 — gom tin theo thứ chúng thật sự đòi, rồi dựng một "
              "project nhỏ cho mỗi nhóm.",
-        stats=alert + tiles
-              + "<div class=subhead>Project đang có trên CV</div>" + _mine(have),
-        chart_title="Nhóm JD — mỗi nhóm bao nhiêu tin",
-        chart=plot.bars(sizes, unit=" tin", note="chưa có nhóm nào")
-              + "<div class=subhead>Chi tiết từng nhóm</div>" + _groups(clusters),
-        settings=runtime.rows(settings),
-        debug=runtime.actions([
-            ("Nghiên cứu công ty", "", "chưa nối — xem scripts/research.py"),
-            ("Dựng lại nhóm", "", "chưa nối"),
-        ]),
+        panels=[
+            runtime.panel("Thống kê", alert + tiles
+                          + "<div class=subhead>Project đang có trên CV</div>"
+                          + _mine(have), span=2),
+            runtime.panel("Nhóm JD — mỗi nhóm bao nhiêu tin",
+                          plot.bars(sizes, unit=" tin", note="chưa có nhóm nào")
+                          + "<div class=subhead>Chi tiết từng nhóm</div>"
+                          + _groups(clusters), span=2),
+            runtime.panel("Cài đặt", runtime.rows(settings)),
+            runtime.panel("Debug", runtime.actions([
+                ("Nghiên cứu công ty", "", "chưa nối — xem scripts/research.py"),
+                ("Dựng lại nhóm", "", "chưa nối"),
+            ])),
+        ],
     )
-
 
 STATE_NOTE = {
     "ok": ("brief ready", "ok"),

@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 
 from . import notify, postings
+from . import prefs
 from .journal import SEARCH, SYSTEM, log as jlog
 from .db import connect
 
@@ -36,29 +37,68 @@ class Scheduler:
         self.last_scan: float = 0.0
         self.last_result: str = "chưa chạy lần nào"
         self.running = False
-        self.paused = False
+        # Mặc định DỪNG. Mở app lên mà nó tự đi quét trong lúc người dùng còn
+        # đang cấu hình là sai — cấu hình chưa xong thì quét về cũng là rác.
+        # Đọc lại lựa chọn lần trước, chưa có thì tắt.
+        self.paused = True
         self._thread: threading.Thread | None = None
 
     # --- điều khiển -------------------------------------------------------
     def start(self) -> None:
+        self.paused = not self._autorun()
+        # Mốc đếm bắt đầu TỪ LÚC MỞ APP, không phải từ 0. Để 0 thì
+        # "now - 0 >= 3600" luôn đúng và vòng quét nổ ngay sau 5 giây —
+        # Chrome bật lên trong khi cửa sổ còn chưa vẽ xong.
+        self.last_scan = time.time()
+        jlog.emit(SYSTEM,
+                  "app mở — tự quét đang TẮT, bấm Chạy ngay khi bạn sẵn sàng"
+                  if self.paused else
+                  f"app mở — tự quét ĐANG BẬT, lần đầu sau {self.scan_every // 60} phút")
         self._thread = threading.Thread(target=self._loop, daemon=True, name="scheduler")
         self._thread.start()
+
+    @staticmethod
+    def _autorun() -> bool:
+        try:
+            conn = connect()
+            try:
+                return prefs.flag(conn, prefs.AUTORUN)
+            finally:
+                conn.close()
+        except Exception:                       # noqa: BLE001
+            return False                        # đọc hỏng -> KHÔNG tự chạy
 
     def stop(self) -> None:
         self.stop_flag.set()
 
     def pause(self) -> None:
-        """Ngưng quét tự động. KHÁC stop(): luồng vẫn sống, bấm tiếp là chạy lại.
+        """Ngưng quét tự động, và NHỚ lựa chọn đó cho lần mở app sau.
 
+        KHÁC stop(): luồng vẫn sống, bấm tiếp là chạy lại.
         Không cắt ngang lần quét đang chạy dở — cắt giữa chừng thì Chrome
         treo tab và giao dịch trong derive() cuộn lại nửa vời.
         """
         self.paused = True
+        self._remember(False)
         jlog.warn(SYSTEM, "ĐÃ TẠM DỪNG — không quét tự động nữa")
 
     def resume(self) -> None:
         self.paused = False
-        jlog.ok(SYSTEM, f"chạy lại — lần quét sau trong {self.next_in() // 60} phút")
+        self._remember(True)
+        jlog.ok(SYSTEM, f"tự quét ĐÃ BẬT — lần sau trong {self.next_in() // 60} phút")
+
+    @staticmethod
+    def _remember(on: bool) -> None:
+        """Nhớ lựa chọn. Không nhớ thì lần mở app sau lại tự chạy, đúng cái
+        vừa tắt đi."""
+        try:
+            conn = connect()
+            try:
+                prefs.set_flag(conn, prefs.AUTORUN, on)
+            finally:
+                conn.close()
+        except Exception:                       # noqa: BLE001
+            pass
 
     def state(self) -> str:
         """Một chữ cho giao diện: đang chạy / tạm dừng / chờ."""

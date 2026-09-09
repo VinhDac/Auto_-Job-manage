@@ -3,7 +3,7 @@
 Phần cần Chrome thật sẽ tự bỏ qua nếu Chrome chưa chạy.
 """
 
-import struct, sys
+import re, struct, sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -92,6 +92,49 @@ for text in ("Just a moment...", "Attention Required! | Cloudflare",
     check(f"nhận ra chặn: {text[:28]}", bool(webbase.BLOCKED.search(text)))
 check("trang bình thường KHÔNG bị nhận nhầm",
       not webbase.BLOCKED.search("Quantitative Analyst jobs in London | LinkedIn"))
+
+print("\n[tắt Chrome: phải THẬT SỰ tắt, và chỉ tắt bản của app]")
+# LỖI THẬT: bản cũ gọi GET /json/close — endpoint đó cần kèm target id nên
+# trả 404, lỗi bị nuốt trong except, hàm trả None và Chrome vẫn nguyên đó.
+# Hàm "tắt" mà không tắt gì, chạy êm ru suốt.
+from jobbot.browser import chrome as ch
+src_ch = Path("src/jobbot/browser/chrome.py").read_text()
+
+def code_of(name, text=src_ch):
+    """Thân hàm, BỎ chú thích và docstring — để không kiểm nhầm vào lời giải
+    thích về chính cái lỗi đã sửa."""
+    body = text.split(f"def {name}")[1]
+    body = body.split("\ndef ")[0]
+    body = re.sub(r'"""[\s\S]*?"""', "", body)
+    return "\n".join(l for l in body.split("\n") if not l.strip().startswith("#"))
+
+shut = code_of("shutdown")
+check("KHÔNG gọi endpoint /json/close (cần target id, trả 404)",
+      "/json/close" not in shut)
+check("dùng lệnh CDP Browser.close", "Browser.close" in shut)
+check("đi qua websocket của TRÌNH DUYỆT", "webSocketDebuggerUrl" in shut)
+check("shutdown trả về bool để người gọi biết có tắt được không",
+      "-> bool" in src_ch.split("def shutdown")[1].split("\n")[0])
+check("và có chờ, không trả lời ngay khi chưa tắt xong", "alive(port)" in shut)
+# Chrome cá nhân cũng là tiến trình "Google Chrome" — giết theo TÊN là quét
+# luôn cả nó, mất việc người dùng đang làm dở. Giết tiến trình do CHÍNH MÌNH
+# sinh ra (process.terminate() trong launch) thì không sao.
+check("KHÔNG giết tiến trình theo tên",
+      not any(w in src_ch for w in ("pkill", "killall", "pgrep")))
+check("cổng debug riêng, không phải 9222 mặc định", ch.PORT != 9222)
+check("profile riêng, không dùng profile người dùng",
+      "chrome-profile" in str(ch.profile_dir()))
+check("Chrome chưa chạy -> coi như đã tắt, không báo hỏng",
+      ch.shutdown(port=1) is True or not ch.alive(1))
+
+# Hàm tắt đúng vẫn vô dụng nếu KHÔNG AI GỌI. Trước đây không một chỗ nào gọi
+# shutdown(), nên Chrome mở ra rồi nằm trên màn hình tới lần quét sau — một
+# tiếng sau.
+runner_src = Path("src/jobbot/scan_runner.py").read_text()
+app_src = Path("src/jobbot/app.py").read_text()
+check("quét xong thì đóng Chrome", "chrome.shutdown()" in runner_src)
+check("và báo ra nếu đóng không được", "không đóng được Chrome" in runner_src)
+check("thoát app cũng đóng Chrome", "chrome.shutdown()" in app_src)
 
 print("\n[LinkedIn — ranh giới an toàn]")
 from jobbot.ingest.web import linkedin as li

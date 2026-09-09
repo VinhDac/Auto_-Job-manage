@@ -118,8 +118,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             # Gửi ngay trạng thái hiện tại — mở tab giữa chừng vẫn thấy đúng,
             # không phải chờ sự kiện kế tiếp mới biết máy đang làm gì.
-            self._send_event({"type": "hello", "state": _run_state(),
-                              "running": journal.log.running(),
+            self._send_event({"type": "hello", **_state_payload(),
                               "events": [e.as_dict()
                                          for e in journal.log.tail(limit=40)][::-1]})
             while True:
@@ -156,8 +155,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/events":
             return self._events()
         if path == "/api/state":
-            return self._json({"state": _run_state(),
-                               "running": journal.log.running()})
+            return self._json(_state_payload())
 
         # --- ĐÃ NỐI DỮ LIỆU THẬT (bước 1) ---
         if path in ("/", "/jobs") or path.startswith("/jobs/"):
@@ -245,8 +243,10 @@ class Handler(BaseHTTPRequestHandler):
             conn = db.connect()
             try:
                 return self._html(search.render(
-                    sources=live.sources(conn), yields=live.source_yield(conn),
-                    settings=live.search_settings(conn),
+                    sources=live.sources(conn), reach=live.search_reach(conn),
+                    watch=live.watchlist(conn),
+                    chrome_set=live.chrome_settings(conn),
+                    api_set=live.api_settings(conn),
                     chrome=live.chrome_status()))
             finally:
                 conn.close()
@@ -341,12 +341,12 @@ class Handler(BaseHTTPRequestHandler):
                     journal.log.done(journal.SCORE)
                     conn.close()
             threading.Thread(target=_rescore, daemon=True, name="rescore").start()
-            return self._json({"ok": True, "state": _run_state()})
+            return self._json({"ok": True, **_state_payload()})
 
         if path == "/api/pause":
             runner = sched.current()
             runner.resume() if runner.paused else runner.pause()
-            return self._json({"ok": True, "state": _run_state()})
+            return self._json({"ok": True, **_state_payload()})
 
         if path.startswith("/profile/"):
             section_id = _segments(path)[-1]
@@ -413,10 +413,13 @@ def serve(port: int | None = None) -> tuple[ThreadingHTTPServer, str]:
     return ThreadingHTTPServer((HOST, port), Handler), f"http://{HOST}:{port}/"
 
 
-def _run_state() -> str:
+def _state_payload() -> dict:
     """Trạng thái THẬT của vòng chạy, không phải chuỗi cứng.
 
     live.run_status() cũ trả 'idle' kể cả lúc đang quét, vì nó chỉ nhìn bảng
     source_run chứ không hỏi scheduler. Đây là chỗ duy nhất biết sự thật.
     """
-    return sched.current().state()
+    runner = sched.current()
+    return {"state": runner.state(),
+            "next_in": runner.next_in() // 60,      # phút
+            "running": journal.log.running()}

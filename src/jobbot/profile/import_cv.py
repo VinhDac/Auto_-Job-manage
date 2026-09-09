@@ -12,6 +12,7 @@ Tự ghi đè là cách nhanh nhất để xoá mất thứ họ đã điền ta
 from __future__ import annotations
 
 import re
+import sys
 import zipfile
 from dataclasses import dataclass
 from io import BytesIO
@@ -33,21 +34,108 @@ class ReadError(RuntimeError):
 # ---------------------------------------------------------------- đọc file
 
 def from_pdf(data: bytes) -> str:
-    """Dùng PDFKit của macOS. Nó xử lý được font nhúng và mã hoá riêng —
-    bóc tay bằng zlib chỉ ra ký tự rác."""
-    try:
-        import objc
-        from Foundation import NSData, NSBundle
-        objc.loadBundle("PDFKit", globals(),
-                        bundle_path="/System/Library/Frameworks/Quartz.framework"
-                                    "/Frameworks/PDFKit.framework")
-        doc = PDFDocument.alloc().initWithData_(          # noqa: F821
-            NSData.dataWithBytes_length_(data, len(data)))
-        if doc is None:
-            raise ReadError("Không mở được PDF — file hỏng hoặc có mật khẩu.")
-        return str(doc.string() or "")
-    except ImportError as exc:
-        raise ReadError(f"Đọc PDF cần PyObjC (macOS có sẵn): {exc}") from exc
+    """Đọc chữ trong PDF.
+
+    macOS có PDFKit — nó xử lý được font nhúng và bảng mã riêng, nên ưu tiên.
+    Máy khác thì bóc bằng thư viện chuẩn: giải nén luồng nội dung rồi nhặt
+    chữ trong các toán tử Tj/TJ.
+
+    Bộ bóc tay KHÔNG đọc được PDF dùng font nhúng có bảng mã riêng (LaTeX,
+    Canva, InDesign hay ra kiểu này) — nó trả về ký tự rác. Nên phải TỰ KIỂM
+    và nói thẳng, thay vì nhét một đống rác vào hồ sơ. Người dùng còn đường
+    khác: dán thẳng chữ vào ô bên cạnh.
+    """
+    if sys.platform == "darwin":
+        try:
+            return _pdf_macos(data)
+        except ReadError:
+            raise
+        except Exception:                       # noqa: BLE001
+            pass                                # không có PyObjC -> bóc tay
+    text = _pdf_plain(data)
+    if not _looks_like_text(text):
+        raise ReadError(
+            "PDF này dùng font nhúng nên bóc chữ ra bị rác. "
+            "Mở PDF, bôi đen toàn bộ, copy rồi DÁN vào ô bên cạnh.")
+    return text
+
+
+def _pdf_macos(data: bytes) -> str:
+    import objc
+    from Foundation import NSData
+    objc.loadBundle("PDFKit", globals(),
+                    bundle_path="/System/Library/Frameworks/Quartz.framework"
+                                "/Frameworks/PDFKit.framework")
+    doc = PDFDocument.alloc().initWithData_(              # noqa: F821
+        NSData.dataWithBytes_length_(data, len(data)))
+    if doc is None:
+        raise ReadError("Không mở được PDF — file hỏng hoặc có mật khẩu.")
+    return str(doc.string() or "")
+
+
+# (chữ) Tj   |   [(a) -3 (b)] TJ   — hai cách PDF đặt chữ lên trang
+_PDF_STR = re.compile(rb"\((?:\\.|[^\\()])*\)", re.S)
+_PDF_SHOW = re.compile(rb"(?:Tj|TJ|'|\")")
+
+
+def _pdf_plain(data: bytes) -> str:
+    """Bóc chữ bằng thư viện chuẩn. Chỉ ăn được PDF mã hoá chữ kiểu thường."""
+    import zlib
+
+    chunks: list[str] = []
+    for raw in re.findall(rb"stream\r?\n(.*?)endstream", data, re.S):
+        body = raw
+        try:
+            body = zlib.decompress(raw)
+        except zlib.error:
+            try:
+                body = zlib.decompressobj().decompress(raw)   # luồng cụt đuôi
+            except zlib.error:
+                continue                                       # không phải Flate
+        chunks.append(_pdf_text_ops(body))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(c for c in chunks if c.strip())).strip()
+
+
+def _pdf_text_ops(body: bytes) -> str:
+    out: list[str] = []
+    for line in body.split(b"\n"):
+        if not _PDF_SHOW.search(line):
+            continue
+        parts = [_pdf_unescape(m[1:-1]) for m in _PDF_STR.findall(line)]
+        if parts:
+            out.append("".join(parts))
+    return "\n".join(out)
+
+
+_ESCAPES = {b"n": "\n", b"r": "", b"t": "\t", b"b": "", b"f": "",
+            b"(": "(", b")": ")", b"\\": "\\"}
+
+
+def _pdf_unescape(raw: bytes) -> str:
+    out, i = [], 0
+    while i < len(raw):
+        ch = raw[i:i + 1]
+        if ch == b"\\" and i + 1 < len(raw):
+            nxt = raw[i + 1:i + 2]
+            if nxt.isdigit():                     # \ddd = mã bát phân
+                digits = raw[i + 1:i + 4]
+                out.append(chr(int(digits, 8))); i += 1 + len(digits); continue
+            out.append(_ESCAPES.get(nxt, nxt.decode("latin-1"))); i += 2; continue
+        out.append(ch.decode("latin-1")); i += 1
+    return "".join(out)
+
+
+def _looks_like_text(text: str) -> bool:
+    """Có phải chữ người đọc được không, hay là rác từ font nhúng.
+
+    Dấu hiệu: CV thật thì phần lớn ký tự là chữ cái, khoảng trắng, dấu câu.
+    Font nhúng bảng mã riêng cho ra một biển ký tự lạ.
+    """
+    body = text.strip()
+    if len(body) < 200:                           # quá ngắn -> không phải CV
+        return False
+    good = sum(c.isalnum() or c.isspace() or c in ".,;:/@()&+%-–—·" for c in body)
+    return good / len(body) > 0.85
 
 
 def from_docx(data: bytes) -> str:

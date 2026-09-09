@@ -35,13 +35,15 @@ def render(*, stats: dict, hist: list, chances: list, settings: list) -> str:
     return runtime.render(
         title="Score", active="/score", stream="score",
         note="Bước 2 — chấm độ khớp, rồi hỏi riêng: có đường vào không.",
-        stats=alert + tiles + "<div class=subhead>Cơ hội thật</div>"
-              + plot.spread(chances),
-        chart_title="Phân bố điểm",
-        chart=plot.bars(hist, unit=" tin"),
-        settings=runtime.rows(settings),
-        debug=runtime.actions([
-            ("Chấm lại tất cả", "rescore", "bỏ điểm cũ, chấm lại từ đầu"),
-            ("Dựng lại từ raw", "", "chưa nối — bóc lại mô tả từ HTML gốc"),
-        ]),
+        panels=[
+            runtime.panel("Thống kê", alert + tiles
+                          + "<div class=subhead>Cơ hội thật</div>"
+                          + plot.spread(chances), span=2),
+            runtime.panel("Phân bố điểm", plot.bars(hist, unit=" tin"), span=2),
+            runtime.panel("Cài đặt", runtime.rows(settings)),
+            runtime.panel("Debug", runtime.actions([
+                ("Chấm lại tất cả", "rescore", "bỏ điểm cũ, chấm lại từ đầu"),
+                ("Dựng lại từ raw", "", "chưa nối — bóc lại mô tả từ HTML gốc"),
+            ])),
+        ],
     )
