@@ -31,7 +31,7 @@ MIGRATIONS: list[str] = [
     """
     CREATE TABLE raw_posting (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        source      TEXT    NOT NULL,     -- 'arbeitnow' | 'greenhouse:monzo'
+        source      TEXT    NOT NULL,     -- 'linkedin' | 'greenhouse:monzo'
         source_id   TEXT    NOT NULL,     -- id bên nguồn
         url         TEXT,
         fetched_at  TEXT    NOT NULL,
@@ -203,6 +203,30 @@ MIGRATIONS: list[str] = [
     """
     ALTER TABLE source_run ADD COLUMN attempted INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE source_run ADD COLUMN failed INTEGER NOT NULL DEFAULT 0;
+    """,
+    # 10 — "khớp" khác "có cửa". Điểm khớp cao ở một tin đòi PhD và 5 năm kinh
+    # nghiệm không nói lên gì về xác suất được gọi. Tách hai thứ ra.
+    """
+    ALTER TABLE posting ADD COLUMN realism TEXT NOT NULL DEFAULT '';
+    ALTER TABLE posting ADD COLUMN realism_why TEXT NOT NULL DEFAULT '';
+    ALTER TABLE posting ADD COLUMN deadline TEXT NOT NULL DEFAULT '';
+    ALTER TABLE posting ADD COLUMN deadline_ts INTEGER NOT NULL DEFAULT 0;
+    CREATE INDEX posting_realism ON posting(realism);
+    """,
+    # 11 — điểm cũng phải gắn phiên bản HỒ SƠ, không chỉ phiên bản luật.
+    # Thiếu cột này thì đổi hồ sơ chỉ lọc lại chứ không chấm lại: 72/204 tin
+    # đang giữ bị đóng băng ở score=NULL vì chúng được chấm lúc còn rỗng mô tả.
+    # DEFAULT 0 = "chưa chấm với hồ sơ nào" -> mọi tin cũ tự thành cần chấm lại.
+    """
+    ALTER TABLE posting ADD COLUMN scored_profile INTEGER NOT NULL DEFAULT 0;
+    """,
+    # 12 — nhật ký chạy: mỗi dòng thuộc một LUỒNG và có MỨC.
+    # Nhờ luồng mà tab Search chỉ hiện việc của Search; nhờ mức mà lỗi không
+    # nằm lẫn với dòng thường. Dòng cũ không có -> mặc định 'system'/'info'.
+    """
+    ALTER TABLE audit ADD COLUMN stream TEXT NOT NULL DEFAULT 'system';
+    ALTER TABLE audit ADD COLUMN level  TEXT NOT NULL DEFAULT 'info';
+    CREATE INDEX audit_stream ON audit(stream, id);
     """,
 ]
 

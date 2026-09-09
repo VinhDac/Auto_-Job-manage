@@ -13,7 +13,7 @@ import json
 from dataclasses import dataclass, field
 
 from ..ingest.base import norm
-from ..scoring.vocab import ALIASES
+from ..scoring.vocab import ALIASES, alias_hits
 from . import rules
 from .blocks import Block, parse, sentences
 
@@ -46,9 +46,10 @@ class TailoredCV:
 
 
 def skills_in(text: str) -> set[str]:
-    low = f" {norm(text)} "
-    return {c for a, c in ALIASES.items()
-            if (f" {a.strip()} " if len(a.strip()) <= 3 else a.strip()) in low}
+    """Kỹ năng có mặt trong đoạn chữ. Luật khớp nằm ở vocab.alias_hits —
+    MỘT chỗ, vì trước đây score._signals giữ một bản sao và hai bên phải tự
+    nhớ mà sửa cùng nhau."""
+    return set(alias_hits(norm(text)))
 
 
 def wanted_skills(explain: dict | None, jd_text: str = "") -> set[str]:

@@ -8,6 +8,6 @@ KHÔNG ở đây:
     - Dedup (-> dedup/)     - Chấm điểm (-> scoring/)
     - Ghi DB trực tiếp (-> core/store)
 
-Nguồn đã xác minh chạy: greenhouse, lever, ashby, arbeitnow, remotive.
+Nguồn đang dùng: greenhouse, lever, ashby (board công ty) + linkedin (Chrome).
 Nguồn không có API công khai: chạy trong cửa sổ giống người, không 24/7 (design.md §3).
 """

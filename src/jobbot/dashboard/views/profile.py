@@ -88,7 +88,7 @@ def _steps(current_id: str, done_ids: set[str]) -> str:
 
 
 def render_section(section: Section, answers: Answers, done_ids: set[str],
-                   next_label: str, pending: int = 0) -> str:
+                   next_label: str) -> str:
     optional = "<span class=opt-tag>optional</span>" if section.optional else ""
     questions = "".join(_question(q, answers) for q in section.questions)
     return page(
@@ -99,7 +99,7 @@ def render_section(section: Section, answers: Answers, done_ids: set[str],
         + f"<form method=post>{questions}"
         + f"<div class=actions><button class=primary type=submit>{esc(next_label)}</button>"
         + "<a class=skip href='/profile'>Review profile</a></div></form>",
-        active="/profile", pending=pending, status="Running",
+        active="/profile", status="Running",
     )
 
 
@@ -114,8 +114,7 @@ def _shown(question: Question, answers: Answers) -> str:
     return f"<span class=val>{esc(text if len(text) <= 300 else text[:300] + '…')}</span>"
 
 
-def render_summary(answers: Answers, versions: int, missing_gate: list[str],
-                   pending: int = 0) -> str:
+def render_summary(answers: Answers, versions: int, missing_gate: list[str]) -> str:
     questions = all_questions()
 
     if missing_gate:
@@ -151,5 +150,5 @@ def render_summary(answers: Answers, versions: int, missing_gate: list[str],
         f"<p class=lead>{versions} version(s) saved. Every edit writes a new version rather than "
         "overwriting — this profile is living data, not a form you fill in once.</p>"
         f"{gate}{''.join(blocks)}",
-        active="/profile", pending=pending, status="Running",
+        active="/profile", status="Running",
     )

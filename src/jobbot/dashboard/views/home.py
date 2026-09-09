@@ -1,58 +1,71 @@
-"""Home — mở app ra là thấy ngay TÌNH HÌNH, không phải bảng số.
+"""Home — bảng tổng hợp của một cái máy đang chạy, không phải trang giới thiệu.
 
-Thứ tự cố ý: cần bạn làm gì -> máy đang làm gì -> con số -> đã làm gì.
-Người mở app lên không hỏi "có bao nhiêu tin", họ hỏi "có gì cần tôi không".
+Người mở app lên không hỏi "có bao nhiêu tin". Họ hỏi:
+    nó đang làm gì · nó vừa làm gì · có gì cần tôi không
+
+Nên nhật ký chiếm hẳn một cột dọc, đứng cạnh mọi thứ khác. Còn nút RUN/PAUSE
+thì nằm trên thanh master (layout.page), không nằm trong ô nào cả — bấm được
+từ bất kỳ trang nào.
+
+Trang KHÔNG cuộn: mỗi ô tự cuộn bên trong.
 """
 
 from __future__ import annotations
 
 from html import escape as esc
 
-from ..layout import card, empty, h1, page, stat
+from .. import plot
+from ..layout import (empty, grid, journal_box, page, progress_box, stat, widget)
 
-TAG = {"approve": "Decision", "mail": "Setup", "follow": "Follow-up",
-       "scan": "Scan", "warn": "Attention"}
+TAG = {"approve": "Quyết định", "mail": "Cài đặt", "follow": "Theo dõi",
+       "scan": "Quét", "warn": "Chú ý"}
 
-# Ô nào đáng làm nổi bật bằng màu nhấn
 KEY_LABELS = {"Unique jobs", "Awaiting you", "Match your titles"}
 
 
+def _funnel(rows: list[dict]) -> str:
+    top = max((r["n"] for r in rows), default=0) or 1
+    out = ""
+    for row in rows:
+        # Bậc chưa làm hiện chữ 'chưa làm', KHÔNG hiện số 0 — số 0 đọc ra là
+        # "đã chạy mà không ra gì", trong khi sự thật là chưa hề chạy.
+        width = 0 if row["todo"] else max(row["n"] / top * 100, 0.8)
+        value = "chưa làm" if row["todo"] else f"{row['n']:,}"
+        out += (f"<div class='frow{' todo' if row['todo'] else ''}'>"
+                f"<span class=fname>{esc(row['name'])}</span>"
+                f"<span class=ftrack><i style='width:{width:.1f}%'></i></span>"
+                f"<b class=fnum>{esc(value)}</b></div>")
+    return f"<div class=funnel>{out}</div>"
+
+
 def render(status: dict, counters: list[dict], needs: list[dict],
-           activity: list[dict], pending: int) -> str:
-    live = status["state"] == "running"
-
-    items = "".join(
+           activity: list[dict], *,
+           days: list, chances: list, funnel: list) -> str:
+    needs_html = "".join(
         f"<a class='need {esc(n['kind'])}' href='{esc(n['href'])}'>"
-        f"<span class=tag>{esc(TAG.get(n['kind'], 'Note'))}</span>"
+        f"<span class=tag>{esc(TAG.get(n['kind'], 'Ghi chú'))}</span>"
         f"<b>{esc(n['text'])}</b><span class=muted>{esc(n['note'])}</span></a>"
-        for n in needs
-    ) or empty("Nothing needs you right now.")
-
-    failed = "".join(f"<li class=warn>{esc(s)}</li>" for s in status["sources_failed"])
-    runcard = card(
-        f"<div class=runline><span class='dot {'on' if live else ''}'></span>"
-        f"<b>{esc(status['state'].title())}</b>"
-        f"<span class=muted>last scan {esc(status['last_scan'])} · "
-        f"next {esc(status['next_scan'])}</span><span class=spacer></span>"
-        f"<span class=muted>{status['sources_ok']}/{status['sources_total']} sources</span></div>"
-        + (f"<ul class=mini>{failed}</ul>" if failed else ""))
+        for n in needs) or empty("Không có gì đang chờ bạn.")
 
     tiles = "".join(
         stat(c["value"], c["label"], c["note"], key=c["label"] in KEY_LABELS)
         for c in counters)
 
-    feed = "".join(
-        f"<li class='ev {esc(a['kind'])}'><span class=t>{esc(a['time'])}</span>"
-        f"<span>{esc(a['text'])}</span></li>" for a in activity)
+    # MỘT lưới duy nhất. Hai lưới chồng nhau thì tổng chiều cao vượt màn hình
+    # và trang cuộn trở lại — đúng thứ đang muốn bỏ.
+    body = grid(
+        widget("Đang chạy", progress_box(), span=1),
+        widget("Tin lấy về mỗi ngày", plot.bars(days, unit=" tin"), span=1),
+        # Nhật ký cao bằng cả cột: đây là thứ được nhìn nhiều nhất.
+        widget("Nhật ký", journal_box(), span=1, rows=4, cls="tall"),
 
-    return page(
-        "Home",
-        h1("Home", "Everything running, and everything waiting on you.")
-        + "<h2>Needs you</h2>" + f"<div class=needs>{items}</div>"
-        + "<h2>Engine</h2>" + runcard
-        + "<h2>Numbers</h2>" + f"<div class=stats>{tiles}</div>"
-        + "<h2>Recent activity</h2>"
-        + (f"<ul class=feed>{feed}</ul>" if feed else empty("Nothing logged yet.")),
-        active="/", pending=pending,
-        status=f"{status['state'].title()} · {status['sources_ok']} sources",
+        widget("Phễu", _funnel(funnel), span=2),
+        widget("Con số", f"<div class=stats>{tiles}</div>", span=2),
+
+        widget("Cần bạn", f"<div class=needs>{needs_html}</div>", span=1),
+        widget("Cơ hội thật", plot.spread(chances), span=1),
+        cols=3,
     )
+
+    return page("Home", body, active="/", flow=False,
+                status=f"{status['sources_ok']}/{status['sources_total']} nguồn")

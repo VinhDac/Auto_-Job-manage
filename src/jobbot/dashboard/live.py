@@ -1,6 +1,6 @@
-"""Dữ liệu THẬT từ DB — thay dần cho mock.py.
+"""Dữ liệu THẬT từ DB.
 
-Mỗi hàm ở đây trả về ĐÚNG hình dạng hàm cùng tên trong mock.py.
+mock.py đã bị xoá hẳn — không còn số bịa nào trong app.
 Đó là lý do trang không phải sửa gì khi chuyển từ giả sang thật.
 
 Đã nối thật:  run_status · counters · jobs · job_detail · activity
@@ -78,41 +78,103 @@ def counters(conn: sqlite3.Connection) -> list[dict]:
     ]
 
 
+def per_day(conn: sqlite3.Connection, days: int = 14) -> list[tuple[str, int]]:
+    """Mỗi ngày lấy về bao nhiêu tin MỚI — theo lúc CÀO VỀ, không phải lúc đăng.
+
+    Dùng raw_posting.fetched_at vì đây là câu hỏi "máy làm được gì mỗi ngày",
+    chứ không phải "thị trường đăng gì mỗi ngày". Ngày không có tin vẫn phải
+    có cột 0, nếu không biểu đồ nói dối về nhịp chạy.
+    """
+    rows = dict(conn.execute(
+        "SELECT substr(fetched_at, 1, 10) AS d, COUNT(*) FROM raw_posting"
+        " WHERE d >= date('now', ?) GROUP BY d", (f"-{days - 1} days",)).fetchall())
+    out = []
+    for back in range(days - 1, -1, -1):
+        day = conn.execute("SELECT date('now', ?)", (f"-{back} days",)).fetchone()[0]
+        out.append((day[8:10] + "/" + day[5:7], rows.get(day, 0)))
+    return out
+
+
+def chances(conn: sqlite3.Connection) -> list[tuple[str, int, str]]:
+    """Phân bố "có cửa không" — trả lời câu hỏi thật, không phải điểm khớp."""
+    got = dict(conn.execute(
+        "SELECT realism, COUNT(*) FROM posting WHERE kept = 1 GROUP BY realism").fetchall())
+    return [("likely", got.get("likely", 0), "hi"),
+            ("possible", got.get("possible", 0), "mid"),
+            ("unlikely", got.get("unlikely", 0), "lo")]
+
+
+def funnel(conn: sqlite3.Connection) -> list[dict]:
+    """Phễu: mỗi bậc là một câu SQL đếm được, không bậc nào là số bịa.
+
+    Bậc nào chưa làm thì ghi thẳng 'chưa làm' — để số 0 trần thì đọc ra là
+    "đã chạy mà không ra gì", sai hẳn nghĩa.
+    """
+    one = lambda sql: int(conn.execute(sql).fetchone()[0])
+    return [
+        {"name": "tải về", "n": one("SELECT COUNT(*) FROM posting"), "todo": False},
+        {"name": "qua bộ lọc", "n": one("SELECT COUNT(*) FROM posting WHERE kept=1"),
+         "todo": False},
+        {"name": "việc duy nhất",
+         "n": one("SELECT COUNT(DISTINCT COALESCE(group_id, CAST(id AS TEXT)))"
+                  " FROM posting WHERE kept=1"), "todo": False},
+        {"name": "chấm được",
+         "n": one("SELECT COUNT(*) FROM posting WHERE kept=1 AND score IS NOT NULL"),
+         "todo": False},
+        {"name": "đáng nộp",
+         "n": one("SELECT COUNT(*) FROM posting WHERE kept=1 AND score>=70"
+                  " AND realism!='unlikely'"), "todo": False},
+        {"name": "đã gửi", "n": 0, "todo": True},
+        {"name": "có hồi âm", "n": 0, "todo": True},
+    ]
+
+
 def jobs(conn: sqlite3.Connection, flt) -> list[dict]:
-    """Lọc theo ý người dùng, RỒI mới gộp trùng — gộp trước thì lọc sai nhóm."""
+    """Lọc theo ý người dùng, RỒI mới gộp trùng — gộp trước thì lọc sai nhóm.
+
+    LỖI ĐÃ SỬA: gộp bằng Python SAU khi đã LIMIT theo DÒNG. Trang thì cắt theo
+    dòng, còn số đếm trên đầu trang lại đếm theo NHÓM, nên hai bên không bao
+    giờ khớp: trên máy thật đầu trang ghi 139 việc, đi hết các trang đếm được
+    144 thẻ — 5 nhóm bị cắt đôi qua ranh giới trang và hiện thành hai thẻ.
+    Gộp phải xảy ra TRONG SQL, trước khi cắt trang.
+    """
     where, args = flt.where()
     per, offset = flt.limit()
     rows = conn.execute(
-        f"SELECT * FROM posting{where} ORDER BY {flt.order()} LIMIT ? OFFSET ?",
+        "SELECT * FROM ("
+        "  SELECT *,"
+        "         COUNT(*) OVER (PARTITION BY grp) AS merged,"
+        "         GROUP_CONCAT(source) OVER (PARTITION BY grp) AS all_sources,"
+        # Đại diện nhóm = tin chấm cao nhất, không phải tin gặp trước.
+        "         ROW_NUMBER() OVER (PARTITION BY grp"
+        "                            ORDER BY score DESC NULLS LAST, id ASC) AS rn"
+        f"    FROM (SELECT *, COALESCE(group_id, CAST(id AS TEXT)) AS grp"
+        f"            FROM posting{where})"
+        f") WHERE rn = 1 ORDER BY {flt.order()} LIMIT ? OFFSET ?",
         [*args, per, offset]).fetchall()
 
-    seen: dict[str, dict] = {}
+    out = []
     for row in rows:
-        key = row["group_id"] or f"solo{row['id']}"
-        found = seen.get(key)
-        if found is None:
-            seen[key] = {
-                "id": str(row["id"]),
-                "title": row["title"], "company": row["company"],
-                "location": row["location"] or "not stated",
-                "salary": row["salary"] or "not stated",
-                "score": row["score"],
-                "confidence": row["score_conf"],
-                "posted": _ago(row["posted_at"]) if row["posted_at"] else "",
-                "age_days": _age_days(row["posted_ts"]),
-                "closes": "",
-                "sources": [row["source"]],
-                "merged": 1,
-                "state": "new" if row["kept"] else "dropped",
-                "via_agency": bool(row["via_agency"]),
-                "drop_reason": row["drop_reason"],
-                "url": row["url"],
-            }
-        else:
-            found["merged"] += 1
-            if row["source"] not in found["sources"]:
-                found["sources"].append(row["source"])
-    return list(seen.values())
+        sources = list(dict.fromkeys((row["all_sources"] or "").split(",")))
+        out.append({
+            "id": str(row["id"]),
+            "title": row["title"], "company": row["company"],
+            "location": row["location"] or "not stated",
+            "salary": row["salary"] or "not stated",
+            "score": row["score"],
+            "confidence": row["score_conf"],
+            "posted": _ago(row["posted_at"]) if row["posted_at"] else "",
+            "age_days": _age_days(row["posted_ts"]),
+            "sources": [s for s in sources if s],
+            "merged": row["merged"],
+            "state": "new" if row["kept"] else "dropped",
+            "via_agency": bool(row["via_agency"]),
+            "realism": row["realism"], "realism_why": row["realism_why"],
+            "deadline": row["deadline"],
+            "drop_reason": row["drop_reason"],
+            "url": row["url"],
+        })
+    return out
 
 
 def job_counts(conn: sqlite3.Connection, flt) -> dict:
@@ -150,6 +212,8 @@ def job_detail(conn: sqlite3.Connection, job_id: str) -> dict | None:
         "location": row["location"] or "not stated",
         "salary": row["salary"] or "not stated",
         "score": row["score"], "confidence": row["score_conf"],
+        "realism": row["realism"], "realism_why": row["realism_why"],
+        "deadline": row["deadline"],
         "posted": _ago(row["posted_at"]) if row["posted_at"] else "",
         "sources": sorted({r["source"] for r in same}),
         "merged": len(same), "url": row["url"],
@@ -175,17 +239,68 @@ def needs_you(conn: sqlite3.Connection) -> list[dict]:
     out: list[dict] = []
     unique = postings.count_groups(conn)
 
+    # Số liệu lỗi thời phải báo TRƯỚC mọi thứ khác — đọc số cũ mà tưởng mới
+    # thì mọi quyết định phía sau đều dựa trên nền sai.
+    waiting = llm_waiting(conn)
+    if waiting:
+        out.append({
+            "kind": "approve",
+            "text": f"{waiting} project brief request(s) waiting on Claude",
+            "href": "/projects",
+            "note": "The engine is set to answer in-session. Open a Claude Code session "
+                    "and the queued request gets answered; or switch the engine in Settings.",
+        })
+
+    state = health(conn)
+    if state["stale"]:
+        out.append({
+            "kind": "warn",
+            "text": f"{state['stale']:,} postings were judged by older rules",
+            "href": "/settings",
+            "note": "Your profile or the matching rules changed. What you see below "
+                    "was decided before that — the next scan re-judges them.",
+        })
+    for run in state["broken"]:
+        out.append({
+            "kind": "warn",
+            "text": f"Source failing: {run['source']}",
+            "href": "/settings",
+            "note": run["error"][:130] or "no reason recorded",
+        })
+
     if postings.count(conn) == 0:
         out.append({"kind": "approve", "text": "No postings yet — run the first scan",
                     "href": "/settings", "note": "python3 scripts/scan.py"})
         return out
 
-    out.append({
-        "kind": "approve",
-        "text": f"{unique} jobs found and waiting to be scored",
-        "href": "/jobs",
-        "note": "Scoring is step 2 — it needs your full CV, especially the WorldQuant detail",
-    })
+    # Dòng này từng viết "waiting to be scored — scoring is step 2" và ở nguyên
+    # đó rất lâu sau khi bước 2 xong. Chữ cứng trên màn hình mà không tính từ dữ
+    # liệu thì nó chỉ đúng vào đúng ngày viết ra.
+    worth = int(conn.execute(
+        "SELECT COUNT(*) FROM posting WHERE kept = 1 AND via_agency = 0"
+        " AND score >= 70 AND realism IN ('likely','possible')").fetchone()[0])
+    strong = int(conn.execute(
+        "SELECT COUNT(*) FROM posting WHERE kept = 1 AND via_agency = 0"
+        " AND realism = 'likely'").fetchone()[0])
+    unscored = int(conn.execute(
+        "SELECT COUNT(*) FROM posting WHERE kept = 1 AND score IS NULL").fetchone()[0])
+
+    if worth:
+        out.append({
+            "kind": "approve",
+            "text": f"{worth} jobs are worth a look — {strong} of them are a real shot",
+            "href": "/jobs?chance=likely",
+            "note": "Direct employers only, scored 70+, and the posting does not rule "
+                    "you out on a PhD or years of experience.",
+        })
+    if unscored:
+        out.append({
+            "kind": "scan",
+            "text": f"{unscored} postings still have no description to judge from",
+            "href": "/jobs?band=none",
+            "note": "The deep-read pass has not reached them. Run "
+                    "python3 scripts/scan.py to fetch the full text.",
+        })
     out.append({
         "kind": "mail",
         "text": "Adzuna GB is off — the biggest UK source",
@@ -233,6 +348,114 @@ def sources(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
+def source_yield(conn: sqlite3.Connection) -> list[dict]:
+    """Mỗi HỌ nguồn tải về bao nhiêu, dùng được bao nhiêu.
+
+    Gộp theo họ chứ không theo từng board: 62 dòng 'greenhouse:xxx' thì không
+    đọc ra điều gì, còn một dòng 'greenhouse 2937 -> 59' thì nói ngay là nguồn
+    này phải tải cả board rồi mới lọc.
+    """
+    rows = conn.execute(
+        "SELECT CASE WHEN instr(source,':')>0"
+        "         THEN substr(source,1,instr(source,':')-1) ELSE source END AS fam,"
+        "       COUNT(*) AS pulled, SUM(kept) AS kept"
+        " FROM posting GROUP BY fam ORDER BY kept DESC, pulled DESC").fetchall()
+    return [{"name": r["fam"], "pulled": r["pulled"], "kept": r["kept"] or 0,
+             "rate": round(100 * (r["kept"] or 0) / r["pulled"], 1) if r["pulled"] else 0.0}
+            for r in rows]
+
+
+def search_settings(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """Bước 1 đang tìm bằng CÁI GÌ — đọc từ hồ sơ và từ code, không gõ tay.
+
+    Chỗ nào code bỏ qua hồ sơ thì phải NÓI RA. Giấu đi thì người dùng chỉnh
+    ô Settings cả buổi mà không hiểu vì sao kết quả không đổi.
+    """
+    from ..core.scheduler import HUMAN_WINDOW, SCAN_EVERY_MIN
+    from ..ingest.web import linkedin as li
+    from ..profile import store as pstore
+
+    answers = pstore.load(conn)
+    titles = [t.strip() for t in (answers.get("job_titles") or "").splitlines() if t.strip()]
+    used = titles[:5]
+    return [
+        ("Quét mỗi", f"{SCAN_EVERY_MIN} phút"),
+        ("Khung giờ Chrome", f"{HUMAN_WINDOW[0]}:00 – {HUMAN_WINDOW[1]}:00"),
+        ("Chức danh tìm", f"{len(used)}/{len(titles)} — <span class=warn-t>code cắt còn 5</span>"
+                          if len(titles) > len(used) else f"{len(used)}"),
+        ("Địa điểm LinkedIn", "London — <span class=warn-t>chuỗi cứng, không đọc hồ sơ</span>"),
+        ("Thị trường đã chọn", ", ".join(answers.get("markets") or []) or "—"),
+        ("Từ khoá kỹ năng", "<span class=warn-t>không dùng để tìm</span>"),
+        ("Số trang mỗi chức danh", "4 × 10 tin"),
+    ]
+
+
+def score_hist(conn: sqlite3.Connection) -> list[tuple[str, int]]:
+    """Phân bố điểm theo dải 10. Cột nào cao thì phần lớn tin nằm ở đó."""
+    got = dict(conn.execute(
+        "SELECT (score / 10) * 10 AS band, COUNT(*) FROM posting"
+        " WHERE kept = 1 AND score IS NOT NULL GROUP BY band").fetchall())
+    return [(f"{low}", got.get(low, 0)) for low in range(0, 101, 10)]
+
+
+def score_settings(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    from ..core import versions
+    from ..core.derive import stale_count
+    from ..profile import store as pstore
+    stale = stale_count(conn)
+    return [
+        ("Luật lọc", versions.FILTER_RULES),
+        ("Luật chấm", versions.SCORE_RULES),
+        ("Phiên bản hồ sơ", str(pstore.latest_version_id(conn) or 0)),
+        ("Tin cần tính lại", f"{stale}" if not stale
+                             else f"<span class=warn-t>{stale}</span>"),
+        ("Ngưỡng 'đáng nộp'", "điểm ≥ 70 và cơ hội ≠ unlikely"),
+    ]
+
+
+def score_stats(conn: sqlite3.Connection) -> dict:
+    one = lambda sql: int(conn.execute(sql).fetchone()[0])
+    return {
+        "kept": one("SELECT COUNT(*) FROM posting WHERE kept=1"),
+        "scored": one("SELECT COUNT(*) FROM posting WHERE kept=1 AND score IS NOT NULL"),
+        "blind": one("SELECT COUNT(*) FROM posting WHERE kept=1 AND score_conf='none'"),
+        "strong": one("SELECT COUNT(*) FROM posting WHERE kept=1 AND score>=70"),
+        "worth": one("SELECT COUNT(*) FROM posting WHERE kept=1 AND score>=70"
+                     " AND realism!='unlikely'"),
+    }
+
+
+def project_stats(conn: sqlite3.Connection, clusters: list, mine: list) -> dict:
+    """Bước 4 đang ở đâu: bao nhiêu nhóm, bao nhiêu nhóm CV chưa trả lời được."""
+    real = [c for c in clusters if c.key != "other"]
+    return {
+        "clusters": len(real),
+        "gaps": sum(1 for c in real if c.gap),
+        "covered": sum(1 for c in real if not c.gap),
+        "mine": len(mine),
+        "jobs": sum(len(c.jobs) for c in real),
+        "waiting": llm_waiting(conn),
+    }
+
+
+def project_settings(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    from ..core import llm
+    from ..projects.cluster import MAX_CLUSTERS, MIN_JOBS, TOO_COMMON
+    engine = llm.engine_name()
+    return [
+        ("Máy LLM", engine if engine != "none"
+                    else "<span class=warn-t>chưa bật</span>"),
+        ("Tin tối thiểu mỗi nhóm", str(MIN_JOBS)),
+        ("Số nhóm tối đa", str(MAX_CLUSTERS)),
+        ("Kỹ năng quá phổ biến", f"có mặt ở >{int(TOO_COMMON * 100)}% tin thì không làm khoá nhóm"),
+        ("Nghiên cứu công ty", "đọc trang tuyển dụng qua Chrome, có cache"),
+    ]
+
+
+def cluster_sizes(conn: sqlite3.Connection, clusters: list) -> list[tuple[str, int]]:
+    return [(c.key[:12], len(c.jobs)) for c in clusters if c.key != "other"]
+
+
 def chrome_status() -> dict:
     from ..browser import chrome as ch
     from ..core.scheduler import HUMAN_WINDOW
@@ -255,3 +478,34 @@ def company_stats(conn: sqlite3.Connection) -> dict:
 
 def last_runs(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in postings.last_runs(conn)]
+
+
+def health(conn: sqlite3.Connection) -> dict:
+    """Sức khoẻ hệ thống — thứ người dùng phải thấy, không phải chỉ nằm trong DB.
+
+    `stale` > 0 nghĩa là phán quyết hiện tại sinh ra từ hồ sơ hoặc luật CŨ.
+    Không hiện ra thì người dùng đọc số liệu đã lỗi thời mà tưởng là mới.
+    """
+    from ..core import versions
+    from ..core.derive import stale_count
+
+    runs = postings.last_runs(conn)
+    broken = [dict(r) for r in runs if not r["ok"]]
+    flaky = [dict(r) for r in runs
+             if r["ok"] and r["attempted"] and r["failed"]]
+    return {
+        "stale": stale_count(conn),
+        "unjudged": postings.unjudged(conn),
+        "filter_rules": versions.FILTER_RULES,
+        "score_rules": versions.SCORE_RULES,
+        "broken": broken,
+        "flaky": flaky,
+    }
+
+
+def llm_waiting(conn: sqlite3.Connection) -> int:
+    """Yêu cầu LLM đang chờ Claude trả lời trong phiên."""
+    from ..core import llm
+    llm.ensure_table(conn)
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM llm_request WHERE answer = ''").fetchone()[0])

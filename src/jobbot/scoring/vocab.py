@@ -129,3 +129,39 @@ def alias_map() -> dict[str, str]:
 
 
 ALIASES = alias_map()
+
+
+# --------------------------------------------------------------- khớp alias
+# Khớp CHUỖI CON là sai, và sai to: 'excel' nằm trong 'excellent', nên 70 tin
+# đang giữ được gắn kỹ năng Excel chỉ vì JD viết "excellent communication" —
+# và nhóm project lớn nhất trên màn hình /projects mọc lên từ đó. Cùng kiểu:
+# 'scala' trong 'scalable' (46 tin), 'rust' trong 'trust' (35), 'valuation'
+# trong 'evaluation' (10).
+#
+# Nhưng cấm hẳn chuỗi con thì mất phần lớn cái ĐÚNG, vì tiếng Anh chia đuôi:
+# backtesting, derivatives, pipelines, containerisation, portfolios. Nên luật
+# là: phải đúng RANH GIỚI TỪ ở đầu, và chỉ cho phép một cái ĐUÔI CHIA ở cuối.
+_TAIL = r"(?:s|es|ed|ing|ings|ation|ations|isation|isations|ization|izations)?"
+
+
+def _alias_pattern(alias: str) -> re.Pattern:
+    return re.compile(r"\b" + re.escape(alias) + _TAIL + r"\b")
+
+
+_ALIAS_RE: dict[str, tuple[re.Pattern, str]] = {
+    alias: (_alias_pattern(alias), canonical)
+    for alias, canonical in ALIASES.items() if alias.strip()
+}
+
+
+def alias_hits(normed: str) -> list[str]:
+    """Tên chuẩn của mọi kỹ năng có mặt trong CHỮ ĐÃ CHUẨN HOÁ, giữ thứ tự.
+
+    Đầu vào phải đi qua ingest.base.norm trước — luật ranh giới từ dựa vào
+    việc dấu câu đã thành khoảng trắng.
+    """
+    found: list[str] = []
+    for pattern, canonical in _ALIAS_RE.values():
+        if canonical not in found and pattern.search(normed):
+            found.append(canonical)
+    return found

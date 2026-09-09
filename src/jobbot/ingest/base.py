@@ -80,7 +80,7 @@ _GLUED = re.compile(r"(group|holdings?|capital|partners?|global|international|"
 def norm_company(name: str) -> str:
     """Bỏ đuôi pháp lý và đuôi mô tả. 'Monzo Bank Ltd' -> 'monzo bank'.
 
-    Cắt cả đuôi VIẾT LIỀN: arbeitnow trả về "ocadogroup" còn Greenhouse trả về
+    Cắt cả đuôi VIẾT LIỀN: Greenhouse trả slug "ocadogroup" còn tin thì ghi
     "Ocado Group" — không cắt thì hai bản của cùng một việc không gộp được.
     """
     out = _WS.sub(" ", _SUFFIX.sub(" ", norm(name))).strip()

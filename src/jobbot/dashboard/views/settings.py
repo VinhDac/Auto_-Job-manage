@@ -16,8 +16,17 @@ def _srow(label: str, value: str, note: str = "") -> str:
             + (f"<span class=muted>{esc(note)}</span>" if note else "") + "</div>")
 
 
+def _rate(run: dict) -> str:
+    """Tỉ lệ đọc hỏng. Không đo được thì nói thẳng là không đo được."""
+    if not run.get("attempted"):
+        return "<span class=muted>not measured</span>"
+    bad = run["failed"] * 100 // run["attempted"]
+    kind = "warn" if bad > 30 else ("" if bad else "ok")
+    return badge(f"{run['failed']}/{run['attempted']} failed ({bad}%)", kind)
+
+
 def render(sources: list[dict], chrome: dict, companies: dict,
-           runs: list[dict], pending: int) -> str:
+           runs: list[dict], health: dict) -> str:
     rows = "".join(
         f"<tr><td>{esc(s['name'])}</td>"
         f"<td>{badge(s['kind'], 'ok' if s['kind'] == 'api' else '')}</td>"
@@ -72,11 +81,36 @@ def render(sources: list[dict], chrome: dict, companies: dict,
         f"<tr><td>{esc(r['source'])}</td>"
         f"<td>{badge('ok', 'ok') if r['ok'] else badge('failed', 'warn')}</td>"
         f"<td>{r['fetched']:,}</td><td>{r['new_rows']:,}</td>"
-        f"<td class=muted>{esc(r['error'][:70])}</td></tr>" for r in runs)
+        f"<td>{_rate(r)}</td>"
+        f"<td class=muted>{esc(r['error'][:60])}</td></tr>" for r in runs)
+
+    warn = ""
+    if health["stale"]:
+        warn = card(
+            f"<b>{health['stale']:,} postings need re-judging</b>"
+            "<div class=muted>Your profile or the rules changed since these were last "
+            "judged, so what you are looking at was decided by an older version. "
+            "The next scan fixes it, or run <code>python3 scripts/rebuild.py</code>."
+            "</div>", "notice")
+    if health["unjudged"]:
+        warn += card(f"<b>{health['unjudged']:,} postings never judged</b>"
+                     "<div class=muted>Pulled in but the filter has not run over them "
+                     "yet — they are hidden until it does.</div>", "notice")
+
+    versions_card = card(
+        "<b>Rule versions</b>"
+        + _srow("Filter rules", f"<code>{esc(health['filter_rules'])}</code>",
+                "title matching, seniority, location")
+        + _srow("Scoring rules", f"<code>{esc(health['score_rules'])}</code>",
+                "vocabulary, requirement extraction, weights")
+        + "<div class=note>Every verdict records which version produced it. Change a "
+          "rule and the affected postings are re-judged automatically — nothing goes "
+          "quietly stale.</div>")
 
     return page(
         "Settings",
         h1("Settings", "What the system is doing, and what it is not allowed to do.")
+        + warn
         + "<h2>Chrome</h2>" + chrome_card
         + "<h2>Boundaries</h2>" + limits
         + "<h2>Companies</h2>" + comp
@@ -85,5 +119,6 @@ def render(sources: list[dict], chrome: dict, companies: dict,
           "<th>Last run</th><th>Found</th><th></th></tr>" + rows + "</table>"
         + "<h2>Last run per source</h2>"
         + "<table class=data><tr><th>Source</th><th></th><th>Seen</th>"
-          "<th>New</th><th>Error</th></tr>" + last + "</table>",
-        active="/settings", pending=pending, status="Running")
+          "<th>New</th><th>Deep read</th><th>Error</th></tr>" + last + "</table>"
+        + "<h2>Rules</h2>" + versions_card,
+        active="/settings", status="Running")

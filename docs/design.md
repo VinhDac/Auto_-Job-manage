@@ -54,11 +54,21 @@ Người dùng ở **UK**, nhắm **UK + global**. Đã kiểm chứng thật:
 
 | Nguồn | Cần key | Ghi chú |
 |---|---|---|
-| `arbeitnow.com` | Không | **59/175 tin trang đầu là UK.** Phủ EU tốt. Dùng ngay được. |
 | `boards-api.greenhouse.io` | Không | Theo từng công ty. Đã thử: `monzo`, `wise` OK. |
 | `api.lever.co` | Không | Theo từng công ty. |
 | `api.ashbyhq.com` | Không | Theo từng công ty. |
-| `remotive.com` | Không | Remote toàn cầu. |
+
+**Đã bỏ** (07/09/2026, sau khi đo trên dữ liệu thật):
+
+| Nguồn | Tải về | Dùng được | Vì sao bỏ |
+|---|---|---|---|
+| `arbeitnow.com` | 2.506 | **2** | Job board châu Âu — sai thị trường. |
+| `remotive.com` | 18 | **0** | Remote toàn cầu — sai thị trường. |
+| `efinancialcareers` | 66 | 28 | 67% tin là môi giới (LinkedIn 24%). |
+
+Tỉ lệ thấp KHÔNG tự nó là lý do bỏ: greenhouse cũng chỉ 2% vì phải tải trọn
+board rồi mới lọc, nhưng đó là chủ việc TRỰC TIẾP và chỉ tốn HTTP. Bỏ hai
+nguồn trên là vì chúng phục vụ một thị trường khác hẳn.
 | `api.adzuna.com/.../gb/` | **Có** (miễn phí) | Nhà UK, phủ thị trường UK rộng nhất. Cần `app_id` + `app_key`. |
 | `reed.co.uk/api` | **Có** (miễn phí) | Board lớn ở UK. Trả 401 nếu thiếu key. |
 | `jobs.service.gov.uk` | — | Board của chính phủ UK (findAJob đã chuyển sang đây). |

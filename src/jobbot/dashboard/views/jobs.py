@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from html import escape as esc
 
-from ..filters import BAND, DAYS, LOC, PER_PAGE, SHOW, SORT, VIA, JobFilter
+from ..filters import (BAND, CHANCE, DAYS, LOC, PER_PAGE, SHOW, SORT, VIA,
+                       JobFilter)
 from ..layout import badge, card, empty, h1, page, score_bar
 
 STATE_BADGE = {
@@ -37,6 +38,11 @@ def _ticks(label: str, name: str, options, flt) -> str:
             f"<div class=ticklist>{items}</div></div>")
 
 
+CHANCE_BADGE = {"likely": ("worth applying", "ok"),
+                "possible": ("maybe", ""),
+                "unlikely": ("long shot", "warn"),
+                "unknown": ("can't tell", "muted")}
+
 CONF_NOTE = {"high": "", "medium": "few requirements found",
              "low": "requirements guessed from prose", "none": ""}
 
@@ -52,25 +58,32 @@ def _score(job: dict) -> str:
 
 def _row(job: dict) -> str:
     label, kind = STATE_BADGE.get(job["state"], (job["state"], ""))
+    chance = job.get("realism") or ""
+    chip = badge(*CHANCE_BADGE[chance]) if chance in CHANCE_BADGE else ""
     sources = "".join(badge(s, "src") for s in job["sources"])
     merged = job.get("merged", len(job["sources"]))
     dup = (f"<span class=muted>{merged} postings merged</span>" if merged > 1 else "")
+    reason = (f"<div class=chancewhy>{esc(job['realism_why'])}</div>"
+              if chance in ("unlikely", "likely") and job.get("realism_why") else "")
     why = (f"<div class=dropwhy>Filtered out — {esc(job['drop_reason'])}</div>"
            if job.get("drop_reason") else "")
     agency = badge("via agency", "warn") if job.get("via_agency") else ""
     age = job.get("age_days")
     stale = (badge(f"{age}d old", "warn") if age is not None and age >= 45
              else badge("no date", "muted") if age is None else "")
-    closes = f"<span class=warn-t>closes {esc(job['closes'])}</span>" if job["closes"] else ""
+    # 'closes' từng là ô rỗng cứng trong live.jobs — hạn nộp tính ra được thì
+    # nằm ở khoá 'deadline' mà không view nào đọc, nên chưa bao giờ hiện lên.
+    closes = (f"<span class=warn-t>closes {esc(job['deadline'])}</span>"
+              if job.get("deadline") else "")
     return card(
         f"<a class=jobhead href='/jobs/{esc(job['id'])}'>"
         f"<span class=jt>{esc(job['title'])}</span>"
         f"<span class=jc>{esc(job['company'])} · {esc(job['location'])}</span></a>"
-        f"<div class=jmeta>{_score(job)}{badge(label, kind)}{agency}{stale}"
+        f"<div class=jmeta>{_score(job)}{chip}{badge(label, kind)}{agency}{stale}"
         f"<span class=spacer></span>"
         f"<span class=muted>{esc(job['salary'])}</span></div>"
         f"<div class=jfoot>{sources}{dup}<span class=spacer></span>"
-        f"<span class=muted>{esc(job['posted'])}</span>{closes}</div>{why}",
+        f"<span class=muted>{esc(job['posted'])}</span>{closes}</div>{reason}{why}",
         "job" + (" out" if job.get("drop_reason") else ""),
     )
 
@@ -94,8 +107,7 @@ def _pager(flt: JobFilter, total: int) -> str:
             f"<span class=muted>Page {flt.page} of {pages:,}</span>{nxt}</div>")
 
 
-def render(jobs: list[dict], flt: JobFilter, counts: dict, facets: dict,
-           pending: int) -> str:
+def render(jobs: list[dict], flt: JobFilter, counts: dict, facets: dict) -> str:
     total = counts.get(flt.show, len(jobs))
     body = "".join(_row(j) for j in jobs) if jobs else empty(
         "Nothing matches these filters. Try widening them, or switch Show to "
@@ -114,6 +126,7 @@ def render(jobs: list[dict], flt: JobFilter, counts: dict, facets: dict,
         + _chips("Where", "loc", LOC, flt.loc, flt)
         + _chips("When", "days", DAYS, flt.days, flt)
         + _chips("Score", "band", BAND, flt.band, flt)
+        + _chips("Chance", "chance", CHANCE, flt.chance, flt)
         + _chips("Posted by", "via", VIA, flt.via, flt)
         + _chips("Sort", "sort", SORT, flt.sort, flt)
         + "<div class=tickwrap>"
@@ -133,7 +146,7 @@ def render(jobs: list[dict], flt: JobFilter, counts: dict, facets: dict,
         + panel + active
         + f"<div class=resultcount>{_range(flt, len(jobs), total)}</div>"
         + body + _pager(flt, total),
-        active="/jobs", pending=pending, status="Running",
+        active="/jobs", status="Running",
     )
 
 
@@ -171,7 +184,7 @@ def _breakdown(job: dict) -> str:
     return card(f"<div class=bd>{rows}</div>{tail}", "bdcard")
 
 
-def render_detail(job: dict, pending: int) -> str:
+def render_detail(job: dict) -> str:
     reqs = "".join(
         f"<li class='{'met' if r['met'] else ('unk' if r['met'] is None else 'miss')}'>"
         f"<b>{esc(r['text'])}</b>"
@@ -205,5 +218,5 @@ def render_detail(job: dict, pending: int) -> str:
         + "<div class=actbar><button class=primary>Queue for approval</button>"
           "<button class=ghostbtn>Reject…</button>"
           "<span class=muted>Nothing is sent until you approve it in the queue.</span></div>",
-        active="/jobs", pending=pending, status="Running",
+        active="/jobs", status="Running",
     )

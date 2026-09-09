@@ -90,5 +90,54 @@ with tempfile.TemporaryDirectory() as tmp:
     check("trang 2 rỗng khi chỉ có 2 tin", len(live.jobs(conn, Q(page="2"))) == 0)
     conn.close()
 
+print("\n[phân trang phải LỢP KÍN số đếm — không thiếu, không lặp]")
+# LỖI THẬT: jobs() cắt trang theo DÒNG rồi mới gộp trùng bằng Python, còn
+# job_counts() đếm theo NHÓM. Trên máy thật đầu trang ghi 139 việc, đi hết
+# các trang đếm được 144 thẻ: 5 nhóm bị cắt đôi qua ranh giới trang.
+with tempfile.TemporaryDirectory() as tmp:
+    import jobbot.dashboard.filters as filters_mod
+    from jobbot.core.derive import derive
+    from jobbot.profile import store
+
+    conn = db.connect(Path(tmp) / "p.db")
+    store.save(conn, {"job_titles": "Data Scientist", "seniority": ["grad", "junior"],
+                      "markets": ["uk_onsite"], "work_auth": "citizen"}, "t")
+    JD = ("Requirements:\n· Python and pandas\n· SQL\n" + "detail " * 80)
+    items = []
+    for n in range(11):
+        # cứ hai tin lại có một tin TRÙNG (cùng công ty + chức danh) -> một nhóm
+        # hai dòng, đúng chỗ phân trang hay cắt đôi.
+        items.append(Posting(source_id=f"a{n}", title="Data Scientist",
+                             company=f"Co{n}", location="London",
+                             url=f"https://x/a{n}", description=JD))
+        if n % 2 == 0:
+            items.append(Posting(source_id=f"b{n}", title="Data Scientist",
+                                 company=f"Co{n}", location="London",
+                                 url=f"https://y/b{n}", description=JD))
+    postings.save_batch(conn, "greenhouse:t", items)
+    derive(conn)
+
+    real_per = filters_mod.PER_PAGE
+    filters_mod.PER_PAGE = 3                    # trang nhỏ -> nhiều ranh giới
+    try:
+        total = live.job_counts(conn, Q())["matched"]
+        seen, sizes = [], []
+        for page in range(1, 40):
+            got = live.jobs(conn, Q(page=page))
+            if not got:
+                break
+            sizes.append(len(got))
+            seen += [j["id"] for j in got]
+        check("đi hết các trang ra ĐÚNG số đếm trên đầu trang", len(seen) == total)
+        check("không thẻ nào hiện hai lần", len(seen) == len(set(seen)))
+        check("mọi trang đều đầy, trừ trang cuối",
+              all(n == 3 for n in sizes[:-1]) and 0 < sizes[-1] <= 3)
+        check("tin trùng được gộp, không đếm hai lần", total < len(items))
+        merged = [j for j in live.jobs(conn, Q()) if j["merged"] > 1]
+        check("nhóm gộp vẫn giữ số dòng của nó", bool(merged))
+    finally:
+        filters_mod.PER_PAGE = real_per
+    conn.close()
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

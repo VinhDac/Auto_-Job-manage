@@ -96,10 +96,14 @@ def save_batch(conn: sqlite3.Connection, source: str,
                     "  AND length(COALESCE(body,'')) < 200",
                     (item.raw_body, source, item.source_id))
             if item.description:        # và mô tả đã bóc, nếu đang thiếu
+                # Mô tả về muộn thì phán quyết cũ được sinh ra từ CHỖ TRỐNG.
+                # Xoá dấu phiên bản để derive() nhận ra tin này đã cũ và phán
+                # lại — không xoá thì tin đứng nguyên score=NULL vĩnh viễn.
                 conn.execute(
                     "UPDATE posting SET description = ?, salary = COALESCE(NULLIF(?,''), salary),"
                     " posted_at = COALESCE(NULLIF(?,''), posted_at),"
-                    " posted_ts = CASE WHEN ? > 0 THEN ? ELSE posted_ts END"
+                    " posted_ts = CASE WHEN ? > 0 THEN ? ELSE posted_ts END,"
+                    " judged_rules = '', scored_rules = ''"
                     " WHERE raw_id = (SELECT id FROM raw_posting WHERE source=? AND source_id=?)"
                     "   AND length(COALESCE(description,'')) < 200",
                     (item.description, item.salary, item.posted_at,
@@ -173,5 +177,5 @@ def source_stats(conn: sqlite3.Connection) -> list[sqlite3.Row]:
 
 def last_runs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
-        "SELECT source, MAX(started_at) AS at, ok, fetched, new_rows, error"
-        " FROM source_run GROUP BY source ORDER BY source").fetchall()
+        "SELECT source, MAX(started_at) AS at, ok, fetched, new_rows, error,"
+        " attempted, failed FROM source_run GROUP BY source ORDER BY source").fetchall()

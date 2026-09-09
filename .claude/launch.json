@@ -1,0 +1,10 @@
+{
+  "version": "0.0.1",
+  "autoPort": true,
+  "configurations": [
+    { "name": "jobbot", "runtimeExecutable": "python3",
+      "runtimeArgs": ["-c",
+        "import os,sys;sys.path.insert(0,'src');from jobbot.dashboard.server import serve;from jobbot.core import journal;journal.log.open();srv,url=serve(int(os.environ.get('PORT','8790')));print('ready',url,flush=True);srv.serve_forever()"],
+      "port": 8790 }
+  ]
+}

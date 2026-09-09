@@ -86,6 +86,38 @@ def _bullets(lines: list[str]) -> list[str]:
     return out
 
 
+MIN_RUN = 3              # dưới 3 dòng liền nhau thì chưa gọi là danh sách
+
+
+def _runs(lines: list[str]) -> list[str]:
+    """Danh sách KHÔNG có dấu gạch đầu dòng — nhận diện bằng chỗ xuống dòng.
+
+    Vì sao cần: LinkedIn trả về JD dưới dạng chữ đã dựng sẵn, <li> mất sạch dấu
+    '·'. Bốn mươi sáu tin đang giữ có nguyên một danh sách yêu cầu đọc được mà
+    bộ tách trả về rỗng, chỉ vì thiếu một ký tự.
+
+    Dấu hiệu phân biệt: khi HTML được bóc ra chữ, '</p>' thành hai dòng trống
+    còn '<li>' chỉ thành một dòng — nên đoạn văn xuôi đứng LẺ giữa hai dòng
+    trống, còn mục danh sách đi thành CHUỖI LIỀN. Lấy chuỗi, bỏ đoạn lẻ.
+    """
+    out: list[str] = []
+    run: list[str] = []
+
+    def flush():
+        if len(run) >= MIN_RUN:
+            out.extend(run)
+        run.clear()
+
+    for line in lines:
+        item = re.sub(r"\s+", " ", line).strip(" .;")
+        if 20 < len(item) < 400 and not BULLET.match(line):
+            run.append(item)
+        else:
+            flush()
+    flush()
+    return out
+
+
 def requirements(text: str) -> list[Requirement]:
     parts = sections(text)
     out: list[Requirement] = []
@@ -109,6 +141,18 @@ def requirements(text: str) -> list[Requirement]:
                 continue
             for item in _bullets(lines):
                 out.append(Requirement(item, not NICE_WORDS.search(item)))
+
+    if not out:                            # không có dấu gạch nào -> tìm danh sách
+        for kind, lines in parts:          #    nhận ra bằng xuống dòng (LinkedIn)
+            if kind == "stop":
+                continue
+            for item in _runs(lines):
+                # Danh sách phúc lợi cũng là danh sách. Chấm điểm dựa trên
+                # "competitive salary" thì con số ra là vô nghĩa.
+                if BENEFIT_WORDS.search(item):
+                    continue
+                must = kind != "nice" and not NICE_WORDS.search(item)
+                out.append(Requirement(item, must, "list"))
 
     if not out:                            # vẫn không có -> JD viết bằng văn xuôi
         out = _from_prose(parts)
@@ -150,4 +194,8 @@ def confidence(reqs: list[Requirement]) -> str:
         return "none"
     if any(r.source == "prose" for r in reqs):
         return "low"
+    if any(r.source == "list" for r in reqs):
+        # Đọc được cả danh sách nhưng ranh giới do xuống dòng đoán ra, không do
+        # dấu gạch nói thẳng — tin vừa phải, đừng tin như gạch đầu dòng.
+        return "medium"
     return "high" if len(reqs) >= 4 else "medium"

@@ -28,8 +28,10 @@ from ..ingest import filter as jobfilter
 from ..ingest.base import Posting
 from ..ingest.web.agency import judge as judge_agency
 from ..profile import store
+from ..scoring.realism import assess, find_deadline
 from ..scoring.score import score_job
 from . import versions
+from .journal import SCORE, log as jlog
 
 
 def _row_to_posting(row: sqlite3.Row) -> Posting:
@@ -39,10 +41,17 @@ def _row_to_posting(row: sqlite3.Row) -> Posting:
 
 
 def stale_count(conn: sqlite3.Connection) -> int:
+    """Bao nhiêu tin đang mang phán quyết cũ — LỌC hay CHẤM đều tính.
+
+    Chỉ đếm phần lọc là nói dối: đổi SCORE_RULES thì mọi điểm đều cũ mà màn
+    hình vẫn báo "không có gì cần tính lại".
+    """
     pv = store.latest_version_id(conn) or 0
     return int(conn.execute(
-        "SELECT COUNT(*) FROM posting WHERE judged_profile != ? OR judged_rules != ?",
-        (pv, versions.FILTER_RULES)).fetchone()[0])
+        "SELECT COUNT(*) FROM posting"
+        " WHERE judged_profile != ? OR judged_rules != ?"
+        "    OR (kept = 1 AND (scored_rules != ? OR scored_profile != ?))",
+        (pv, versions.FILTER_RULES, versions.SCORE_RULES, pv)).fetchone()[0])
 
 
 def derive(conn: sqlite3.Connection, force: bool = False,
@@ -62,7 +71,9 @@ def derive(conn: sqlite3.Connection, force: bool = False,
     # Nên chỉ cần KHÔNG commit ở giữa là cả khối này là một giao dịch.
     try:
         judged = kept = agencies = 0
-        for row in rows:
+        for index, row in enumerate(rows, 1):
+            if index % 25 == 0 or index == len(rows):
+                jlog.progress(SCORE, "lọc tin", index, len(rows))
             item = _row_to_posting(row)
             keep, reason = jobfilter.judge(item, answers)
             is_agency, _ = judge_agency(row["company"], row["description"] or "")
@@ -71,26 +82,50 @@ def derive(conn: sqlite3.Connection, force: bool = False,
                 " judged_profile=?, judged_rules=? WHERE id=?",
                 (int(keep), "" if keep else reason, int(is_agency),
                  profile_version, versions.FILTER_RULES, row["id"]))
+            if not keep:
+                # Tin bị loại thì XOÁ điểm cũ. Không xoá thì nó giữ một con số
+                # sinh ra từ luật cũ, không có phiên bản, và không bao giờ được
+                # tính lại vì vòng chấm chỉ chạy trên tin đang giữ.
+                # KHÔNG lọc thêm "score IS NOT NULL": tin chấm ra độ tin 'none'
+                # có score=NULL nhưng vẫn còn realism và scored_rules cũ bám lại.
+                conn.execute(
+                    "UPDATE posting SET score=NULL, score_conf='', score_json='',"
+                    " scored_rules='', scored_profile=0, realism='', realism_why='',"
+                    " deadline='', deadline_ts=0 WHERE id=?", (row["id"],))
             judged += 1
             kept += int(keep)
             agencies += int(is_agency)
 
+        jlog.progress(SCORE, "gộp tin trùng")
         n_rows, n_groups = group.regroup(conn, commit=False)
 
-        # chấm điểm: tin đang giữ mà luật chấm đã đổi, hoặc chưa từng chấm
+        # Chấm điểm phụ thuộc CẢ luật chấm LẪN hồ sơ (score_job đọc answers),
+        # nên cũ theo phía nào cũng phải chấm lại. scored_rules='' != SCORE_RULES
+        # nên tin chưa từng chấm đã nằm trong điều kiện này rồi.
+        # force cũng phải xuyên qua đây — nếu không, tin từng chấm lúc mô tả còn
+        # rỗng sẽ đứng nguyên score=NULL kể cả khi gọi derive(force=True).
         to_score = conn.execute(
             "SELECT id, title, description FROM posting WHERE kept = 1"
-            " AND (scored_rules != ? OR scored_rules = '')",
-            (versions.SCORE_RULES,)).fetchall()
+            + ("" if force else
+               " AND (scored_rules != ? OR scored_profile != ?)"),
+            () if force else (versions.SCORE_RULES, profile_version)).fetchall()
         scored = 0
-        for row in to_score:
-            result = score_job(row["title"], row["description"] or "", answers)
+        for index, row in enumerate(to_score, 1):
+            if index % 25 == 0 or index == len(to_score):
+                jlog.progress(SCORE, "chấm điểm", index, len(to_score))
+            text = row["description"] or ""
+            result = score_job(row["title"], text, answers)
+            # "khớp" và "có cửa" là hai câu hỏi khác nhau — tính riêng
+            chance = assess(row["title"], text, result, answers)
+            deadline, deadline_ts = find_deadline(text)
             conn.execute(
-                "UPDATE posting SET score=?, score_conf=?, score_json=?, scored_rules=?"
+                "UPDATE posting SET score=?, score_conf=?, score_json=?, scored_rules=?,"
+                " scored_profile=?, realism=?, realism_why=?, deadline=?, deadline_ts=?"
                 " WHERE id=?",
                 (result["score"], result["confidence"],
-                 json.dumps(result, ensure_ascii=False),
-                 versions.SCORE_RULES, row["id"]))
+                 json.dumps(result, ensure_ascii=False), versions.SCORE_RULES,
+                 profile_version, chance["band"], chance["why"],
+                 deadline, deadline_ts, row["id"]))
             scored += 1
         conn.commit()
     except Exception:
@@ -105,6 +140,10 @@ def derive(conn: sqlite3.Connection, force: bool = False,
     kept_total = totals["n"] or 0
     agency_total = totals["ag"] or 0
 
+    jlog.done(SCORE)
+    if judged or scored:
+        jlog.ok(SCORE, f"phán lại {judged} · chấm {scored} · đang giữ {kept_total}"
+                       f" · {n_groups} việc duy nhất")
     log(f"  suy diễn: phán lại {judged} · đang giữ {kept_total} "
         f"({agency_total} môi giới) · {n_groups} việc duy nhất · chấm {scored}")
     return {"judged": judged, "kept": kept_total, "agencies": agency_total,

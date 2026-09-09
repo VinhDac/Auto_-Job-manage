@@ -109,5 +109,108 @@ blank = score_job("Analyst", "We are a great company. Join us.", PROFILE)
 check("JD không có yêu cầu -> KHÔNG bịa điểm", blank["score"] is None)
 check("và nói rõ vì sao", "Could not read" in blank["reason"])
 
+print("\n[hồ sơ THIẾU ô cũng không được làm sập vòng chấm]")
+# LỖI THẬT: "".splitlines() là [] chứ không phải [""], nên judge_one lấy [0]
+# và ném IndexError. Nó nổ GIỮA giao dịch của derive(), cuộn lại cả lần quét —
+# một hồ sơ chưa điền học vấn là cả đường ống chết câm.
+_DEGREE_JD = ("Requirements:\n· A degree in a quantitative discipline\n"
+              "· Strong Python\n· SQL\n")
+for _missing in ["education", "skills_strong", "certifications", "years_real",
+                 "seniority", "job_titles"]:
+    _thin = {k: v for k, v in PROFILE.items() if k != _missing}
+    try:
+        _out = score_job("Data Scientist", _DEGREE_JD, _thin)
+        check(f"thiếu {_missing!r} vẫn chấm được", _out["score"] is not None)
+    except Exception as _exc:                        # noqa: BLE001
+        check(f"thiếu {_missing!r} vẫn chấm được", False)
+        print(f"       {type(_exc).__name__}: {_exc}")
+
+check("hồ sơ RỖNG hoàn toàn cũng không sập",
+      score_job("Data Scientist", _DEGREE_JD, {}) is not None)
+_empty = score_job("Data Scientist", _DEGREE_JD, {"education": ""})
+_edu = [r for r in _empty["requirements"] if "degree" in r["text"].lower()]
+check("và nói thẳng là hồ sơ chưa có học vấn",
+      bool(_edu) and "nothing on your profile" in _edu[0]["evidence"])
+
+print("\n[khớp kỹ năng theo TỪ, không theo chuỗi con]")
+# LỖI THẬT, ảnh hưởng lớn nhất trong cả đợt soát: 'excel' nằm trong
+# 'excellent', nên 70/204 tin đang giữ được gắn kỹ năng Excel chỉ vì JD viết
+# "excellent communication" — và nhóm project LỚN NHẤT trên /projects mọc lên
+# từ cái bóng đó, tức là cả bước sinh project đang nhắm sai.
+from jobbot.scoring.vocab import alias_hits
+from jobbot.ingest.base import norm as _norm
+_hits = lambda t: alias_hits(_norm(t))
+
+for _text, _bad in [("Excellent communication skills", "excel"),
+                    ("highly scalable systems", "scala"),
+                    ("we build trust with clients", "rust"),
+                    ("evaluation of trading models", "asset pricing"),
+                    ("javascript front end", "java")]:
+    check(f"{_text[:34]!r} KHÔNG ra {_bad!r}", _bad not in _hits(_text))
+
+for _text, _want in [("Excel and VBA", "excel"),
+                     ("Rust and C++", "rust"),
+                     ("Scala on the JVM", "scala")]:
+    check(f"{_text!r} vẫn ra {_want!r}", _want in _hits(_text))
+
+# Cấm hẳn chuỗi con thì mất phần lớn cái ĐÚNG — tiếng Anh chia đuôi.
+for _text, _want in [("backtesting engines", "backtesting"),
+                     ("derivatives pricing", "derivatives"),
+                     ("building data pipelines", "data pipeline"),
+                     ("containerisation with docker", "docker"),
+                     ("managing portfolios", "portfolio"),
+                     ("running simulations", "backtesting")]:
+    check(f"đuôi chia vẫn khớp: {_text!r}", _want in _hits(_text))
+
+# Hai tầng phải hiểu chữ GIỐNG NHAU — trước đây mỗi bên giữ một bản sao luật.
+from jobbot.cv.build import skills_in as _skills_in
+_probe = "Excellent communication, Excel, backtesting and scalable pipelines"
+check("cv.skills_in và scoring dùng chung một luật",
+      _skills_in(_probe) == set(_hits(_probe)))
+
+print("\n[danh sách KHÔNG có dấu gạch đầu dòng — LinkedIn]")
+# Lỗi thật: LinkedIn trả JD qua innerText, <li> mất sạch dấu '·'. Bộ tách nhận
+# diện danh sách BẰNG dấu đó nên trả về rỗng, và 46/204 tin đang giữ — PIMCO,
+# L&G, Smarkets — bị báo "không đọc được yêu cầu" dù có nguyên danh sách.
+LINKEDIN = """Data Analyst
+
+Nando's is on a journey to Create Lasting Happiness across the communities we work in.
+
+What you'll bring
+
+Writing complex SQL to query, transform and model data across our cloud platform
+Building and maintaining data models in Dataform or a similar transformation tool
+Building reports and dashboards in Looker or a similar BI tool for the business
+Using Git as standard practice - branching, pull requests and code review
+Applying relevant statistical methods to support analysis
+
+Benefits
+
+Competitive salary and non-contributory pension
+25 days annual leave plus bank holidays
+"""
+reqs = extract.requirements(LINKEDIN)
+check("đọc được danh sách dù không có dấu gạch", len(reqs) >= 4)
+check("lấy đúng nguyên văn", any("Dataform" in r.text for r in reqs))
+check("đánh dấu nguồn là 'list', không phải 'bullet'",
+      all(r.source == "list" for r in reqs))
+check("độ tin cậy vừa phải, không phải 'high'",
+      extract.confidence(reqs) == "medium")
+check("KHÔNG nuốt phúc lợi vào làm yêu cầu",
+      not any("pension" in r.text.lower() or "annual leave" in r.text.lower()
+              for r in reqs))
+scored = score_job("Data Analyst", LINKEDIN, PROFILE)
+check("và chấm ra điểm thật", scored["score"] is not None)
+
+# Đoạn văn xuôi đứng lẻ giữa hai dòng trống KHÔNG được coi là mục danh sách
+PROSE_ONLY = """About us
+
+We are a great company with a long history of doing interesting things.
+
+We believe in people and in building software that lasts a long time.
+"""
+check("đoạn văn lẻ không bị coi là danh sách",
+      not [r for r in extract.requirements(PROSE_ONLY) if r.source == "list"])
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

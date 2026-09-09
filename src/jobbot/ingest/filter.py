@@ -52,11 +52,22 @@ def seniority_ok(posting: Posting, accepted: list[str]) -> bool:
     return True
 
 
+def _names_in(text: str, names: set[str]) -> bool:
+    """Tên địa danh khớp theo TỪ, không theo chuỗi con.
+
+    'uk' nằm trong 'ukraine', 'gb' nằm trong 'gbagada' — trên DB thật có 17
+    tin ở Paris, Köln, Bremen lọt qua bộ lọc địa điểm kiểu này. norm() đã đổi
+    dấu câu thành khoảng trắng rồi, nên chỉ cần đệm hai đầu là đủ.
+    """
+    padded = f" {text} "
+    return any(f" {name} " in padded for name in names)
+
+
 def location_ok(posting: Posting, markets: list[str]) -> bool:
     text = norm(f"{posting.location} {posting.company}")
-    if any(w in text for w in UK_WORDS):
+    if _names_in(text, UK_WORDS):
         return True
-    if posting.remote and any(w in text for w in EU_REMOTE_WORDS):
+    if posting.remote and _names_in(text, EU_REMOTE_WORDS):
         return True
     return False
 

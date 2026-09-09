@@ -27,6 +27,9 @@ BAND = [("", "Any score"), ("75", "75+"), ("60", "60+"), ("none", "Not scorable"
 # về mặc định, và người dùng không có cách nào bảo "cho tôi xem cả hai".
 VIA = [("direct", "Direct employers"), ("all", "Include agencies"),
        ("agency", "Agencies only")]
+# "Khớp" và "có cửa" là hai câu hỏi khác nhau — lọc riêng
+CHANCE = [("", "Any"), ("likely", "Worth applying"), ("possible", "Maybe"),
+          ("unlikely", "Long shot"), ("unknown", "Can't tell")]
 
 UK_LIKE = ("london", "united kingdom", "england", "scotland", "wales", "manchester",
            "edinburgh", "cambridge", "oxford", "bristol", "leeds", "birmingham")
@@ -47,6 +50,7 @@ class JobFilter:
     days: str = ""
     band: str = ""
     via: str = "direct"
+    chance: str = ""
     sort: str = "score"
     page: int = 1
 
@@ -74,6 +78,7 @@ class JobFilter:
             days=one("days"),
             band=one("band"),
             via=one("via", "direct"),
+            chance=one("chance"),
             sort=one("sort", "score"),
         )
         try:
@@ -87,6 +92,7 @@ class JobFilter:
         found.days = valid(found.days, DAYS)
         found.band = valid(found.band, BAND)
         found.via = found.via if found.via in {v for v, _ in VIA} else "direct"
+        found.chance = valid(found.chance, CHANCE)
         found.sort = valid(found.sort, SORT) or "score"
         return found
 
@@ -131,6 +137,10 @@ class JobFilter:
             clauses.append("via_agency = 1")
         # "all" -> không thêm điều kiện nào
 
+        if self.chance:
+            clauses.append("realism = ?")
+            args.append(self.chance)
+
         if self.band == "none":
             clauses.append("score IS NULL")
         elif self.band:
@@ -147,7 +157,8 @@ class JobFilter:
         return PER_PAGE, (self.page - 1) * PER_PAGE
 
     def order(self) -> str:
-        return {"score": "score DESC NULLS LAST, posted_ts DESC",
+        return {"score": "CASE realism WHEN 'likely' THEN 0 WHEN 'possible' THEN 1"
+                         " WHEN 'unknown' THEN 2 ELSE 3 END, score DESC NULLS LAST",
                 "new": "posted_ts DESC, id DESC", "old": "posted_ts ASC, id ASC",
                 "company": "LOWER(company) ASC, LOWER(title) ASC",
                 "title": "LOWER(title) ASC"}[self.sort]
@@ -158,7 +169,7 @@ class JobFilter:
         state: dict = {"q": self.q, "show": self.show, "source": list(self.source),
                        "company": list(self.company), "loc": self.loc,
                        "days": self.days, "band": self.band, "via": self.via,
-                       "sort": self.sort, "page": self.page}
+                       "chance": self.chance, "sort": self.sort, "page": self.page}
         # đổi bộ lọc thì về trang 1 — trừ khi chính nó đang đổi trang
         if "page" not in changes:
             state["page"] = ""
@@ -206,6 +217,8 @@ class JobFilter:
             out.append((dict(DAYS)[self.days], self.url(days="")))
         if self.band:
             out.append((dict(BAND)[self.band], self.url(band="")))
+        if self.chance:
+            out.append((dict(CHANCE)[self.chance], self.url(chance="")))
         if self.via != "direct":
             out.append((dict(VIA)[self.via], self.url(via="direct")))
         return out

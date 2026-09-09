@@ -11,7 +11,7 @@ from ...profile.import_cv import Proposal
 from ..layout import badge, card, empty, h1, page
 
 
-def render_form(pending: int, error: str = "") -> str:
+def render_form(error: str = "") -> str:
     warn = f"<div class=\'gate block\'>{esc(error)}</div>" if error else ""
     return page(
         "Import CV",
@@ -31,15 +31,15 @@ def render_form(pending: int, error: str = "") -> str:
                "contact, education, certifications and skills, then shows each one for "
                "you to approve. Fields you have already filled in are never overwritten."
                "</div>", "notice"),
-        active="/profile", pending=pending, status="Running")
+        active="/profile", status="Running")
 
 
-def render_review(proposals: list[Proposal], text: str, pending: int) -> str:
+def render_review(proposals: list[Proposal], text: str) -> str:
     if not proposals:
         return page("Import CV",
                     h1("Nothing new found")
                     + empty("Everything this CV mentions is already on your profile."),
-                    active="/profile", pending=pending, status="Running")
+                    active="/profile", status="Running")
 
     rows = "".join(
         f"<label class=\'qrow safe\'>"
@@ -60,4 +60,4 @@ def render_review(proposals: list[Proposal], text: str, pending: int) -> str:
         + f"<div class=qlist>{rows}</div>"
         + "<div class=actbar><button class=primary type=submit>Save selected</button>"
           "<a class=skip href=\'/profile\'>Cancel</a></div></form>",
-        active="/profile", pending=pending, status="Running")
+        active="/profile", status="Running")

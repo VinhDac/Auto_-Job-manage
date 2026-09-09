@@ -105,5 +105,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("nhật ký ghi được", len(postings.recent_audit(conn)) == 1)
     conn.close()
 
+print("\n[địa điểm khớp theo TỪ, không theo chuỗi con]")
+from jobbot.ingest.filter import location_ok as _loc
+_P = lambda loc, co="", rm=False: Posting(source_id="x", title="t", company=co,
+                                          location=loc, remote=rm)
+for _loc_text, _co in [("London", ""), ("Manchester, UK", ""),
+                       ("United Kingdom", ""), ("Edinburgh", "")]:
+    check(f"giữ {_loc_text!r}", _loc(_P(_loc_text, _co), []))
+# 17 tin thật lọt qua vì 'uk' nằm trong 'ukraine', 'gb' nằm trong 'gbagada'
+for _loc_text, _co in [("Kyiv, Ukraine", ""), ("Köln", "teamZUKUNFT gGmbH"),
+                       ("Paris", "Bigblue"), ("Bremen", "GBC Group"),
+                       ("Gbagada, Lagos", "")]:
+    check(f"loại {_loc_text!r} {_co}", not _loc(_P(_loc_text, _co), []))
+check("remote toàn cầu vẫn giữ", _loc(_P("Anywhere", "", True), []))
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

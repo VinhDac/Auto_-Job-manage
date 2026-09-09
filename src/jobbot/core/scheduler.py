@@ -15,6 +15,7 @@ import time
 from datetime import datetime
 
 from . import notify, postings
+from .journal import SEARCH, SYSTEM, log as jlog
 from .db import connect
 
 SCAN_EVERY_MIN = 60
@@ -35,6 +36,7 @@ class Scheduler:
         self.last_scan: float = 0.0
         self.last_result: str = "chưa chạy lần nào"
         self.running = False
+        self.paused = False
         self._thread: threading.Thread | None = None
 
     # --- điều khiển -------------------------------------------------------
@@ -44,6 +46,25 @@ class Scheduler:
 
     def stop(self) -> None:
         self.stop_flag.set()
+
+    def pause(self) -> None:
+        """Ngưng quét tự động. KHÁC stop(): luồng vẫn sống, bấm tiếp là chạy lại.
+
+        Không cắt ngang lần quét đang chạy dở — cắt giữa chừng thì Chrome
+        treo tab và giao dịch trong derive() cuộn lại nửa vời.
+        """
+        self.paused = True
+        jlog.warn(SYSTEM, "ĐÃ TẠM DỪNG — không quét tự động nữa")
+
+    def resume(self) -> None:
+        self.paused = False
+        jlog.ok(SYSTEM, f"chạy lại — lần quét sau trong {self.next_in() // 60} phút")
+
+    def state(self) -> str:
+        """Một chữ cho giao diện: đang chạy / tạm dừng / chờ."""
+        if self.running:
+            return "running"
+        return "paused" if self.paused else "idle"
 
     def next_in(self) -> int:
         """Còn bao nhiêu giây tới lần quét sau."""
@@ -55,12 +76,17 @@ class Scheduler:
     def _loop(self) -> None:
         time.sleep(5)                       # để server lên trước
         while not self.stop_flag.is_set():
-            if time.time() - self.last_scan >= self.scan_every:
+            if not self.paused and time.time() - self.last_scan >= self.scan_every:
                 self.scan_once()
             self.stop_flag.wait(30)
 
     def scan_once(self) -> str:
         """Một lần quét. Nuốt mọi lỗi — một nguồn chết không được giết app."""
+        if self.running:
+            # Bấm RUN trong lúc đang chạy thì KHÔNG chạy chồng lên nhau: hai
+            # vòng quét cùng ghi một DB, và cùng mở Chrome, là hỏng thật.
+            jlog.warn(SYSTEM, "đang quét dở — bỏ qua yêu cầu chạy chồng")
+            return self.last_result
         self.running = True
         self.last_scan = time.time()
         try:
@@ -70,6 +96,7 @@ class Scheduler:
             self._maybe_notify(result)
         except Exception as exc:                        # noqa: BLE001
             self.last_result = f"lỗi: {type(exc).__name__}: {exc}"
+            jlog.error(SYSTEM, f"lần quét hỏng: {type(exc).__name__} — {str(exc)[:70]}")
             try:
                 conn = connect()
                 postings.log(conn, "scan_error", str(exc)[:300])
@@ -78,13 +105,42 @@ class Scheduler:
                 pass
         finally:
             self.running = False
+            jlog.done(SEARCH)
+            jlog.done(SYSTEM)
         return self.last_result
 
     @staticmethod
     def _maybe_notify(result: dict) -> None:
-        """Chỉ báo khi có việc MỚI đáng xem. Không báo mỗi lần quét."""
+        """Chỉ báo khi có việc MỚI đáng xem. Không báo mỗi lần quét.
+
+        Nuốt giá trị trả về là lý do lỗi rào chuỗi AppleScript sống sót qua
+        cả quá trình: mọi thông báo đều hỏng mà không ai biết. Hỏng thì GHI
+        VÀO NHẬT KÝ, để nó hiện ở màn hình Settings.
+        """
         fresh = result.get("new_matches", 0)
-        if fresh > 0:
-            notify.send("jobbot",
-                        f"{fresh} việc mới khớp hồ sơ của bạn",
-                        subtitle="Mở dashboard để xem")
+        if fresh <= 0:
+            return
+        sent = notify.send("jobbot",
+                           f"{fresh} việc mới khớp hồ sơ của bạn",
+                           subtitle="Mở dashboard để xem")
+        try:
+            conn = connect()
+            postings.log(conn, "notify" if sent else "notify_failed",
+                         f"{fresh} việc mới" if sent
+                         else f"{fresh} việc mới — thông báo KHÔNG hiện được")
+            conn.close()
+        except Exception:                               # noqa: BLE001
+            pass
+
+
+# Một bản dùng chung: app.py dựng vòng chạy, server.py cần nó cho nút RUN/PAUSE.
+# Luồn qua tham số thì phải xuyên qua serve() -> Handler -> từng route, mà
+# Handler thì do http.server dựng, không truyền gì vào được.
+_current: Scheduler | None = None
+
+
+def current() -> Scheduler:
+    global _current
+    if _current is None:
+        _current = Scheduler()
+    return _current

@@ -7,5 +7,6 @@ Không có cơ chế này thì: sửa vocab.py xong, điểm cũ và điểm m�
 cùng một bảng, không cách nào biết cái nào tính bằng luật nào.
 """
 
-FILTER_RULES = "2026-09-07.1"     # ingest/filter.py + ingest/base.norm_*
-SCORE_RULES = "2026-09-07.1"      # scoring/vocab.py + scoring/extract.py + scoring/score.py
+FILTER_RULES = "2026-09-07.1"  # ingest/filter.py + ingest/base.norm_*
+# scoring/vocab.py + scoring/extract.py + scoring/score.py + realism + deadline
+SCORE_RULES = "2026-09-07.4"   # + danh sách không gạch đầu dòng, alias khớp theo TỪ

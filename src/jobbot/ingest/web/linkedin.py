@@ -25,6 +25,7 @@ import re
 import time
 import urllib.parse
 
+from ...core.journal import SEARCH, log as jlog
 from ..base import Posting, strip_html
 from .base import Blocked, Health, grab, open_page
 
@@ -75,7 +76,10 @@ DETAIL_JS = """
     const crit = [...document.querySelectorAll('[class*=job-criteria__item]')]
         .map(e => e.innerText.replace(/\\s+/g, ' ').trim());
     return JSON.stringify([{
-      description: box ? box.innerText.trim().slice(0, 20000) : '',
+      // innerHTML chứ KHÔNG phải innerText: innerText của <ul><li> trả về
+      // các dòng trần, mất dấu gạch đầu dòng — mà bộ tách yêu cầu nhận
+      // diện danh sách BẰNG dấu đó. strip_html() dựng lại '· ' từ <li>.
+      description: box ? box.innerHTML.slice(0, 60000) : '',
       criteria: crit.join(' | ').slice(0, 400)
     }]);
   } catch (e) { return "[]"; }
@@ -115,7 +119,8 @@ def fetch(tab, queries: list[str], location: str = "London",
                            for e in EXPERIENCE.get(lv, "2").split(",")}))
     found: dict[str, Posting] = {}
 
-    for query in queries:
+    for qn, query in enumerate(queries, 1):
+        jlog.progress(SEARCH, f"tìm LinkedIn — {query}", qn, len(queries))
         for page in range(pages):
             url = GUEST.format(q=urllib.parse.quote(query),
                                loc=urllib.parse.quote(location),
@@ -134,7 +139,12 @@ def fetch(tab, queries: list[str], location: str = "London",
         return list(found.values()), Health(0, 0)
 
     health = Health(attempted=len(found), failed=0)
-    for item in found.values():
+    items = list(found.values())
+    jlog.emit(SEARCH, f"linkedin: tìm được {len(items)} tin, bắt đầu đọc kỹ")
+    for index, item in enumerate(items):
+        # Đây là chỗ vòng quét đứng lâu nhất — 192 tin, mỗi tin nghỉ 2.5-5 giây.
+        # Không báo tiến độ ở đây thì màn hình im lặng suốt 8-16 phút.
+        jlog.progress(SEARCH, "đọc kỹ LinkedIn", index + 1, len(items))
         try:
             open_page(tab, GUEST_JOB.format(jid=item.source_id), timeout=30)
             detail = grab(tab, DETAIL_JS)
@@ -147,10 +157,14 @@ def fetch(tab, queries: list[str], location: str = "London",
                 item.description = strip_html(raw)[:20000]
                 item.payload["criteria"] = detail[0].get("criteria", "")
         except Blocked:
-            health.note("bị chặn giữa chừng")
-            break                          # bị chặn -> dừng hẳn, không cãi lại
+            # Dừng hẳn, không cãi lại — nhưng phải NÓI RA là đã dừng, và số
+            # tin còn lại chưa đọc được tính vào phần hỏng. Chỉ note() rồi
+            # break thì failed=0 và lần quét này trông y hệt một lần thành công.
+            health.block(f"bị chặn ở tin {index + 1}/{len(items)}",
+                         unread=len(items) - index)
+            break
         except Exception as exc:           # noqa: BLE001
             health.failed += 1
             health.note(f"{type(exc).__name__}: {str(exc)[:44]}")
         _pause()
-    return list(found.values()), health
+    return items, health

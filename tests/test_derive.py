@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from jobbot.core import db, postings, versions
 from jobbot.core.derive import derive, rebuild, stale_count
-from jobbot.ingest.base import Posting
+from jobbot.ingest.base import Posting, strip_html
 from jobbot.profile import store
 
 ok = fail = 0
@@ -26,12 +26,16 @@ PROFILE = {"job_titles": "Quantitative Analyst\nData Scientist",
 def fresh(tmp):
     conn = db.connect(Path(tmp) / "t.db")
     store.save(conn, PROFILE, "test")
+    # Nguồn thật bóc HTML TRƯỚC khi giao cho save_batch (xem linkedin.py), nên
+    # fixture cũng phải làm vậy — đưa thẳng HTML vào là dựng ra một thế giới
+    # không tồn tại, và bài test bên dưới sẽ kiểm nhầm thứ.
+    RAW_A = "<p>Requirements:</p><ul><li>Strong Python and SQL</li></ul>"
+    RAW_B = "<p>Manage products</p>"
     items = [
         Posting(source_id="a", title="Quantitative Analyst", company="Man Group",
-                location="London", description="<p>Requirements:</p><ul><li>Python</li></ul>",
-                raw_body="<p>Requirements:</p><ul><li>Strong Python and SQL</li></ul>"),
+                location="London", description=strip_html(RAW_A), raw_body=RAW_A),
         Posting(source_id="b", title="Product Manager", company="Acme",
-                location="London", description="x", raw_body="<p>Manage products</p>"),
+                location="London", description=strip_html(RAW_B), raw_body=RAW_B),
     ]
     postings.save_batch(conn, "test", items)
     return conn
@@ -40,9 +44,15 @@ print("\n[tầng raw thật sự raw]")
 with tempfile.TemporaryDirectory() as tmp:
     conn = fresh(tmp)
     body = conn.execute("SELECT body FROM raw_posting WHERE source_id='a'").fetchone()[0]
-    check("nguyên văn HTML được giữ trong raw", "<li>" in body)
-    check("raw KHÔNG bị bóc HTML", body != conn.execute(
-        "SELECT description FROM posting WHERE title='Quantitative Analyst'").fetchone()[0])
+    # So body với description chỉ nói "hai chuỗi khác nhau" — yếu. Điều cần
+    # bảo đảm là body ĐÚNG BẰNG chuỗi đã đưa vào, không sứt một ký tự.
+    check("raw giữ NGUYÊN VĂN từng ký tự",
+          body == "<p>Requirements:</p><ul><li>Strong Python and SQL</li></ul>")
+    stripped = conn.execute(
+        "SELECT description FROM posting WHERE title='Quantitative Analyst'"
+    ).fetchone()[0]
+    check("bản đã bóc thì sạch thẻ", "<li>" not in stripped and "<p>" not in stripped)
+    check("và giữ được dấu gạch đầu dòng", "·" in stripped)
     conn.close()
 
 print("\n[gắn phiên bản]")
@@ -96,6 +106,54 @@ with tempfile.TemporaryDirectory() as tmp:
                          " WHERE title='Quantitative Analyst'").fetchone()[0]
     check("dựng lại từ raw -> mô tả trở lại", "Python" in fixed and "RÁC" not in fixed)
     check("và không còn thẻ HTML", "<li>" not in fixed)
+    conn.close()
+
+print("\n[phán quyết phải CŨ ĐI khi đầu vào đổi]")
+# Ba lỗi thật, cùng một gốc: điểm chỉ gắn phiên bản LUẬT, không gắn phiên bản
+# HỒ SƠ, và mô tả về muộn không xoá dấu phiên bản nào cả. Hậu quả trên máy
+# thật: 72/204 tin đang giữ đứng nguyên score=NULL vì chúng được chấm lúc mô
+# tả còn rỗng, và derive(force=True) cũng không gỡ ra được.
+with tempfile.TemporaryDirectory() as tmp:
+    conn = db.connect(Path(tmp) / "t.db")
+    store.save(conn, dict(PROFILE, skills_strong="Python"), "v1")
+    LATE = ("Requirements:\n· Python and pandas\n· SQL\n· Machine learning\n"
+            + "detail " * 80)
+
+    postings.save_batch(conn, "s", [Posting(source_id="x", title="Data Scientist",
+        company="Monzo", location="London", url="u", description="")])
+    derive(conn)
+    check("chấm lúc chưa có mô tả -> nói thẳng là không chấm được",
+          conn.execute("SELECT score_conf FROM posting").fetchone()[0] == "none")
+
+    postings.save_batch(conn, "s", [Posting(source_id="x", title="Data Scientist",
+        company="Monzo", location="London", url="u", description=LATE)])
+    check("mô tả về muộn -> tin tự thành cần tính lại", stale_count(conn) == 1)
+    derive(conn)
+    first = conn.execute("SELECT score, score_conf FROM posting").fetchone()
+    check("và được chấm lại bằng mô tả mới", first[0] is not None and first[1] != "none")
+
+    store.save(conn, {"skills_strong": "Python, pandas, SQL, machine learning"}, "v2")
+    check("đổi hồ sơ -> điểm cũ tự thành cần tính lại", stale_count(conn) == 1)
+    derive(conn)
+    second = conn.execute("SELECT score FROM posting").fetchone()[0]
+    check("và điểm đổi theo hồ sơ mới", second > first[0])
+    check("tính xong thì không còn gì cũ", stale_count(conn) == 0)
+
+    # force phải xuyên qua CẢ vòng chấm, không chỉ vòng lọc
+    conn.execute("UPDATE posting SET score = 1")
+    conn.commit()
+    derive(conn, force=True)
+    check("force=True chấm lại cả tin không cũ",
+          conn.execute("SELECT score FROM posting").fetchone()[0] == second)
+    conn.close()
+
+with tempfile.TemporaryDirectory() as tmp:
+    conn = fresh(tmp)
+    derive(conn)
+    check("chấm xong thì sạch", stale_count(conn) == 0)
+    conn.execute("UPDATE posting SET scored_rules = 'luật cũ' WHERE kept = 1")
+    conn.commit()
+    check("stale_count thấy luật CHẤM đổi, không chỉ luật LỌC", stale_count(conn) > 0)
     conn.close()
 
 print("\n[một giao dịch]")

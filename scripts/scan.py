@@ -18,16 +18,15 @@ from jobbot.scan_runner import run_scan
 
 
 def main() -> int:
-    pages = 3
-    if "--pages" in sys.argv:
-        pages = int(sys.argv[sys.argv.index("--pages") + 1])
+    # --pages đã bỏ cùng arbeitnow/remotive: nguồn còn lại là board công ty
+    # (lấy trọn board, không phân trang) và LinkedIn (số trang cố định trong
+    # ingest/web/linkedin.py).
     chrome = "--no-chrome" not in sys.argv
     deep = "--shallow" not in sys.argv
 
     print("\nQuét nguồn\n")
     # manual=True: người dùng tự bấm, nên không áp cửa sổ giờ người
-    result = run_scan(pages=pages, log=print, chrome_sources=chrome,
-                      deep=deep, manual=True)
+    result = run_scan(log=print, chrome_sources=chrome, deep=deep, manual=True)
     if not result["ok"]:
         print(f"\n{result['summary']}: {result.get('missing')}")
         return 1

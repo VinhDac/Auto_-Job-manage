@@ -214,7 +214,36 @@ Test: 28/28 qua. Không gọi LLM lần nào.
 
 **Chưa làm:** xuất PDF/DOCX. Hiện xem trên web, copy ra được.
 
-## Bước 4 — PROJECT   *(xong)*
+## Bước 4 — PROJECT   *(xong — bảy chặng)*
+
+**Sửa lại theo đúng ý Vin:** không dùng project cũ. Chúng quá lớn, chi phí đọc cao,
+người tuyển không bước vào. Hệ thống phải ĐỀ XUẤT bài nhỏ mới.
+
+```
+0 NHẮM         nhóm JD -> cần chứng minh cái gì          projects/cluster.py
+1 NGHIÊN CỨU   đọc kỹ toàn bộ JD, lọc câu khuôn mẫu      projects/research.py
+2 SINH         LLM đề xuất 4 phương án, không phải 1     core/llm.py
+3 KIỂM CỨNG    8 luật, trượt là loại                     projects/brief.py
+4 KIỂM DỮ LIỆU tải thật, nhìn BÊN TRONG                  projects/feasible.py
+5 XẾP HẠNG     6 chiều                                   projects/rank.py
+6 CHỌN         lấy đầu bảng, giữ cái bị loại kèm lý do   projects/pipeline.py
+```
+
+**Chặng 4 là chỗ phân biệt đề bài THẬT với đề bài NGHE HỢP LÝ.** `URL trả 200`
+là hàng rào yếu. Hàng rào mạnh là tải vài KB đầu rồi nhìn vào: có cột ngày thật
+không, có cột giá không, bao nhiêu dòng, có phải bảng tra cứu không.
+
+Bắt được lỗi ngay trong đề bài tôi tự sinh ra: dataset S&P 500 constituents trả
+200, qua hết 8 luật cứng — nhưng là **bảng tra cứu 399 dòng không có giá**, không
+backtest được gì. Bốn lý do từ chối cụ thể, trong đó có
+*"cột 'Date added' là siêu dữ liệu, không phải trục thời gian"*.
+
+**Chặng 5, sáu chiều:** phủ · **bác bỏ được** · cụ thể · dữ liệu sẵn · gọn · mới.
+
+Chiều *bác bỏ được* quan trọng nhất: câu hỏi phải có thể ra kết quả NGƯỢC. Đề bài
+chỉ có thể xác nhận thì không phải nghiên cứu, là quảng cáo.
+
+Test: 65/65 (`test_brief`).
 
 |x| Gom JD thành nhóm bằng greedy set cover | `projects/cluster.py` |
 |x| Đối chiếu project đã có với từng nhóm, chỉ ra chỗ trống | `projects/cluster.py` |

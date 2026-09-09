@@ -28,8 +28,11 @@ class WebSocket:
         self.sock = socket.create_connection(
             (parts.hostname, parts.port or 80), timeout=timeout)
         self.sock.settimeout(timeout)
-        self._handshake(parts.path or "/", parts.hostname, parts.port)
+        # _buf phải khai TRƯỚC khi bắt tay: gói tin 101 và khung dữ liệu đầu
+        # tiên có thể về chung một lần đọc TCP, _handshake giữ lại phần thừa
+        # trong _buf. Gán b"" SAU khi bắt tay là ném đúng phần đó đi.
         self._buf = b""
+        self._handshake(parts.path or "/", parts.hostname, parts.port)
 
     # --- bắt tay -----------------------------------------------------------
     def _handshake(self, path: str, host: str, port: int | None) -> None:

@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from jobbot.browser import chrome, ws
 from jobbot.ingest.web import base as webbase
-from jobbot.ingest.web.efinancialcareers import WORK_MODE, _from_row
 
 ok = fail = skip = 0
 def check(name, cond):
@@ -35,6 +34,36 @@ check("độ dài đúng", (frame[1] & 0x7F) == 2)
 mask, body = frame[2:6], frame[6:]
 check("giải mask ra đúng chữ",
       bytes(b ^ mask[i % 4] for i, b in enumerate(body)) == b"hi")
+
+print("\n[bắt tay: khung về CHUNG gói với 101 không được rơi]")
+# Mọi bài test ở trên đều đi vòng qua __init__ (dùng __new__), nên không cái
+# nào thấy được rằng __init__ gán self._buf = b"" NGAY SAU _handshake — tức là
+# ném đi đúng những byte khung mà _handshake vừa giữ lại. Chrome gửi 101 và
+# sự kiện đầu tiên chung một gói TCP là mất frame.
+class HandshakeSock:
+    """Trả 101 và một khung 'hello' trong CÙNG một lần đọc."""
+    RESPONSE = (b"HTTP/1.1 101 Switching Protocols\r\n"
+                b"Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+                + bytes([0x81, 5]) + b"hello")
+
+    def __init__(self): self.sent, self.given = b"", False
+    def sendall(self, b): self.sent += b
+    def settimeout(self, t): pass
+    def close(self): pass
+    def recv(self, n):
+        if self.given:
+            return b""
+        self.given = True
+        return self.RESPONSE
+
+made = HandshakeSock()
+real_create = ws.socket.create_connection
+ws.socket.create_connection = lambda *a, **k: made
+try:
+    live = ws.WebSocket("ws://127.0.0.1:9222/devtools/browser/abc")
+    check("bắt tay xong vẫn giữ được khung đi kèm", live.recv() == "hello")
+finally:
+    ws.socket.create_connection = real_create
 
 conn2 = ws.WebSocket.__new__(ws.WebSocket)
 conn2.sock, conn2._buf = FakeSock(), bytes([0x81, 5]) + b"hello"
@@ -62,21 +91,7 @@ for text in ("Just a moment...", "Attention Required! | Cloudflare",
              "Access Denied", "Verify you are human", "403 Forbidden"):
     check(f"nhận ra chặn: {text[:28]}", bool(webbase.BLOCKED.search(text)))
 check("trang bình thường KHÔNG bị nhận nhầm",
-      not webbase.BLOCKED.search("Quantitative jobs in London | eFinancialCareers"))
-
-print("\n[tách dữ liệu thẻ tin]")
-row = {"title": "Quant Analyst", "url": "https://x/jobs-Abc-123",
-       "company": "Citi", "location": "London, United Kingdom",
-       "contract": "Permanent", "salary": "Hybrid", "posted": "2 days ago"}
-p = _from_row(row)
-check("hình thức làm việc KHÔNG lọt vào cột lương", p.salary == "")
-check("và được lưu riêng", p.payload["work_mode"] == "Hybrid")
-p2 = _from_row({**row, "salary": "£65,000"})
-check("lương thật thì vẫn vào cột lương", p2.salary == "£65,000")
-p3 = _from_row({**row, "salary": "Remote"})
-check("Remote -> đánh dấu cờ remote", p3.remote is True)
-check("thiếu công ty -> 'unknown', không rỗng",
-      _from_row({**row, "company": ""}).company == "unknown")
+      not webbase.BLOCKED.search("Quantitative Analyst jobs in London | LinkedIn"))
 
 print("\n[LinkedIn — ranh giới an toàn]")
 from jobbot.ingest.web import linkedin as li
@@ -119,6 +134,20 @@ h.note("TimeoutError"); h.note("mô tả rỗng")
 check("Health đếm được hỏng", h.failed == 6)
 check("Health tóm tắt được lý do", "6/10 hỏng" in h.summary and "TimeoutError" in h.summary)
 check("không hỏng -> không báo gì", Health(10, 0).summary == "")
+check("chạy trọn vẹn thì lành", Health(10, 0).ok)
+
+# LỖI THẬT: linkedin.fetch gặp Blocked giữa vòng đọc kỹ thì chỉ note() rồi
+# break — failed vẫn 0, record_run thấy 0/193 hỏng nên ghi ok=1, và màn hình
+# Settings hiện huy hiệu XANH cho một lần quét bị cắt từ tin thứ ba.
+blocked = Health(attempted=193, failed=0)
+check("chưa chặn thì lành", blocked.ok)
+blocked.block("bị chặn ở tin 3/193", unread=191)
+check("bị chặn -> KHÔNG còn lành", not blocked.ok)
+check("và số tin chưa đọc được tính là hỏng", blocked.failed == 191)
+check("và nói thẳng ra là bị chặn", "BỊ CHẶN" in blocked.summary)
+early = Health(attempted=5)
+early.block("chặn ngay từ tin đầu", unread=5)
+check("bị chặn ngay tin đầu vẫn không lành", not early.ok)
 
 with tempfile.TemporaryDirectory() as tmp:
     conn = _db.connect(Path(tmp) / "h.db")
@@ -152,3 +181,4 @@ with tempfile.TemporaryDirectory() as tmp:
     conn.close()
 
 print(f"\n{ok} ok, {fail} fail")
+sys.exit(1 if fail else 0)

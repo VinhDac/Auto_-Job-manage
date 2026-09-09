@@ -20,17 +20,28 @@ from dataclasses import dataclass, field
 from ...browser.cdp import CDPError, Tab
 
 # Chỉ nút TỪ CHỐI. Danh sách này cố tình không có từ nào mang nghĩa đồng ý.
-REJECT_JS = """
+#
+# LỖI ĐÃ SỬA: trước đây danh sách nằm thẳng trong một regex literal xuống dòng
+# giữa chừng, rồi cả khối bị .replace("\n", " "). Nhánh bị cắt qua dòng thành
+# " strictly necessary" — dính một khoảng trắng ở đầu, mà nhãn nút thì đã
+# .trim(), nên nhánh đó không bao giờ khớp. Tách ra thành DANH SÁCH thì xuống
+# dòng kiểu gì cũng không hỏng được nữa.
+REJECT_LABELS = [
+    "reject all", "reject", "decline all", "decline", "refuse",
+    "only necessary", "strictly necessary", "essential only",
+    "necessary only", "continue without accepting",
+]
+
+REJECT_JS = ("""
 (() => {
-  const want = /^(reject all|reject|decline all|decline|refuse|only necessary|
-strictly necessary|essential only|necessary only|continue without accepting)$/i;
+  const want = new RegExp('^(' + %s + ')$', 'i');
   for (const e of document.querySelectorAll('button,a[role=button],[role=button]')) {
     const t = (e.innerText || '').trim();
     if (want.test(t) && e.offsetParent !== null) { e.click(); return t; }
   }
   return "";
 })()
-""".replace("\n", " ")
+""" % json.dumps("|".join(REJECT_LABELS))).replace("\n", " ")
 
 BLOCKED = re.compile(
     r"just a moment|attention required|access denied|verify you are human|"
@@ -47,17 +58,33 @@ class Health:
     """
     attempted: int = 0
     failed: int = 0
+    # Bị chặn là một trạng thái RIÊNG, không phải "hỏng vài tin". Trước đây
+    # linkedin.fetch gặp Blocked giữa vòng đọc kỹ thì chỉ note() rồi break, nên
+    # failed vẫn là 0, record_run thấy 0/193 hỏng và ghi ok=1 — màn hình
+    # Settings hiện huy hiệu xanh cho một lần quét bị cắt ngang từ tin thứ ba.
+    blocked: bool = False
     samples: list[str] = field(default_factory=list)
 
     def note(self, message: str) -> None:
         if len(self.samples) < 5:
             self.samples.append(message)
 
+    def block(self, message: str, unread: int = 0) -> None:
+        """Bị chặn: ghi cờ, và tính số tin CHƯA đọc được vào phần hỏng."""
+        self.blocked = True
+        self.failed += max(0, unread)
+        self.note(message)
+
+    @property
+    def ok(self) -> bool:
+        return not self.blocked
+
     @property
     def summary(self) -> str:
-        if not self.failed:
+        if not (self.failed or self.blocked):
             return ""
-        return (f"{self.failed}/{self.attempted} hỏng · "
+        head = "BỊ CHẶN · " if self.blocked else ""
+        return (f"{head}{self.failed}/{self.attempted} hỏng · "
                 + " · ".join(self.samples[:2]))
 
 

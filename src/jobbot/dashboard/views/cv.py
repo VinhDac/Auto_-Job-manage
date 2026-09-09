@@ -9,7 +9,7 @@ from ...cv.render import audit, paper
 from ..layout import card, h1, page
 
 
-def render(job: dict, cv: TailoredCV, pending: int) -> str:
+def render(job: dict, cv: TailoredCV) -> str:
     return page(
         f"CV — {job['title']}",
         f"<a class=back href='/jobs/{esc(job['id'])}'>← {esc(job['title'])}</a>"
@@ -18,5 +18,5 @@ def render(job: dict, cv: TailoredCV, pending: int) -> str:
              f"from your own profile: the system selects and orders, it never writes.")
         + paper(cv)
         + audit(cv),
-        active="/jobs", pending=pending, status="Running",
+        active="/jobs", status="Running",
     )

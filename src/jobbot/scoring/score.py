@@ -20,7 +20,8 @@ from dataclasses import dataclass, field
 
 from ..ingest.base import norm
 from . import extract
-from .vocab import ALIASES, DEGREE_WORDS, QUANT_FIELD, SKILLS, YEARS
+from .vocab import (ALIASES, DEGREE_WORDS, QUANT_FIELD, SKILLS, YEARS,
+                    alias_hits)
 
 YEARS_BAND = {"0-1": 0.5, "1-3": 2, "3-5": 4, "5-8": 6.5, "8+": 10}
 JUNIOR_LEVELS = {"intern", "grad", "grad_scheme", "junior"}
@@ -77,14 +78,13 @@ def build_index(answers: dict) -> list[Evidence]:
 
 
 def _signals(text: str) -> list[str]:
-    """Những kỹ năng/khái niệm mà dòng yêu cầu này thực sự đang đòi."""
-    low = f" {norm(text)} "
-    found = []
-    for alias, canonical in ALIASES.items():
-        needle = f" {alias.strip()} " if len(alias.strip()) <= 3 else alias.strip()
-        if needle in low and canonical not in found:
-            found.append(canonical)
-    return found
+    """Những kỹ năng/khái niệm mà dòng yêu cầu này thực sự đang đòi.
+
+    Luật khớp ở vocab.alias_hits — dùng chung với cv.build.skills_in, để
+    tầng chấm điểm và tầng dựng CV không bao giờ hiểu khác nhau về cùng
+    một chữ.
+    """
+    return alias_hits(norm(text))
 
 
 def _find(signal: str, index: list[Evidence]) -> tuple[bool, str, bool]:
@@ -142,7 +142,11 @@ def judge_one(req: extract.Requirement, index: list[Evidence], answers: dict) ->
         quant = any(f in education for f in QUANT_FIELD)
         met = any(has[level] for level in levels)      # JD viết "hoặc" thì là hoặc
         note = "quantitative field" if quant else "field not obviously quantitative"
-        raw = str(answers.get("education") or "").splitlines()[0][:80]
+        # "".splitlines() là [] chứ không phải [""] — lấy [0] là IndexError, và
+        # nó nổ giữa giao dịch của derive() nên CẢ lần quét bị cuộn lại. Dòng
+        # ngay dưới đã lường trước ô trống, chỉ là không bao giờ chạy tới.
+        lines = str(answers.get("education") or "").splitlines()
+        raw = lines[0][:80] if lines else ""
         return Judged(text, req.must, met,
                       f"{raw} — {note}" if raw else "nothing on your profile about education",
                       levels)

@@ -1,30 +1,45 @@
 """Web server chạy local — thư viện chuẩn, không cài gì thêm.
 
-Chỉ định tuyến. Vẽ là việc của views/, dữ liệu là việc của core/ và mock.py.
+Chỉ định tuyến. Vẽ là việc của views/, dữ liệu là việc của core/ và live.py.
 """
 
 from __future__ import annotations
 
 import json
+import queue
 import socket
 import sqlite3
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from ..core import db
+from ..core import journal, scheduler as sched
 from ..core.paths import web_dir
 from ..profile import store
 from ..profile.schema import LONGTEXT, MULTI, SECTIONS, TEXT, section_by_id
-from . import layout, live, mock
+from . import layout, live
 from .filters import JobFilter
 from . import upload
 from .views import cv as cvview
 from .views import cvhealth, importcv
-from .views import (home, jobs, pipeline, profile,
-                    projects, settings, stats, queue)
+from .views import (home, jobs, profile, projects,
+                    score, search, settings)
 
 HOST = "127.0.0.1"          # chỉ máy này truy cập được. Không mở ra mạng.
 DEFAULT_PORT = 8765
+
+
+def _segments(path: str) -> list[str]:
+    """Tách path thành từng mảnh rồi giải mã TỪNG mảnh.
+
+    Trình duyệt mã hoá khoảng trắng thành %20, nên khoá cụm 'machine learning'
+    tới đây là 'machine%20learning' — không khớp với gì cả. Phải giải mã.
+
+    Giải mã cả chuỗi RỒI mới tách là sai: '%2F' sẽ hoá thành '/' và tự đẻ ra
+    một mảnh mới. Tách trước, giải mã sau thì không đẻ được.
+    """
+    return [unquote(part) for part in path.strip("/").split("/") if part]
 
 
 def _split_other(raw: str) -> list[str]:
@@ -85,6 +100,48 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     # --- định tuyến -------------------------------------------------------
+    # --- dòng sự kiện đẩy xuống trình duyệt --------------------------------
+    def _events(self):
+        """SSE: một kết nối sống lâu, server đẩy xuống, trình duyệt không hỏi.
+
+        Chọn SSE chứ không polling: nhật ký chỉ đi MỘT chiều từ máy xuống màn
+        hình. Polling mỗi giây thì 24/7 là 86.400 lượt/ngày cho phần lớn là
+        "chưa có gì mới". WebSocket thì thừa nguyên chiều ngược lại.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+
+        chan = journal.log.subscribe()
+        try:
+            # Gửi ngay trạng thái hiện tại — mở tab giữa chừng vẫn thấy đúng,
+            # không phải chờ sự kiện kế tiếp mới biết máy đang làm gì.
+            self._send_event({"type": "hello", "state": _run_state(),
+                              "running": journal.log.running(),
+                              "events": [e.as_dict()
+                                         for e in journal.log.tail(limit=40)][::-1]})
+            while True:
+                try:
+                    self._send_event(chan.get(timeout=20))
+                except queue.Empty:
+                    self.wfile.write(b": ping\n\n")     # giữ kết nối, proxy không cắt
+                    self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ValueError):
+            pass                     # đóng tab là chuyện thường, không phải lỗi
+        finally:
+            journal.log.unsubscribe(chan)
+
+    def _send_event(self, payload: dict) -> None:
+        body = json.dumps(payload, ensure_ascii=False)
+        self.wfile.write(f"data: {body}\n\n".encode())
+        self.wfile.flush()
+
+    def _json(self, payload: dict, status: int = 200):
+        return self._send(json.dumps(payload, ensure_ascii=False).encode(),
+                          status=status, ctype="application/json; charset=utf-8")
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -93,8 +150,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/static/app.css":
             return self._send((web_dir() / "app.css").read_bytes(),
                               ctype="text/css; charset=utf-8")
-
-        pending = len(mock.proposals())          # TODO bước 5: đếm từ hàng đợi thật
+        if path == "/static/live.js":
+            return self._send((web_dir() / "live.js").read_bytes(),
+                              ctype="text/javascript; charset=utf-8")
+        if path == "/events":
+            return self._events()
+        if path == "/api/state":
+            return self._json({"state": _run_state(),
+                               "running": journal.log.running()})
 
         # --- ĐÃ NỐI DỮ LIỆU THẬT (bước 1) ---
         if path in ("/", "/jobs") or path.startswith("/jobs/"):
@@ -103,13 +166,15 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/":
                     return self._html(home.render(
                         live.run_status(conn), live.counters(conn),
-                        live.needs_you(conn), live.activity(conn), pending))
+                        live.needs_you(conn), live.activity(conn),
+                        days=live.per_day(conn), chances=live.chances(conn),
+                        funnel=live.funnel(conn)))
                 if path == "/jobs":
                     flt = JobFilter.from_query(query)
                     return self._html(jobs.render(
                         live.jobs(conn, flt), flt, live.job_counts(conn, flt),
-                        live.facets(conn), pending))
-                parts = path.strip("/").split("/")
+                        live.facets(conn)))
+                parts = _segments(path)
                 found = live.job_detail(conn, parts[1])
                 if not found:
                     return self._404()
@@ -123,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
                                if found.get("score_json") else None)
                     doc = build_page(answers, found["title"], found["company"],
                                      wanted_skills(explain, found["jd"]))
-                    return self._html(projects.render_page(found, doc, health(doc), pending))
+                    return self._html(projects.render_page(found, doc, health(doc)))
                 if len(parts) == 3 and parts[2] == "cv":
                     import json as _json
                     from ..cv.build import build as build_cv
@@ -131,16 +196,35 @@ class Handler(BaseHTTPRequestHandler):
                     answers = pstore.load(conn)
                     explain = _json.loads(found["score_json"]) if found.get("score_json") else None
                     tailored = build_cv(answers, explain, found["jd"])
-                    return self._html(cvview.render(found, tailored, pending))
-                return self._html(jobs.render_detail(found, pending))
+                    return self._html(cvview.render(found, tailored))
+                return self._html(jobs.render_detail(found))
             finally:
                 conn.close()
 
-        # --- vẫn dùng dữ liệu giả (bước 4-6) ---
-        if path == "/queue":
-            return self._html(queue.render(mock.proposals(), pending))
-        if path == "/pipeline":
-            return self._html(pipeline.render(mock.pipeline(), mock.STAGES, pending))
+        if path.startswith("/projects/"):
+            conn = db.connect()
+            try:
+                from ..cv.blocks import parse as parse_cv
+                from ..projects.cluster import build as cluster_jobs
+                from ..projects.pipeline import run as run_pipeline
+                from ..projects.research import study
+                answers = store.load(conn)
+                mine = [b for b in parse_cv(answers.get("cv_text") or "")
+                        if b.kind == "project"]
+                key = _segments(path)[-1]
+                found = next((c for c in cluster_jobs(conn, mine) if c.key == key), None)
+                if found is None:
+                    return self._404()
+                from ..projects.pipeline import research_cached
+                findings = study(conn, found)
+                # Chỉ ĐỌC cache. Mở Chrome trong lúc vẽ trang là sai — việc nặng
+                # thuộc về vòng quét nền, xem scripts/research.py.
+                findings, source = research_cached(conn, found, findings)
+                outcome = run_pipeline(conn, findings, [b.title for b in mine])
+                return self._html(projects.render_brief(found, findings, outcome))
+            finally:
+                conn.close()
+
         if path == "/projects":
             conn = db.connect()
             try:
@@ -149,17 +233,41 @@ class Handler(BaseHTTPRequestHandler):
                 answers = store.load(conn)
                 mine = [b for b in parse_cv(answers.get("cv_text") or "")
                         if b.kind == "project"]
-                return self._html(projects.render(cluster_jobs(conn, mine), mine, pending))
+                found = cluster_jobs(conn, mine)
+                return self._html(projects.render(
+                    found, mine,
+                    stats=live.project_stats(conn, found, mine),
+                    settings=live.project_settings(conn),
+                    sizes=live.cluster_sizes(conn, found)))
             finally:
                 conn.close()
-        if path == "/stats":
-            return self._html(stats.render(mock.stats(), pending))
+        if path == "/search":
+            conn = db.connect()
+            try:
+                return self._html(search.render(
+                    sources=live.sources(conn), yields=live.source_yield(conn),
+                    settings=live.search_settings(conn),
+                    chrome=live.chrome_status()))
+            finally:
+                conn.close()
+
+        if path == "/score":
+            conn = db.connect()
+            try:
+                return self._html(score.render(
+                    stats=live.score_stats(conn), hist=live.score_hist(conn),
+                    chances=live.chances(conn),
+                    settings=live.score_settings(conn)))
+            finally:
+                conn.close()
+
         if path == "/settings":
             conn = db.connect()
             try:
                 return self._html(settings.render(
                     live.sources(conn), live.chrome_status(),
-                    live.company_stats(conn), live.last_runs(conn), pending))
+                    live.company_stats(conn), live.last_runs(conn),
+                    live.health(conn)))
             finally:
                 conn.close()
 
@@ -170,12 +278,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/profile":
                 return self._html(profile.render_summary(
                     answers, len(store.history(conn)),
-                    store.missing_for_ingest(answers), pending))
+                    store.missing_for_ingest(answers)))
 
             if path == "/profile/import":
-                return self._html(importcv.render_form(pending))
+                return self._html(importcv.render_form())
             if path == "/profile/health":
-                return self._html(cvhealth.render(answers.get("cv_text", ""), pending))
+                return self._html(cvhealth.render(answers.get("cv_text", "")))
 
             if path == "/api/profile":
                 payload = {"answers": answers, "versions": len(store.history(conn)),
@@ -185,13 +293,13 @@ class Handler(BaseHTTPRequestHandler):
                                   ctype="application/json; charset=utf-8")
 
             if path.startswith("/profile/"):
-                section = section_by_id(path.rsplit("/", 1)[-1])
+                section = section_by_id(_segments(path)[-1])
                 if section is None:
                     return self._404()
                 done = {s.id for s in SECTIONS if store.is_section_done(answers, s)}
                 nxt = store.next_section(section.id)
                 label = f"Save and continue → {nxt.title}" if nxt else "Save and review profile"
-                return self._html(profile.render_section(section, answers, done, label, pending))
+                return self._html(profile.render_section(section, answers, done, label))
 
             self._404()
         finally:
@@ -211,12 +319,37 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/profile/import/save":
             return self._save_import(form)
 
-        if path == "/queue":
-            # TODO backend: thực thi đề xuất đã duyệt. Hiện chỉ quay lại trang.
-            return self._redirect("/queue")
+        if path == "/api/run":
+            runner = sched.current()
+            threading.Thread(target=runner.scan_once, daemon=True,
+                             name="scan-manual").start()
+            return self._json({"ok": True, "state": "running"})
+
+        if path == "/api/rescore":
+            # Chấm lại TOÀN BỘ. Chạy nền: 208 tin mất vài giây, nhưng người
+            # bấm không nên phải ngồi nhìn trình duyệt quay.
+            def _rescore():
+                from ..core.derive import derive
+                conn = db.connect()
+                try:
+                    journal.log.emit(journal.SCORE, "chấm lại toàn bộ theo yêu cầu")
+                    derive(conn, force=True)
+                except Exception as exc:            # noqa: BLE001
+                    journal.log.error(journal.SCORE,
+                                      f"chấm lại hỏng: {type(exc).__name__} — {exc}")
+                finally:
+                    journal.log.done(journal.SCORE)
+                    conn.close()
+            threading.Thread(target=_rescore, daemon=True, name="rescore").start()
+            return self._json({"ok": True, "state": _run_state()})
+
+        if path == "/api/pause":
+            runner = sched.current()
+            runner.resume() if runner.paused else runner.pause()
+            return self._json({"ok": True, "state": _run_state()})
 
         if path.startswith("/profile/"):
-            section_id = path.rsplit("/", 1)[-1]
+            section_id = _segments(path)[-1]
             conn = db.connect()
             try:
                 store.save(conn, _form_to_answers(form, section_id), note=f"section: {section_id}")
@@ -232,7 +365,6 @@ class Handler(BaseHTTPRequestHandler):
     def _import_cv(self, ctype: str, raw: bytes):
         """Đọc file hoặc chữ dán vào rồi hiện ĐỀ XUẤT — chưa ghi gì cả."""
         from ..profile.import_cv import ReadError, propose, read
-        pending = len(mock.proposals())
         try:
             fields = upload.parse(ctype, raw) if "multipart" in ctype else {}
             filename, blob = fields.get("file", ("", b""))
@@ -241,16 +373,16 @@ class Handler(BaseHTTPRequestHandler):
             if not text.strip():
                 raise ReadError("No file chosen and nothing pasted.")
         except (upload.TooBig, ReadError) as exc:
-            return self._html(importcv.render_form(pending, str(exc)))
+            return self._html(importcv.render_form(str(exc)))
         except Exception as exc:                        # noqa: BLE001
-            return self._html(importcv.render_form(pending, f"Could not read it: {exc}"))
+            return self._html(importcv.render_form(f"Could not read it: {exc}"))
 
         conn = db.connect()
         try:
             found = propose(text, store.load(conn))
         finally:
             conn.close()
-        self._html(importcv.render_review(found, text, pending))
+        self._html(importcv.render_review(found, text))
 
     def _save_import(self, form: dict):
         """Chỉ ghi những ô người dùng để tick. Không đè ô đã có sẵn."""
@@ -279,3 +411,12 @@ def find_port(start: int = DEFAULT_PORT, tries: int = 20) -> int:
 def serve(port: int | None = None) -> tuple[ThreadingHTTPServer, str]:
     port = port or find_port()
     return ThreadingHTTPServer((HOST, port), Handler), f"http://{HOST}:{port}/"
+
+
+def _run_state() -> str:
+    """Trạng thái THẬT của vòng chạy, không phải chuỗi cứng.
+
+    live.run_status() cũ trả 'idle' kể cả lúc đang quét, vì nó chỉ nhìn bảng
+    source_run chứ không hỏi scheduler. Đây là chỗ duy nhất biết sự thật.
+    """
+    return sched.current().state()

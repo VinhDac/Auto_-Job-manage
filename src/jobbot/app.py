@@ -31,7 +31,8 @@ from Foundation import NSMakeRect, NSObject, NSTimer, NSURL, NSURLRequest
 from PyObjCTools import AppHelper
 
 from .core import db, postings
-from .core.scheduler import Scheduler
+from .core import journal
+from .core import scheduler as scheduler_mod
 from .dashboard.server import serve
 
 # WebKit không có bindings dựng sẵn trong PyObjC của Anaconda -> nạp lúc chạy.
@@ -164,7 +165,9 @@ def run() -> int:
     httpd, url = serve()
     threading.Thread(target=httpd.serve_forever, daemon=True, name="web").start()
 
-    scheduler = Scheduler()
+    # Gắn nhật ký vào DB thật — trước dòng này nó chỉ sống trong bộ nhớ.
+    journal.log.open()
+    scheduler = scheduler_mod.current()
     scheduler.start()
 
     app = NSApplication.sharedApplication()
