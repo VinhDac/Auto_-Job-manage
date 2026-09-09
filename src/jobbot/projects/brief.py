@@ -33,8 +33,39 @@ from ..ingest.base import UA, norm
 MAX_DAYS = 3.0
 MIN_SKILL_OVERLAP = 2
 
-MEASURE_NUMBER = re.compile(r"\d|\bhow (?:much|many|often)\b|\bratio\b|\brate\b|"
-                            r"\bpercent|\bsharpe\b|\bauc\b|\brmse\b|\berror\b", re.I)
+# Một số ĐO ĐƯỢC. Ba dạng, và phải nhận đủ cả ba — bản cũ chỉ có từ vựng tài
+# chính (sharpe/auc/rmse/error) nên nó LOẠI OAN mọi đề bài học máy: đo bằng
+# R-squared, accuracy hay Brier score đều trượt. Chạy thật ngày 09/09: ba trong
+# bốn đề bài tốt nhất bị chặn ở đây, và máy chọn mất cái yếu hơn.
+MEASURE_NUMBER = re.compile(
+    r"\d"                                            # 1 · con số thẳng
+    r"|\bhow (?:much|many|often|far)\b"
+    # 2 · chỉ số CÓ TÊN — thứ tra ra được một con số
+    r"|\b(?:ratio|rate|percent\w*|sharpe|sortino|calmar|drawdown|turnover"
+    r"|auc|roc|rmse|mae|mse|error|r[- ]?squared|r2|accuracy|precision|recall"
+    r"|f1|log[- ]?loss|brier|correlation|p[- ]value|t[- ]stat\w*|hit rate"
+    r"|count|share of|proportion)\b"
+    # 3 · phép SO SÁNH nói rõ hai vế. Cố ý KHÔNG nhận "better"/"worse": nói
+    # "nó chạy tốt hơn" không phải một số đo, đó là một ý kiến.
+    r"|\b(?:difference|minus|change in|delta|gap between|ratio of"
+    r"|before and after|improvement in|reduction in|lift|versus|vs)\b", re.I)
+# Câu hỏi CÓ THỂ SAI — mở ra hai kết cục, không phải chỉ một.
+#
+# Đây là CỔNG, không phải thước. Trước đây nó là một chiều chấm điểm: câu hỏi
+# không kiểm chứng được thì trừ 20 điểm rồi vẫn có thể được chọn. Nhưng chính
+# code tự nói ra bản chất của nó — "không phải nghiên cứu, là quảng cáo" — và
+# đó là câu của một cái cổng. Trừ điểm một thứ đáng loại là nói nước đôi.
+FALSIFIABLE = re.compile(
+    r"\b(how much|how far|does|do |whether|is it|are they|compared? (?:to|with)|"
+    r"versus|vs\b|difference between|instead of|better than|worse than|"
+    r"how many|to what extent|what happens (?:if|when))\b", re.I)
+
+# Bài mẫu ai cũng làm — làm lại thì không chứng minh được gì. Cũng là CỔNG.
+TUTORIAL = re.compile(
+    r"\b(titanic|iris dataset|mnist|house prices?|boston housing|"
+    r"sentiment analysis of tweets|movie recommend\w*|churn prediction demo|"
+    r"hello world|stock price prediction with lstm)\b", re.I)
+
 MEASURE_METHOD = re.compile(
     r"\b(measured|compared?|across|over|against|baseline|out[- ]of[- ]sample|"
     r"holdout|walk[- ]forward|repeated|trials?|folds?|split)\b", re.I)
@@ -129,6 +160,13 @@ def validate(brief: Brief, wanted_skills: list[str], existing: list[str],
                      brief.deliverable or "", re.I):
         out.append(Problem("deliverable", "phải nói rõ nộp cái gì"))
 
+    if not FALSIFIABLE.search(q):
+        out.append(Problem("question", "không thể ra kết quả NGƯỢC với mong đợi "
+                                       "— chỉ xác nhận được, không kiểm chứng được"))
+    if TUTORIAL.search(f"{q} {brief.dataset}"):
+        out.append(Problem("dataset", "là bài mẫu phổ biến — làm lại không "
+                                      "chứng minh được gì"))
+
     qn = set(norm(q).split())
     for old in existing:
         on = set(norm(old).split())
@@ -142,7 +180,8 @@ def validate(brief: Brief, wanted_skills: list[str], existing: list[str],
 
 PROMPT = """You are helping a job applicant design ONE small portfolio project.
 
-THE POSTINGS THEY ARE TARGETING ({jobs} of them, at {companies}) repeatedly ask for:
+THE POSTINGS THEY ARE TARGETING ({jobs} of them, at {companies}) list these requirement lines more than once (each line's count is given;
+most lines appear in only one posting, so treat these as samples, not consensus):
 {needs}
 
 Concepts these postings name most often: {concepts}

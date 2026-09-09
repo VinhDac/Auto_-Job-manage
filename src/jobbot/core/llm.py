@@ -155,3 +155,15 @@ def _ask_api(prompt: str) -> str:
         return "".join(b.get("text", "") for b in data.get("content", []))
     except Exception:                       # noqa: BLE001
         return ""
+
+
+def drop(conn: sqlite3.Connection, ids: list[int]) -> int:
+    """Bỏ hẳn mấy yêu cầu đang chờ. Chỉ bỏ cái CHƯA trả lời — câu trả lời đã
+    có là dữ liệu thật, xoá đi là mất công người ngồi chép."""
+    if not ids:
+        return 0
+    marks = ",".join("?" for _ in ids)
+    cur = conn.execute(
+        f"DELETE FROM llm_request WHERE answer = '' AND id IN ({marks})", ids)
+    conn.commit()
+    return cur.rowcount

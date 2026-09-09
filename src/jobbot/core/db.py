@@ -236,6 +236,27 @@ MIGRATIONS: list[str] = [
         value TEXT NOT NULL
     );
     """,
+    # 14 — KHO PROJECT. Trước đây pipeline sinh đề bài rồi vẽ ra màn hình và
+    # VỨT: mỗi lần mở trang chạy lại cả bảy chặng, không có gì tích lại.
+    # Một project làm mất 2-3 ngày thì nó phải sống lâu hơn một lần vẽ trang.
+    #
+    # skills = TRỤC (kỹ năng nào project này chứng minh được)
+    # industries = NHÃN (ngành nào kể được câu chuyện này)
+    # Trục là kỹ năng chứ không phải nhóm JD: nhóm sinh ra từ dữ liệu nên đổi
+    # là đề bài mồ côi — đã xảy ra thật với nhóm ma 'excel'.
+    """
+    CREATE TABLE project (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        question    TEXT NOT NULL,
+        skills      TEXT NOT NULL DEFAULT '',
+        industries  TEXT NOT NULL DEFAULT '',
+        state       TEXT NOT NULL DEFAULT 'de_bai',
+        brief_json  TEXT NOT NULL DEFAULT '',
+        link        TEXT NOT NULL DEFAULT '',
+        made_at     TEXT NOT NULL
+    );
+    CREATE INDEX project_state ON project(state);
+    """,
 ]
 
 

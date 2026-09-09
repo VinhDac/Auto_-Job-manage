@@ -8,6 +8,7 @@
  *   [data-act="run"|"pause"]  nút master
  *   [data-nav]                nút gập thanh bên
  *   [data-tags]               ô thẻ: gõ + Enter để thêm, × để bỏ
+ *   [data-post]               nút gọi việc nền; [data-arg] là tham số
  *   [data-settings]           nút bánh răng; [data-sheet] là tấm phủ
  *   [data-widget]             một ô; [data-expand] trong đó là nút mở to
  *
@@ -96,6 +97,15 @@
   }
 
   // --------------------------------------------------------------- kết nối
+  // Nạp lại trang, TRỪ KHI làm thế là cướp mất việc người dùng đang làm dở.
+  function refreshIfIdle() {
+    const here = document.activeElement;
+    if (here && here.matches('input, textarea, select')) return;  // đang gõ
+    const sheet = document.querySelector('[data-sheet]');
+    if (sheet && !sheet.hidden) return;                           // menu đang mở
+    location.reload();
+  }
+
   let live = null;
 
   function connect() {
@@ -112,8 +122,15 @@
       } else if (m.type === 'event') {
         journal(m);
       } else if (m.type === 'progress') {
-        // Một luồng xong -> hỏi lại toàn cảnh, vì khung này vẽ TẤT CẢ luồng
-        // đang chạy chứ không phải riêng luồng vừa báo.
+        // Luồng CỦA TRANG NÀY vừa xong -> vẽ lại trang. Ruột mỗi tab (danh
+        // sách việc, kho đề bài) do máy chủ dựng thành HTML; SSE chỉ đẩy được
+        // nhật ký và tiến độ. Không nạp lại thì máy làm xong mà màn hình vẫn
+        // y nguyên — người dùng đọc ra là hỏng.
+        const box = document.querySelector('[data-journal]');
+        const mine = box && box.dataset.journal;      // "" ở Home = mọi luồng
+        if (!m.what && mine && m.stream === mine) { refreshIfIdle(); return; }
+        // Còn lại: hỏi lại toàn cảnh, vì khung tiến độ vẽ TẤT CẢ luồng đang
+        // chạy chứ không riêng luồng vừa báo.
         fetch('/api/state').then((r) => r.json()).then((s) => {
           progress(s.running); setState(s.state, s.next_in);
         }).catch(() => {});
@@ -244,6 +261,27 @@
         fetch('/api/' + act.dataset.act, { method: 'POST' })
           .then((r) => r.json()).then((s) => setState(s.state, s.next_in))
           .catch(() => {});
+        return;
+      }
+      // Nút gọi một việc NỀN: gửi đi, rồi tự nói ra nó đang làm gì. Không
+      // dùng chung [data-act] với Chạy/Tạm dừng vì hai cái trả về khác nhau —
+      // bên kia trả về trạng thái máy, bên này trả về việc vừa xếp hàng.
+      const post = e.target.closest('[data-post]');
+      if (post) {
+        e.preventDefault();
+        const was = post.textContent;
+        post.disabled = true;                 // chặn bấm hai lần ra hai luồng
+        fetch(post.dataset.post, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ arg: post.dataset.arg || '' }).toString(),
+        })
+          .then((r) => r.json())
+          .then((s) => {
+            if (s.reload) { location.reload(); return; }
+            post.textContent = s.note || was;
+          })
+          .catch(() => { post.disabled = false; post.textContent = was; });
         return;
       }
       const nav = e.target.closest('[data-nav]');

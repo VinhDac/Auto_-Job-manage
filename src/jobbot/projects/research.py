@@ -48,6 +48,7 @@ class Findings:
     data_named: list[tuple[str, int]] = field(default_factory=list)
     companies: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
+    skill_counts: list[tuple[str, int]] = field(default_factory=list)
     sample_lines: list[str] = field(default_factory=list)
     web_notes: list = field(default_factory=list)          # đọc từ trang công ty
     web_vocabulary: list[tuple[str, int]] = field(default_factory=list)
@@ -132,6 +133,11 @@ def study(conn: sqlite3.Connection, cluster) -> Findings:
             if not r["via_agency"] and r["company"] not in ("", "unknown")
         ).most_common(10)],
         skills=[s for s, _ in skills.most_common(12)],
+        # GIỮ cả số đếm. Đây là tín hiệu cầu ĐÁNG TIN duy nhất trong Findings:
+        # nó gộp trên toàn bộ nhóm. Còn core_needs thì gom theo câu chữ nên vụn
+        # — đo ngày 09/09 trên nhóm 'machine learning': 571 khoá khác nhau trên
+        # 696 dòng yêu cầu, dòng lặp nhiều nhất chỉ có ở 3/55 tin.
+        skill_counts=skills.most_common(12),
         sample_lines=lines,
     )
 

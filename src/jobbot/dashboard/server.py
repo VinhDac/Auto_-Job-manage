@@ -140,6 +140,33 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(json.dumps(payload, ensure_ascii=False).encode(),
                           status=status, ctype="application/json; charset=utf-8")
 
+    def _resume_build(self, skill: str) -> None:
+        """Chạy bảy chặng cho một kỹ năng, ở NỀN.
+
+        Nghiên cứu, hỏi LLM, tải bộ dữ liệu về kiểm — tính bằng phút. Chạy
+        trong lúc vẽ trang là trình duyệt đứng hình, đúng cái lỗi của trang
+        /projects/<nhóm> cũ.
+        """
+        def _run():
+            from ..projects import make
+            conn = db.connect()
+            try:
+                # tab_factory=None: KHÔNG mở Chrome từ một cú bấm nút. Chặng
+                # đọc trang công ty bị bỏ qua, pipeline vẫn chạy bằng JD.
+                # Bật trình duyệt vì một cú bấm là hành vi người dùng không
+                # đoán trước được — Chrome là việc của vòng quét.
+                make.build(conn, skill, live.cv_projects(conn))
+            except Exception as exc:            # noqa: BLE001
+                journal.log.error(journal.PROJECT,
+                                  f"{skill}: dựng hỏng — "
+                                  f"{type(exc).__name__}: {exc}")
+            finally:
+                journal.log.done(journal.PROJECT)
+                conn.close()
+
+        threading.Thread(target=_run, daemon=True,
+                         name=f"project-{skill}").start()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -193,46 +220,11 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
 
-        if path.startswith("/projects/"):
-            conn = db.connect()
-            try:
-                from ..cv.blocks import parse as parse_cv
-                from ..projects.cluster import build as cluster_jobs
-                from ..projects.pipeline import run as run_pipeline
-                from ..projects.research import study
-                answers = store.load(conn)
-                mine = [b for b in parse_cv(answers.get("cv_text") or "")
-                        if b.kind == "project"]
-                key = _segments(path)[-1]
-                found = next((c for c in cluster_jobs(conn, mine) if c.key == key), None)
-                if found is None:
-                    return self._404()
-                from ..projects.pipeline import research_cached
-                findings = study(conn, found)
-                # Chỉ ĐỌC cache. Mở Chrome trong lúc vẽ trang là sai — việc nặng
-                # thuộc về vòng quét nền, xem scripts/research.py.
-                findings, source = research_cached(conn, found, findings)
-                outcome = run_pipeline(conn, findings, [b.title for b in mine])
-                return self._html(projects.render_brief(found, findings, outcome))
-            finally:
-                conn.close()
+        # /projects/<key> ĐÃ BỎ cùng widget. Nó chạy CẢ BẢY CHẶNG pipeline
+        # ngay trong lúc vẽ trang — nghiên cứu, hỏi LLM, tải bộ dữ liệu về kiểm
+        # — rồi vứt kết quả đi. Dựng lại thì việc nặng phải nằm ở vòng nền và
+        # đề bài phải được LƯU, không phải sinh lại mỗi lần mở trang.
 
-        if path == "/projects":
-            conn = db.connect()
-            try:
-                from ..cv.blocks import parse as parse_cv
-                from ..projects.cluster import build as cluster_jobs
-                answers = store.load(conn)
-                mine = [b for b in parse_cv(answers.get("cv_text") or "")
-                        if b.kind == "project"]
-                found = cluster_jobs(conn, mine)
-                return self._html(projects.render(
-                    found, mine,
-                    stats=live.project_stats(conn, found, mine),
-                    settings=live.project_settings(conn),
-                    sizes=live.cluster_sizes(conn, found)))
-            finally:
-                conn.close()
         if path == "/search":
             conn = db.connect()
             try:
@@ -241,6 +233,13 @@ class Handler(BaseHTTPRequestHandler):
                     jobs=live.jobs(conn, flt), flt=flt,
                     counts=live.job_counts(conn, flt),
                     sieve=live.sieve(conn)))
+            finally:
+                conn.close()
+
+        if path == "/projects":
+            conn = db.connect()
+            try:
+                return self._html(projects.render(**live.project_board(conn)))
             finally:
                 conn.close()
 
@@ -356,6 +355,70 @@ class Handler(BaseHTTPRequestHandler):
             # đứng hình, mà nhật ký hiện tiến độ rồi nên không cần chờ.
             threading.Thread(target=_rejudge, daemon=True, name="rejudge").start()
             return self._redirect("/search")
+
+        if path == "/api/project/build":
+            # Bảy chặng: đọc JD, hỏi LLM, tải bộ dữ liệu về kiểm. Tính bằng
+            # phút — chạy nền, trả lời ngay, tiến độ xem ở nhật ký.
+            skill = form.get("arg", [""])[0].strip()
+            if not skill:
+                return self._json({"ok": False}, status=400)
+
+            self._resume_build(skill)
+            return self._json({"ok": True, "note": "đang dựng…"})
+
+        if path == "/api/project/state":
+            raw_arg = form.get("arg", [""])[0]
+            pid, _, state = raw_arg.partition(":")
+            conn = db.connect()
+            try:
+                from ..projects import inventory
+                inventory.set_state(conn, int(pid or 0), state)
+            except ValueError:
+                return self._json({"ok": False}, status=400)
+            finally:
+                conn.close()
+            return self._json({"ok": True, "reload": True})
+
+        if path == "/api/llm/answer":
+            purpose = ""              # gán trước: dùng lại SAU khối finally
+            conn = db.connect()
+            try:
+                from ..core import llm
+                text = form.get("text", [""])[0].strip()
+                req_id = form.get("id", ["0"])[0]
+                if not (text and req_id.isdigit()):
+                    return self._redirect("/projects")
+                llm.answer_request(conn, int(req_id), text)
+                purpose = (conn.execute(
+                    "SELECT purpose FROM llm_request WHERE id = ?",
+                    (int(req_id),)).fetchone() or {"purpose": ""})["purpose"]
+                journal.log.ok(journal.PROJECT,
+                               f"nhận câu trả lời cho {purpose}")
+            finally:
+                conn.close()
+
+            # Khép vòng: câu trả lời vừa dán vào là chạy tiếp bảy chặng ngay.
+            # Không có đoạn này thì người dùng phải tự đoán rằng còn phải quay
+            # sang bấm Dựng lần nữa — mà không chỗ nào nói ra điều đó.
+            skill = purpose.partition(":")[2]
+            if purpose.startswith("project_briefs:") and skill:
+                self._resume_build(skill)
+            return self._redirect("/projects")
+
+        if path == "/api/llm/drop":
+            conn = db.connect()
+            try:
+                from ..core import llm
+                from ..projects import make
+                dead = [r["id"] for r in llm.pending(conn, limit=100)
+                        if make.is_stale(r["purpose"])]
+                if dead:
+                    llm.drop(conn, dead)
+                    journal.log.emit(journal.PROJECT,
+                                     f"dọn {len(dead)} yêu cầu thuộc nhóm cũ")
+            finally:
+                conn.close()
+            return self._redirect("/projects")
 
         if path == "/api/pause":
             runner = sched.current()

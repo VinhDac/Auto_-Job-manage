@@ -389,37 +389,6 @@ def sources(conn: sqlite3.Connection) -> list[dict]:
     return out
 
 
-def project_stats(conn: sqlite3.Connection, clusters: list, mine: list) -> dict:
-    """Bước 4 đang ở đâu: bao nhiêu nhóm, bao nhiêu nhóm CV chưa trả lời được."""
-    real = [c for c in clusters if c.key != "other"]
-    return {
-        "clusters": len(real),
-        "gaps": sum(1 for c in real if c.gap),
-        "covered": sum(1 for c in real if not c.gap),
-        "mine": len(mine),
-        "jobs": sum(len(c.jobs) for c in real),
-        "waiting": llm_waiting(conn),
-    }
-
-
-def project_settings(conn: sqlite3.Connection) -> list[tuple[str, str]]:
-    from ..core import llm
-    from ..projects.cluster import MAX_CLUSTERS, MIN_JOBS, TOO_COMMON
-    engine = llm.engine_name()
-    return [
-        ("Máy LLM", engine if engine != "none"
-                    else "<span class=warn-t>chưa bật</span>"),
-        ("Tin tối thiểu mỗi nhóm", str(MIN_JOBS)),
-        ("Số nhóm tối đa", str(MAX_CLUSTERS)),
-        ("Kỹ năng quá phổ biến", f"có mặt ở >{int(TOO_COMMON * 100)}% tin thì không làm khoá nhóm"),
-        ("Nghiên cứu công ty", "đọc trang tuyển dụng qua Chrome, có cache"),
-    ]
-
-
-def cluster_sizes(conn: sqlite3.Connection, clusters: list) -> list[tuple[str, int]]:
-    return [(c.key[:12], len(c.jobs)) for c in clusters if c.key != "other"]
-
-
 def settings(conn: sqlite3.Connection) -> dict:
     """Ba núm + một dòng tình trạng. Không hơn."""
     from ..core import llm, prefs, versions
@@ -505,3 +474,38 @@ def llm_waiting(conn: sqlite3.Connection) -> int:
     llm.ensure_table(conn)
     return int(conn.execute(
         "SELECT COUNT(*) FROM llm_request WHERE answer = ''").fetchone()[0])
+
+
+# ---------------------------------------------------------------- projects
+
+def cv_projects(conn: sqlite3.Connection) -> list:
+    """Project ĐÃ có trên CV — nguồn cung thứ nhất của lưới khoảng trống."""
+    from ..cv.blocks import parse as parse_cv
+    from ..profile import store as pstore
+    text = pstore.load(conn).get("cv_text") or ""
+    return [b for b in parse_cv(text) if b.kind == "project"]
+
+
+def project_board(conn: sqlite3.Connection) -> dict:
+    """Ba ô của tab Projects, một lần đọc.
+
+    Lưới KHÔNG lưu trong bảng — nó là phép trừ giữa cầu (tin đòi gì) và cung
+    (CV + kho). Lưu thì phải giữ nó khớp với hai thứ luôn đổi.
+    """
+    from ..core import llm
+    from ..projects import inventory, make
+
+    mine = cv_projects(conn)
+    llm.ensure_table(conn)
+    waiting = []
+    for req in llm.pending(conn, limit=10):
+        row = dict(req)
+        row["stale"] = make.is_stale(row["purpose"])
+        # Dấu thời gian trong bảng là UTC, còn nhật ký hiện giờ máy — để cạnh
+        # nhau thì cùng một việc đọc ra hai giờ khác nhau. Tuổi thì không lệch.
+        row["age"] = _ago(row["created_at"])
+        waiting.append(row)
+    return {"grid": inventory.coverage(conn, mine),
+            "store": inventory.all(conn),
+            "scored": inventory.total_scored(conn),
+            "waiting": waiting}

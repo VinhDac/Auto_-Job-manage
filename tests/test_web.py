@@ -144,11 +144,100 @@ with tempfile.TemporaryDirectory() as tmp:
     check("POST /profile/import rỗng -> không sập",
           post("/profile/import", b"") in (200, 303))
 
+    print("\n[Projects: ba nút phải thật sự làm gì đó]")
+    # Cả bốn đường này mới có. Không test qua HTTP thì lỗi kiểu "quên định
+    # nghĩa hàm" chỉ lộ ra lúc người dùng bấm — đúng bốn lần đã xảy ra.
+    def post_form(path, body):
+        return post(path, body.encode())
+
+    status, body = get("/projects")
+    check("/projects vẽ được lưới khoảng trống", "KHOẢNG TRỐNG" in body.upper())
+    check("/projects vẽ được kho", ">Kho<" in body or "KHO" in body.upper())
+    check("ít tin thì lưới nói thẳng là chưa đo được, không vẽ ô rỗng",
+          "chưa có tin nào được chấm điểm" in body)
+
+    # Máy chủ chạy CÙNG tiến trình với bài test, nên hạ ngưỡng ở đây là hạ
+    # luôn bên trong nó. Sáu tin mẫu không đủ MIN_DEMAND thật (15 tin), mà
+    # dựng đủ 15 tin chỉ để thấy một cái nút là đắt hơn giá trị nó kiểm.
+    from jobbot.projects import inventory as inv2
+    real_min = inv2.MIN_DEMAND
+    inv2.MIN_DEMAND = 1
+    _s, body = get("/projects")
+    check("mỗi ô trống có một nút Dựng", "data-post='/api/project/build'" in body)
+    check("số nút Dựng đúng bằng số ô còn trống",
+          body.count("data-post='/api/project/build'") == body.count("gaprow open"))
+
+    check("POST /api/project/build thiếu kỹ năng -> 400",
+          post_form("/api/project/build", "arg=") == 400)
+
+    from jobbot.projects.brief import Brief as B2
+    conn2 = db.connect(Path(tmp) / "jobbot.db")
+    made = inv2.add(conn2, B2(question="Does a cost model change a backtest?",
+                              dataset_url="https://x/y.csv",
+                              method=["a" * 30] * 3, measure="Sharpe, measured daily",
+                              days=2, skills=["backtesting"],
+                              deliverable="one notebook"), ["hedge fund"])
+    conn2.close()
+
+    _s, body = get("/projects")
+    check("đề bài vừa cất hiện trong kho", "Does a cost model change" in body)
+    check("kho có nút đổi trạng thái", "data-post='/api/project/state'" in body)
+    check("ô được đề bài đó nhận làm thì hiện ◐, KHÔNG hiện ✓",
+          f"◐ đề bài #{made}" in body and f"✓ #{made}" not in body)
+    check("và ô đó không còn mời dựng thêm lần nữa",
+          "data-post='/api/project/build' data-arg='backtesting'" not in body)
+    check("làm XONG rồi mới thành dấu ✓",
+          post_form("/api/project/state", f"arg={made}:xong") == 200
+          and f"✓ #{made}" in get("/projects")[1])
+    inv2.MIN_DEMAND = real_min
+
+    check("POST /api/project/state đổi được trạng thái",
+          post_form("/api/project/state", f"arg={made}:dang_lam") == 200)
+    conn2 = db.connect(Path(tmp) / "jobbot.db")
+    check("trạng thái mới thực sự vào cơ sở dữ liệu",
+          inv2.all(conn2)[0]["state"] == inv2.DANG_LAM)
+    check("POST /api/project/state với id rác -> 400",
+          post_form("/api/project/state", "arg=xyz:dang_lam") == 400)
+
+    from jobbot.core import llm as llm2
+    llm2.ensure_table(conn2)
+    conn2.execute("INSERT INTO llm_request (created_at, purpose, prompt)"
+                  " VALUES (?,?,?)", (postings.now(),
+                                      "project_briefs:risk + python", "hỏi gì đó"))
+    conn2.commit(); conn2.close()
+    _s, body = get("/projects")
+    check("yêu cầu LLM đang chờ thì hiện ra", "yêu cầu cũ còn sót" in body)
+    check("khoá theo nhóm cũ được đánh dấu, không mời trả lời",
+          "không còn dùng" in body)
+    check("POST /api/llm/drop dọn được", post_form("/api/llm/drop", "") in (200, 303))
+    conn2 = db.connect(Path(tmp) / "jobbot.db")
+    check("yêu cầu cũ biến mất thật", not llm2.pending(conn2))
+    conn2.close()
+
+    check("POST /api/llm/answer rỗng -> không sập",
+          post_form("/api/llm/answer", "id=0&text=") in (200, 303))
+
+    print("\n[tấm phủ KHÔNG được chắn cả trang khi đang đóng]")
+    # LỖI THẬT, và là loại tệ nhất: cả app không bấm được gì.
+    # `hidden` chỉ là luật [hidden]{display:none} của trình duyệt.
+    # `.sheet{display:flex}` cùng độ ưu tiên nhưng là CSS của mình nên THẮNG —
+    # tấm phủ nằm trên cùng vĩnh viễn, phủ đen cả trang, nuốt mọi cú bấm.
+    css = get("/static/app.css")[1]
+    check("có luật .sheet[hidden] để hidden thật sự ăn",
+          ".sheet[hidden]{display:none}" in css)
+    # Đặt display trên .sheet mà KHÔNG có luật [hidden] đi kèm là tái hiện lỗi.
+    body_rule = css.split(".sheet{")[1].split("}")[0]
+    check("và luật đó đứng SAU luật .sheet gốc",
+          css.index(".sheet[hidden]") > css.index(".sheet{"))
+    check("tấm phủ có nền che thật (nên nếu hở là chắn cả trang)",
+          "rgba(0,0,0,.5)" in body_rule or "z-index:60" in body_rule)
+
     print("\n[Cài đặt là MENU, không phải tab]")
     _, home = get("/")
     check("Settings không còn trong thanh bên", "href='/settings'" not in home)
     check("có nút bánh răng trên thanh trên", "data-settings" in home)
     check("và có sẵn tấm phủ rỗng để nạp vào", "data-sheet" in home)
+    check("tấm phủ mặc định ĐANG ĐÓNG", "class=sheet hidden" in home)
 
     code, panel = get("/settings")
     check(f"/settings trả 200", code == 200)

@@ -405,13 +405,20 @@ body[data-run=paused]  .rdot{background:var(--warn)}
 
 /* ---------------- trang không cuộn ---------------- */
 /* main.flow = trang CHƯA chuyển sang widget, vẫn cuộn như cũ. */
-main:not(.flow){overflow:hidden;display:flex;flex-direction:column}
+/* Cửa sổ đủ rộng thì KHÔNG cuộn — đó là điểm của bố cục widget. Nhưng cửa
+   sổ nhỏ thì phải cho cuộn: ép mọi thứ vừa màn hình 640px nghĩa là mỗi ô còn
+   133px, chỉ đủ tiêu đề và hai dòng. Ô cao 133px thì có cũng như không.
+   overflow:hidden ở đây CẮT CỤT nội dung mà không có cách nào xem tiếp. */
+main:not(.flow){overflow-y:auto;display:flex;flex-direction:column}
 main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px 34px;
   display:flex;flex-direction:column}
 
 /* ---------------- lưới widget ---------------- */
+/* minmax(190px, 1fr): chia đều khi có chỗ, nhưng KHÔNG bao giờ mỏng hơn
+   190px. Hết chỗ thì lưới dài ra và trang cuộn — thà cuộn còn hơn có bảy ô
+   mà ô nào cũng cụt. */
 .wgrid{flex:1;min-height:0;display:grid;gap:12px;
-  grid-auto-rows:minmax(0,1fr)}
+  grid-auto-rows:minmax(190px,1fr)}
 .wid{display:flex;flex-direction:column;min-height:0;min-width:0;
   background:var(--panel);border:1px solid var(--line);border-radius:11px;
   overflow:hidden}
@@ -689,6 +696,11 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px
 .sheet{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.5);
   backdrop-filter:blur(2px);display:flex;align-items:flex-start;
   justify-content:flex-end;padding:calc(var(--top) + 8px) 14px 14px}
+/* BẮT BUỘC. Thuộc tính hidden chỉ là luật [hidden]{display:none} của trình
+   duyệt; .sheet{display:flex} cùng độ ưu tiên nhưng là CSS của mình nên
+   THẮNG — hidden thành vô nghĩa, tấm phủ nằm trên cùng vĩnh viễn, phủ đen
+   cả trang và nuốt mọi cú bấm. Không bấm được gì hết. */
+.sheet[hidden]{display:none}
 .sheetbox{width:400px;max-width:calc(100vw - 28px);max-height:100%;overflow:auto;
   background:var(--panel);border:1px solid var(--line-2);border-radius:12px;
   box-shadow:0 24px 70px rgba(0,0,0,.6)}
@@ -723,3 +735,76 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px
   border-left:2px solid var(--warn);border-radius:0 5px 5px 0;
   padding:5px 8px;margin:6px 0}
 .forced code{font-size:10.5px}
+
+/* ---------------- Projects: khoảng trống · kho · hàng đợi ---------------- */
+
+.gapnote{font-size:11.5px;color:var(--mute);margin-bottom:10px;line-height:1.5}
+.gapnote b{color:var(--dim);font-weight:600}
+
+.gaplist{display:flex;flex-direction:column;gap:1px}
+.gaprow{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;
+  padding:9px 2px;border-bottom:1px solid var(--line)}
+.gaprow:last-child{border-bottom:none}
+/* Ô còn trống là VIỆC PHẢI LÀM — nó phải nổi hơn ô đã có bằng chứng.
+   Ngược lại thì mắt đọc lưới xong không biết nên bắt đầu từ đâu. */
+.gaprow.open .gaphead b{color:var(--ink)}
+.gaprow.doing{opacity:.8}
+.gaprow.done{opacity:.5}
+.gaphead{display:flex;align-items:baseline;gap:9px}
+.gaphead b{font-size:13px;font-weight:600;color:var(--dim)}
+.gapn{font-size:11px;color:var(--mute);flex:none}
+.gapn i{font-style:normal;opacity:.55}   /* mẫu số mờ hơn tử số */
+.gaptrack{height:3px;border-radius:2px;background:var(--line-2);overflow:hidden;
+  margin:5px 0 4px}
+.gaptrack i{display:block;height:100%;background:var(--acc-2);border-radius:2px}
+.gapind{display:flex;gap:5px;flex-wrap:wrap}
+.gapmain{min-width:0}          /* không có dòng này thì tên kỹ năng dài đẩy vỡ cột */
+.gapact{flex:none}
+.gothave{font-size:11px;color:var(--acc);white-space:nowrap}
+.gotplan{font-size:11px;color:var(--warn);white-space:nowrap}
+
+.ind{font-size:10px;color:var(--mute);border:1px solid var(--line-2);
+  border-radius:20px;padding:1px 8px;white-space:nowrap}
+.sk{font-size:10px;color:var(--acc);background:var(--acc-bg);
+  border-radius:20px;padding:1px 8px;white-space:nowrap}
+
+.mbtn.tiny{font-size:11px;padding:4px 11px}
+
+/* kho */
+.plist{display:flex;flex-direction:column;gap:1px}
+.prow{display:grid;grid-template-columns:70px 1fr auto;gap:12px;align-items:start;
+  padding:11px 2px;border-bottom:1px solid var(--line)}
+.prow:last-child{border-bottom:none}
+.pstate{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--mute);padding-top:2px}
+.prow.dang_lam .pstate{color:var(--warn)}
+.prow.xong .pstate{color:var(--acc)}
+.pq{font-size:13px;line-height:1.4;color:var(--ink)}
+.ptags{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
+.pact{flex:none}
+.plink{font-size:11px;color:var(--acc);text-decoration:none}
+.plink:hover{text-decoration:underline}
+
+/* hàng đợi LLM — đường RA của llm.ask(), thứ trước giờ chưa có */
+.lq{border:1px solid var(--warn);background:var(--warn-bg);border-radius:11px;
+  padding:11px 13px;margin-bottom:13px}
+.lqhead{display:flex;align-items:center;justify-content:space-between;gap:11px;
+  font-size:12px;font-weight:600;color:var(--warn);flex-wrap:wrap}
+.lqclean{margin:0}
+.lqitem{font-size:11.5px;color:var(--dim);margin-top:8px}
+.lqitem summary{cursor:pointer;display:flex;justify-content:space-between;gap:11px;
+  padding:5px 0;list-style:none}
+.lqitem summary::-webkit-details-marker{display:none}
+.lqitem summary:hover{color:var(--ink)}
+.lqitem.old{display:flex;justify-content:space-between;gap:11px;opacity:.5;
+  padding:5px 0}
+.lqwhen{color:var(--mute);font-size:10.5px;flex:none}
+.lqbody{display:flex;flex-direction:column;gap:5px;padding:7px 0 3px}
+.lqlab{font-size:10.5px;color:var(--mute)}
+.lqprompt,.lqanswer{font:inherit;font-size:11px;line-height:1.5;width:100%;
+  color:var(--dim);background:var(--bg);border:1px solid var(--line);
+  border-radius:7px;padding:7px 9px;resize:vertical}
+.lqprompt{color:var(--mute)}
+.lqanswer:focus{outline:none;border-color:var(--acc-2);color:var(--ink)}
+.lqbody form{display:flex;flex-direction:column;gap:5px;margin:0}
+.lqbody .mbtn.apply{align-self:flex-start;width:auto;padding:6px 15px}

@@ -142,7 +142,9 @@ def run(conn: sqlite3.Connection, findings: Findings, existing: list[str],
               or "  - (nothing repeated clearly)",
         concepts=", ".join(k for k, _ in findings.concepts[:8]) or "—",
         data=", ".join(k for k, _ in findings.data_named[:5]) or "none named",
-        skills=", ".join(findings.skills[:10]),
+        skills=", ".join(
+            f"{s} ({n} of {findings.jobs})" for s, n in findings.skill_counts[:10])
+            or ", ".join(findings.skills[:10]),
         existing="\n".join(f"  - {e}" for e in existing[:5]) or "  - nothing yet",
         max_days=brief_mod.MAX_DAYS)
 
@@ -171,7 +173,7 @@ def run(conn: sqlite3.Connection, findings: Findings, existing: list[str],
         if not any(p.field == "dataset_url" for p in problems):
             check = inspect(item.dataset_url)
             data_problems = feasible.judge(item, check)
-        marks = rank_mod.score(item, findings.skills, data_problems, existing)
+        marks = rank_mod.score(item, findings.skills, dict(findings.skill_counts))
         scored.append((item, problems, data_problems, marks))
 
     ordered = rank_mod.rank(scored)

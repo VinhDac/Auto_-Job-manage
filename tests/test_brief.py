@@ -152,7 +152,7 @@ with tempfile.TemporaryDirectory() as tmp:
 # ---------------------------------------------------------------- feasibility
 
 from jobbot.projects.feasible import DataCheck, inspect, judge
-from jobbot.projects.rank import score as rank_score
+from jobbot.projects.rank import rank as rank_mod, score as rank_score
 from jobbot.projects.pipeline import _parse_many, run
 
 def fake_fetch(body: bytes, ctype="text/csv", size=None):
@@ -172,6 +172,52 @@ lookup = (b"Symbol,Security,Sector,Date added,CIK\n" +
 c2 = inspect("https://x/z.csv", fetch=fake_fetch(lookup, size=30000))
 check("'Date added' KHÔNG tính là trục thời gian", not c2.has_date)
 check("nhận ra là bảng tra cứu", c2.lookup_table)
+
+# --- tệp thật ngoài đời không sạch như tệp mẫu -------------------------------
+# Cả ba tình huống dưới đây đều ĐÃ xảy ra khi chạy thật, và tình huống đầu làm
+# vỡ CẢ lượt dựng đề bài chứ không phải chỉ loại một đề bài.
+
+import io, zipfile
+from jobbot.projects.feasible import _delimiter, _table_start
+
+PREAMBLE = (b"This file was created using the 202607 CRSP database.\r\n"
+            b"Missing data are indicated by -99.99.\r\n\r\n"
+            b"  Average Value Weighted Returns -- Daily\r\n")
+TABLE = (b",Agric,Food,Beer\r\n" + b"\r\n".join(
+    f"1926{i%12+1:02d}{i%28+1:02d},0.{i},1.{i},2.{i}".encode() for i in range(300)))
+
+buf = io.BytesIO()
+with zipfile.ZipFile(buf, "w") as z:
+    z.writestr("49_Industry_Portfolios_Daily.csv", PREAMBLE + TABLE)
+zipped = buf.getvalue()
+
+def zip_fetch(body):
+    """Bắt chước _fetch: lần đầu bị cắt theo Range, lần hai lấy trọn."""
+    def go(_u, timeout=0, limit=96_000, ranged=True):
+        return (body[:2000] if ranged else body), "application/zip", len(body)
+    return go
+
+c3 = inspect("https://x/ff.zip", fetch=zip_fetch(zipped))
+check("mở được .zip (cả thư viện Fama-French chỉ có zip)", c3.kind == "csv")
+check("nói rõ đã đọc tệp nào bên trong zip", "trong zip" in c3.note)
+check("bỏ được phần lời tựa phía trên bảng", c3.columns[1:4] == ["Agric", "Food", "Beer"])
+check("cột ngày KHÔNG TÊN vẫn nhận ra nhờ giá trị", c3.has_date)
+check("không nhầm là bảng tra cứu", not c3.lookup_table)
+check("đếm đúng số cột số", c3.numeric_cols == 3)
+check("dùng được", c3.ok)
+
+check("dấu phân cách Sniffer đoán bừa thì bỏ, quay về dấu phẩy",
+      _delimiter("Some prose about the file\r\nMore prose here\r\na,b\r\n1,2\r\n") == ",")
+check("lấy dòng NHIỀU ô nhất làm tiêu đề, không lấy câu văn lọt lưới",
+      _table_start(["The rate is simple, over the days",
+                    "and it compounds, across the year",
+                    ",a,b,c", "1,2,3,4", "5,6,7,8", "9,1,2,3"], ",") == 2)
+
+# Tệp đọc không ra bảng chỉ được phép loại ĐỀ BÀI ĐÓ, không được ném ra ngoài.
+junk = b"PKnot-a-zip\x00\x01" + b'"unclosed\nquote,\n' * 500
+c4 = inspect("https://x/junk.csv", fetch=lambda _u, timeout=0, limit=0, ranged=True:
+             (junk, "text/csv", len(junk)))
+check("tệp đọc không nổi -> báo lỗi, KHÔNG ném ngoại lệ", not c4.ok and c4.problems)
 
 B = lambda: Brief(question="How much does survivorship bias inflate momentum returns?",
                   dataset_url="https://x/z.csv", method=["a"*30]*3,
@@ -199,20 +245,36 @@ GOODQ = Brief(question="How much does a random split inflate out-of-sample Sharp
 WEAKQ = Brief(question="An analysis of market data using machine learning.",
               method=["Explore the data", "Clean the data", "Build a model"],
               days=5, skills=["python"])
-s_good, s_weak = rank_score(GOODQ, W, [], []), rank_score(WEAKQ, W, [], [])
+s_good, s_weak = rank_score(GOODQ, W), rank_score(WEAKQ, W)
 check("đề bài tốt hơn hẳn đề bài yếu", s_good.total > s_weak.total + 30)
-check("câu hỏi không bác bỏ được -> 0 điểm chiều đó",
-      s_weak.parts["falsifiable"] == 0.0)
 check("bước chung chung -> điểm cụ thể thấp", s_weak.parts["concrete"] < 0.3)
-check("dữ liệu hỏng -> mất điểm data_ready",
-      rank_score(GOODQ, W, ["bảng tra cứu"], []).parts["data_ready"] == 0.0)
-check("bài mẫu phổ biến -> mất điểm mới",
-      rank_score(Brief(question="Does the Titanic dataset predict survival?",
-                       dataset="titanic", method=["x"], days=1, skills=W),
-                 W, [], []).parts["novel"] == 0.0)
-check("trùng project cũ -> mất điểm mới",
-      rank_score(GOODQ, W, [], ["random split inflate out-of-sample Sharpe"])
-      .parts["novel"] == 0.0)
+check("thước chỉ còn chiều NHIỀU MỨC, không còn chiều đúng/sai",
+      set(rank_score(GOODQ, W).parts) == {"coverage", "concrete", "lean", "in_reach"})
+
+# Ba luật dưới đây ĐÃ RỜI khỏi bộ chấm sang bộ cổng — chúng vốn là đúng/sai.
+# Kiểm ở chỗ mới, để không ai lặng lẽ đem chúng về làm thước lần nữa.
+print("\n[ba luật cũ giờ là CỔNG, không phải thước]")
+def gate(b, seen=()):
+    return {p.field for p in validate(b, WANTED, list(seen), YES)}
+
+check("câu hỏi không bác bỏ được -> LOẠI, không phải trừ điểm",
+      "question" in gate(broken(question="An analysis of market data using ML.")))
+check("bài mẫu phổ biến -> LOẠI",
+      "dataset" in gate(broken(question="Does the Titanic dataset predict survival?",
+                               dataset="titanic")))
+check("trùng project cũ -> LOẠI",
+      "question" in gate(broken(), seen=["How much does a random split inflate "
+                                         "out-of-sample Sharpe"]))
+
+# Lỗi DỮ LIỆU cũng là cổng: nó phải đẩy đề bài xuống cuối bảng xếp hạng, chứ
+# không phải chỉ trừ điểm rồi vẫn có thể đứng đầu. Đã xảy ra: đề bài lỗi dữ
+# liệu điểm cao leo lên đầu -> pipeline báo "cả 4 đều trượt", trong khi ngay
+# dưới nó có một đề bài sạch.
+dirty = (GOODQ, [], ["bảng tra cứu, không phải chuỗi"], rank_score(GOODQ, W))
+clean = (WEAKQ, [], [], rank_score(WEAKQ, W))
+check("đề bài lỗi dữ liệu bị đẩy xuống sau đề bài sạch, dù điểm cao hơn",
+      rank_mod([dirty, clean])[0][0] is WEAKQ)
+
 
 print("\n[bóc nhiều phương án]")
 check("mảng JSON", len(_parse_many('[{"question":"a?"},{"question":"b?"}]')) == 2)
