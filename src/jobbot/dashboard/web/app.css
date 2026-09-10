@@ -982,3 +982,17 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px
 .pill.interview{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
 .pill.rejected{border-color:var(--bad);color:var(--bad)}
 .pill.offer{border-color:var(--acc);color:var(--acc-ink);background:var(--acc)}
+
+/* --- ô nối hộp thư (tab Quản lí) ------------------------------------- */
+.boxform{display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding:12px 14px;border:1px solid var(--line);border-radius:10px;
+  background:var(--panel2,var(--panel));margin-bottom:14px}
+.boxform .boxhead{flex:0 0 100%;font-weight:600}
+.boxform input{flex:1 1 220px;min-width:180px;padding:7px 10px;
+  border:1px solid var(--line);border-radius:7px;background:var(--bg);
+  color:var(--fg);font:inherit}
+.boxform .boxwhy{flex:0 0 100%;color:var(--muted);font-size:12px;line-height:1.6}
+.boxform .formnote{color:var(--warn,#c88)}
+.boxrow{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.boxok{color:var(--muted)}
+.boxok b{color:var(--fg)}

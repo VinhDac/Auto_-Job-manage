@@ -96,19 +96,46 @@ def _table(rows: list[dict]) -> str:
         "</tr></thead><tbody>" + body + "</tbody></table>")
 
 
+def _mailbox(ready: bool, address: str) -> str:
+    """Ô nhập hộp thư. KHÔNG bao giờ vẽ mật khẩu ra — kể cả dạng chấm.
+
+    Trang này Vin mở hàng ngày; một ô password có sẵn giá trị là mật khẩu nằm
+    trong HTML, đọc được bằng View Source và bị trình duyệt lưu vào bộ nhớ
+    đệm. Server chỉ vẽ ĐỊA CHỈ và TRẠNG THÁI; giá trị thật nằm trong
+    config.toml (chmod 600, đã gitignore).
+    """
+    if ready:
+        return (f"<div class=boxrow><span class=boxok>hộp thư "
+                f"<b>{esc(address)}</b> đã nối</span>"
+                f"<button class='mbtn apply' data-post='/api/track/mail/scan'>"
+                f"Quét thư 30 ngày</button>"
+                f"<button class='mbtn tiny' data-post='/api/mail/forget'>"
+                f"xoá mật khẩu</button></div>")
+    return (
+        "<form class=boxform data-post='/api/mail/setup'>"
+        "<div class=boxhead>Nối hộp thư việc làm — thư về là thứ tự cập nhật "
+        "bảng này</div>"
+        f"<input name=address type=email placeholder='địa chỉ hộp thư việc làm'"
+        f" value='{esc(address)}' required>"
+        "<input name=password type=password autocomplete=off"
+        " placeholder='app password 16 ký tự' required>"
+        "<button class='mbtn apply' type=submit>Nối</button>"
+        "<div class=boxwhy>Lấy ở <code>myaccount.google.com/apppasswords</code>"
+        " (bật xác minh 2 bước trước). KHÔNG phải mật khẩu tài khoản — Gmail đã"
+        " ngắt IMAP bằng mật khẩu tài khoản từ 2022. App password lưu vào"
+        " <code>config/config.toml</code>, chmod 600, đã gitignore."
+        "<span class=formnote></span></div></form>")
+
+
 def render(*, rows: list[dict], asks: list[dict], counts: dict,
-           mail_ready: bool = False) -> str:
+           mail_ready: bool = False, mail_address: str = "") -> str:
     open_now = sum(counts.get(s, 0) for s in OPEN)
     draft = counts.get("draft", 0)
     note = ((f"{draft} đang điền · " if draft else "")
             + f"{counts.get('total', 0)} lần nộp · {open_now} đang chờ · "
             f"{counts.get('silent', 0)} im lặng · "
             f"{counts.get('rejected', 0)} từ chối")
-    scan = (f"<button class='mbtn apply' data-post='/api/track/mail/scan'>"
-            f"Quét thư 30 ngày</button>" if mail_ready else
-            f"<span class=needcfg>chưa cấu hình hộp thư — điền "
-            f"<code>[mail]</code> trong <code>config/config.toml</code> "
-            f"rồi mở lại trang</span>")
+    scan = _mailbox(mail_ready, mail_address)
     return runtime.render(
         title="Quản lí", active="/track", stream="search", journal="bottom",
         note=note, cols=1,

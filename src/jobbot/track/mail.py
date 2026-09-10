@@ -21,7 +21,6 @@ from __future__ import annotations
 import email
 import imaplib
 import re
-import sqlite3
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 
@@ -31,17 +30,68 @@ SINCE_DAYS = 30
 MAX_MESSAGES = 400          # trần cứng, để một hộp thư to không treo vòng quét
 SNIPPET = 400               # ký tự lấy từ thân thư
 
+# App password của Google: đúng 16 chữ cái thường. Google hiện nó theo nhóm 4
+# có dấu cách cho dễ chép, nên bỏ dấu cách trước khi so.
+APP_PASSWORD = re.compile(r"[a-z]{16}")
+
 
 class MailError(RuntimeError):
     pass
 
 
-def account(conn: sqlite3.Connection | None = None) -> tuple[str, str]:
+def account() -> tuple[str, str]:
     """(địa chỉ, app password) từ config.toml. Chưa điền thì trả rỗng."""
     from ..core.config import section
     cfg = section("mail")          # KHÔNG đặt tên `box` — `box` là hộp thư IMAP
     return (str(cfg.get("address") or "").strip(),
             str(cfg.get("password") or "").strip())
+
+
+def check(address: str, password: str) -> str:
+    """Thử đăng nhập một cái rồi thoát. Rỗng = được, khác rỗng = lý do hỏng.
+
+    Có mặt hàm này vì nếu không, Vin dán mật khẩu xong không biết nó đúng hay
+    sai cho tới lần quét đầu tiên — và lúc đó thì lỗi nằm lẫn trong nhật ký.
+
+    KHÔNG bao giờ để mật khẩu lọt vào chuỗi trả về: thông báo lỗi của imaplib
+    là nguyên văn máy chủ trả lời, và chuỗi đó đi thẳng vào nhật ký.
+    """
+    if not address or not password:
+        return "chưa điền đủ địa chỉ và app password"
+    # Nhận ra mật khẩu TÀI KHOẢN trước khi gửi nó đi đâu cả. App password của
+    # Google luôn là 16 chữ cái thường, không số, không ký tự đặc biệt. Dán
+    # nhầm mật khẩu tài khoản là chuyện thường, và nếu cứ thử đăng nhập thì
+    # mật khẩu thật đã bay qua mạng rồi mới biết là vô ích.
+    if not APP_PASSWORD.fullmatch(password.replace(" ", "")):
+        return ("đây không phải app password. App password là 16 chữ cái "
+                "thường, không số, không ký tự đặc biệt. Lấy ở "
+                "myaccount.google.com/apppasswords sau khi bật xác minh 2 bước.")
+    try:
+        box = imaplib.IMAP4_SSL(HOST, PORT)
+        try:
+            box.login(address, password)
+            box.select("INBOX", readonly=True)
+        finally:
+            try:
+                box.logout()
+            except Exception:            # noqa: BLE001
+                pass
+    except imaplib.IMAP4.error as exc:
+        why = _hide(str(exc), password)
+        if "AUTHENTICATIONFAILED" in why or "Invalid credentials" in why:
+            return ("Gmail từ chối. Nhớ là app password 16 ký tự, KHÔNG phải "
+                    "mật khẩu tài khoản — Gmail đã ngắt IMAP bằng mật khẩu "
+                    "tài khoản từ 2022.")
+        return why[:160]
+    except OSError as exc:
+        return f"không nối được tới {HOST}: {_hide(str(exc), password)[:100]}"
+    return ""
+
+
+def _hide(text: str, secret: str) -> str:
+    """Bịt mật khẩu nếu nó lọt vào thông báo lỗi. Rẻ, và một lần lọt là lọt
+    vĩnh viễn vào nhật ký."""
+    return text.replace(secret, "***") if secret else text
 
 
 def _text(raw) -> str:

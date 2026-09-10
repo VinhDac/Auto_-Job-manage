@@ -475,6 +475,15 @@ with tempfile.TemporaryDirectory() as tmp:
         code, _ = get(f"/jobs/{job_id}/{sub}")
         check(f"/jobs/<id>/{sub} vẫn sống", code == 200)
 
+    # MỌI trang trong thanh bên. Đã sập trắng vì một tham số thừa ở chỗ gọi
+    # (`mail.account(conn)` sau khi hàm bỏ tham số) — 906 bài test xanh mà
+    # trang /track chết, vì không bài nào mở nó.
+    for page in ("/", "/search", "/track", "/projects", "/cv", "/profile",
+                 "/settings"):
+        code, body = get(page)
+        check(f"{page} mở được", code == 200, f"HTTP {code}")
+        check(f"{page} không trả trang lỗi", "Traceback" not in body)
+
     print("\n[thoát HTML — dữ liệu cào về không được thành mã]")
     conn = db.connect(Path(tmp) / "jobbot.db")
     conn.execute("UPDATE posting SET company = ? WHERE kept = 1",
@@ -503,6 +512,24 @@ with tempfile.TemporaryDirectory() as tmp:
 
     httpd.shutdown(); httpd.server_close()
     os.environ.pop("JOBBOT_DATA_DIR", None)
+
+print("\n[nút trong form — bấm không được nuốt mất form]")
+_js = (Path(__file__).resolve().parent.parent
+       / "src/jobbot/dashboard/web/live.js").read_text(encoding="utf-8")
+# FORM cũng mang [data-post] và nút Gửi nằm TRONG nó, nên closest() từ nút đi
+# ngược lên gặp form. Nhánh nút gán `post.textContent = ...` — gán textContent
+# lên một form là XOÁ SẠCH RUỘT NÓ. Bấm Nối một cái là ô nhập biến mất.
+check("nhánh nút bỏ qua thẻ FORM", "post.tagName === 'FORM'" in _js)
+check("và bỏ qua TRƯỚC khi gán textContent",
+      _js.index("post.tagName === 'FORM'") < _js.index("post.textContent = s.note"))
+check("form có trình nghe submit riêng", "form[data-post]" in _js)
+# Form Cài đặt là trường hợp riêng, không được nuốt mọi form khác.
+check("trình nghe Cài đặt vẫn chỉ nhận đúng /settings",
+      "!== '/settings'" in _js)
+_track = (Path(__file__).resolve().parent.parent
+          / "src/jobbot/dashboard/views/track.py").read_text(encoding="utf-8")
+check("nút Nối là type=submit, không phải data-post riêng",
+      "type=submit" in _track)
 
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

@@ -275,5 +275,21 @@ _fill = (Path(__file__).resolve().parent.parent
 check("chưa đăng nhập thì dừng, không đi mò tiếp",
       _fill.index("if lk.JOBS.search(url)") < _fill.index("real = lk.apply_url(tab)"))
 
+print("\n== tên tệp CV gửi đi ==")
+import tempfile as _tf
+from pathlib import Path as _P
+with _tf.TemporaryDirectory() as _d:
+    _kho = _P(_d) / "qube-research-technologies-digital-assets-quantitative-trader-4137.pdf"
+    _kho.write_bytes(b"%PDF-1.4 fake")
+    _out = run.sendable(_kho, b, 5294)
+    # Tên trong kho là tên NHÓM (đặt theo tin điểm cao nhất dùng chung bản CV
+    # đó). Đính thẳng thì nhà tuyển dụng Prima đọc được tên Qube trên tệp.
+    check("đặt tên theo Vin", _out.name == "Dac-Vinh-Nguyen-CV.pdf", _out.name)
+    check("không mang tên công ty khác", "qube" not in _out.name.lower())
+    check("nội dung y nguyên", _out.read_bytes() == _kho.read_bytes())
+    _other = run.sendable(_kho, b, 1288)
+    check("mỗi tin một thư mục riêng, không ghi đè nhau",
+          _out.parent != _other.parent, f"{_out.parent} vs {_other.parent}")
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

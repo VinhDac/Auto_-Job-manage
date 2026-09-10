@@ -369,7 +369,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(track.render(
                     rows=board.all(conn), asks=scan.proposals(conn),
                     counts=board.counts(conn),
-                    mail_ready=all(mail.account(conn))))
+                    mail_ready=all(mail.account()),
+                    mail_address=mail.account()[0]))
             finally:
                 conn.close()
 
@@ -613,6 +614,40 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False}, status=400)
             finally:
                 conn.close()
+            return self._json({"ok": True, "reload": True})
+
+        if path == "/api/mail/setup":
+            # Vin dán app password ở đây thay vì mở tệp bằng tay. Mật khẩu đi
+            # THẲNG vào config.toml (chmod 600, đã gitignore) và KHÔNG bao giờ
+            # được vẽ ngược ra HTML — trang chỉ hiện địa chỉ và trạng thái.
+            from ..core import config as cfg
+            from ..track import mail as tmail
+
+            address = form.get("address", [""])[0].strip()
+            # Google hiện app password theo nhóm 4 có dấu cách cho dễ chép.
+            # Bỏ dấu cách NGAY LÚC LƯU, để thứ đem đi kiểm đúng bằng thứ đem
+            # đi đăng nhập — trước đây vòng kiểm bỏ dấu cách còn vòng đăng
+            # nhập thì không, hai đường nhìn vào hai chuỗi khác nhau.
+            secret = form.get("password", [""])[0].strip().replace(" ", "")
+            if not address:
+                return self._json({"ok": False, "note": "thiếu địa chỉ"},
+                                  status=400)
+            cfg.write_value("mail", "address", address)
+            if secret:
+                cfg.write_value("mail", "password", secret)
+            saved = tmail.account()
+            why = tmail.check(*saved) if all(saved) else "chưa có app password"
+            if why:
+                journal.log.warn(journal.SEARCH, f"hộp thư chưa dùng được — {why}")
+                return self._json({"ok": False, "note": why[:70], "reload": False})
+            journal.log.ok(journal.SEARCH,
+                           f"hộp thư {address} đã nối được — bấm Quét thư")
+            return self._json({"ok": True, "reload": True})
+
+        if path == "/api/mail/forget":
+            from ..core import config as cfg
+            cfg.write_value("mail", "password", "")
+            journal.log.warn(journal.SEARCH, "đã xoá app password khỏi config")
             return self._json({"ok": True, "reload": True})
 
         if path == "/api/track/mail/scan":

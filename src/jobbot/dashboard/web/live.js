@@ -222,6 +222,26 @@
       const sheet = e.target.closest('[data-sheet]');
       if (sheet && !e.target.closest('.sheetbox')) closeSheet();
     });
+    // Form có [data-post]: gửi CẢ FORM, không phải mỗi data-arg như nút bấm.
+    // Nút [data-post] chỉ gửi một tham số; ô nhập hộp thư cần hai.
+    document.addEventListener('submit', (e) => {
+      const form = e.target.closest('form[data-post]');
+      if (!form) return;
+      e.preventDefault();
+      const note = form.querySelector('.formnote');
+      if (note) note.textContent = ' · đang kiểm…';
+      fetch(form.dataset.post, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(new FormData(form)).toString(),
+      })
+        .then((r) => r.json())
+        .then((s) => {
+          if (s.reload) { location.reload(); return; }
+          if (note) note.textContent = ' · ' + (s.note || 'chưa được');
+        })
+        .catch(() => { if (note) note.textContent = ' · gửi hỏng'; });
+    });
     document.addEventListener('submit', (e) => {
       const form = e.target.closest('.setform');
       // CHỈ chặn form Cài đặt. Trước đây chặn MỌI .setform rồi gửi cứng tới
@@ -272,6 +292,11 @@
       // dùng chung [data-act] với Chạy/Tạm dừng vì hai cái trả về khác nhau —
       // bên kia trả về trạng thái máy, bên này trả về việc vừa xếp hàng.
       const post = e.target.closest('[data-post]');
+      // FORM cũng mang [data-post], và nút Gửi nằm TRONG nó — closest() đi
+      // ngược lên là gặp form chứ không phải nút. Trước đây nhánh này nhận
+      // luôn cái form rồi gán textContent lên nó, tức là XOÁ SẠCH RUỘT FORM:
+      // bấm Nối một cái là ô nhập biến mất. Form để trình nghe 'submit' lo.
+      if (post && post.tagName === 'FORM') return;
       if (post) {
         e.preventDefault();
         const was = post.textContent;

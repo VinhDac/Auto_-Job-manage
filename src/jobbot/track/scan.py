@@ -4,9 +4,14 @@ KHÔNG tự đổi trạng thái. Một thư mở đầu "unfortunately" có th�
 cũng có thể là câu mở đầu của thư đổi lịch phỏng vấn. Đoán sai mà tự ghi thì
 bảng thành sai, và Vin không có cách nào biết là nó đã sai.
 
-Thư dựng lại được QUÁ KHỨ: mỗi thư "thank you for applying" trong 30 ngày là
-bằng chứng một lần đã nộp. Nên thư không khớp dòng nào mà là thư xác nhận thì
-được phép ĐẺ RA một dòng mới — đó là lần nộp có thật, chỉ là app chưa biết.
+Thư dựng lại được QUÁ KHỨ: MỌI thư có kết cục — xác nhận, mời phỏng vấn, từ
+chối, nhận việc — đều là bằng chứng một lần đã nộp. Không khớp dòng nào thì đẻ
+ra dòng mới ở đúng chặng đó. Đó là lần nộp có thật, chỉ là app chưa biết.
+
+LỖI ĐÃ SỬA: trước đây chỉ thư XÁC NHẬN mới được dựng lại dòng. Một thư mời
+phỏng vấn từ công ty app chưa có dòng thì hiện ra "chưa khớp dòng nào", Vin
+bấm Nhận và KHÔNG có gì xảy ra — lời mời phỏng vấn biến mất. Mà thư mời còn là
+bằng chứng mạnh hơn thư xác nhận. Một luật cho mọi kết cục, không ngoại lệ.
 """
 
 from __future__ import annotations
@@ -37,7 +42,7 @@ def store(conn: sqlite3.Connection, msg: dict, kind: str,
 
 def run(conn: sqlite3.Connection, days: int = mail.SINCE_DAYS) -> dict:
     """Một lượt quét. Trả về số đo, không trả về chữ."""
-    address, password = mail.account(conn)
+    address, password = mail.account()
     if not address or not password:
         jlog.warn(SEARCH, "chưa cấu hình hộp thư — xem config/config.toml")
         return {"ok": False, "why": "chưa cấu hình"}
@@ -58,10 +63,12 @@ def run(conn: sqlite3.Connection, days: int = mail.SINCE_DAYS) -> dict:
         company = sort.company_of(msg)
         app_id = sort.match(conn, msg)
 
-        # Thư xác nhận không khớp dòng nào = lần nộp app chưa biết. Dựng lại.
-        if app_id is None and kind == board.SENT and company:
+        # Không khớp dòng nào mà thư có kết cục = lần nộp app chưa biết.
+        # Dựng lại ở ĐÚNG chặng thư nói, đừng ép về "đã nộp": một thư từ chối
+        # dựng thành dòng "đang chờ" là bảng sai ngay lúc sinh ra.
+        if app_id is None and company and kind in board.STAGES:
             app_id = board.add(conn, company, "", origin="mail",
-                               applied_at=msg["received_at"])
+                               applied_at=msg["received_at"], stage=kind)
             made += 1
 
         fresh += store(conn, msg, kind, company, app_id)

@@ -348,6 +348,30 @@ def pick(tab, key: int, want: Ans) -> tuple[str, str]:
     return shown, ""
 
 
+def sendable(resume: Path, book: dict[str, Ans], job: int | None) -> Path:
+    """Bản CV để ĐÍNH KÈM, đặt tên theo Vin chứ không theo tin.
+
+    Tên tệp trong kho là tên NHÓM: một bản CV dùng cho nhiều tin, đặt theo tin
+    điểm cao nhất trong nhóm. Đính thẳng tệp đó thì nhà tuyển dụng Prima nhận
+    được "qube-research-technologies-digital-assets-quantitative-trader.pdf" —
+    họ đọc tên tệp trước cả khi mở, và thấy ngay tên đối thủ.
+
+    Nên chép sang một chỗ riêng cho từng tin, đặt tên bằng tên Vin. Thư mục
+    riêng theo tin, không dùng chung một tệp: hai đơn mở cùng lúc thì trình
+    duyệt đọc tệp lúc bấm Gửi, ghi đè là đơn này mang CV của đơn kia.
+    """
+    who = (book.get("full_name") or Ans("")).value or "CV"
+    name = re.sub(r"[^A-Za-z0-9]+", "-", who).strip("-") + "-CV.pdf"
+    stage = resume.parent / "send" / str(job if job is not None else "one")
+    stage.mkdir(parents=True, exist_ok=True)
+    out = stage / name
+    try:
+        out.write_bytes(resume.read_bytes())
+        return out
+    except OSError:
+        return resume                                # chép hỏng thì đính bản gốc
+
+
 def attach(tab, key: int, path: Path) -> str:
     """Gắn tệp. JS không đặt được value của input[type=file] — phải đi bằng
     lệnh CDP, đó là lý do hàm này đứng riêng."""
@@ -374,7 +398,7 @@ def _set(tab, key: int, value: str) -> str:
 # --- vòng chính -----------------------------------------------------------
 
 def fill(tab, book: dict[str, Ans], resume: Path | None,
-         wait: float = 12.0) -> Report:
+         wait: float = 12.0, job: int | None = None) -> Report:
     """Điền form đang mở. KHÔNG mở trang, KHÔNG gửi — tách ra để đo được.
 
     Chờ Ô chứ không chờ thẻ <form>: boards.greenhouse.io chuyển hướng sang
@@ -411,11 +435,12 @@ def fill(tab, book: dict[str, Ans], resume: Path | None,
 
         if key == "resume":
             if resume and resume.exists():
-                bad = attach(tab, item["k"], resume)
+                paper = sendable(resume, book, job)
+                bad = attach(tab, item["k"], paper)
                 if not bad:
                     used.add(key)
                 (report.filled if not bad else report.failed).append(
-                    (label, resume.name if not bad else bad))
+                    (label, paper.name if not bad else bad))
             else:
                 report.asks.append((label, "chưa in PDF cho tin này", True))
             continue
@@ -514,7 +539,7 @@ def open_and_fill(url: str, book: dict[str, Ans], resume: Path | None,
                 report = Report(url=login_wall(tab), needs_login=login_wall(tab))
                 return report, tab
 
-    report = fill(tab, book, resume, wait=4)
+    report = fill(tab, book, resume, wait=4, job=job)
     if job is not None:
         from .send import mark
         mark(tab, job)

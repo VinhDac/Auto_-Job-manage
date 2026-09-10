@@ -24,14 +24,25 @@ RULES = [
         r"\b(offer of employment|pleased to offer|we would like to offer|"
         r"offer letter|congratulations[^.]{0,40}offer)\b", re.I)),
     (INTERVIEW, re.compile(
-        r"\b(invite you to|would like to invite|schedule (?:a |an )?"
-        r"(?:call|interview|chat)|book a time|next (?:round|stage)|"
-        r"first[- ]round|online assessment|coding (?:test|challenge)|"
-        r"hackerrank|codility|karat)\b", re.I)),
+        r"\b(invit\w* (?:you )?(?:to|for) (?:an? )?"
+        r"(?:interview|call|chat|conversation)|"
+        r"invitation to (?:an? )?interview|interview invitation|"
+        r"would like to invite|would like to (?:meet|speak|chat|talk)|"
+        r"schedule (?:a |an )?(?:call|interview|chat)|book a time|"
+        r"next (?:round|stage)|first[- ]round|online assessment|"
+        r"coding (?:test|challenge)|hackerrank|codility|karat)\b", re.I)),
+    # Đo trên tiêu đề thư thật: bản cũ bắt hụt "decided not to move forward"
+    # (chỉ có "moving") và "won't be taking your application further" (chỉ có
+    # "take"). Hụt ở đây là hụt nặng nhất: thư từ chối rơi xuống "other" thì
+    # `needs_you = 0`, thư không bao giờ hiện ra, và bảng báo "đang chờ" mãi
+    # cho một lần nộp đã chết.
     (REJECTED, re.compile(
-        r"\b(not (?:be )?(?:moving|progressing) forward|unsuccessful|"
-        r"will not be progressing|decided not to proceed|"
-        r"not (?:to )?take your application further|"
+        r"\b(not (?:be )?(?:mov\w+|progress\w+|proceed\w+) forward|"
+        r"will not be (?:progressing|proceeding|moving)|"
+        r"decided not to (?:proceed|continue|mov\w+ forward)|"
+        r"(?:not|won'?t)[^.]{0,24}your application (?:any )?further|"
+        r"not (?:been )?successful|unsuccessful|"
+        r"not (?:the )?right (?:fit|match)|"
         r"other candidates|unable to offer you|regret to inform)\b", re.I)),
     (SENT, re.compile(
         r"\b(thank you for (?:applying|your application)|"
