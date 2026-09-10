@@ -21,10 +21,9 @@ AUTORUN = "autorun"
 SCAN_EVERY = "scan_every_min"    # quét lại mỗi bao nhiêu phút
 HOURS_FROM = "hours_from"        # Chrome chỉ chạy trong khung giờ này
 HOURS_TO = "hours_to"
-LLM_ENGINE = "llm_engine"        # trước đây chỉ đặt được bằng biến môi trường
 
 DEFAULTS = {AUTORUN: "0", SCAN_EVERY: "60",
-            HOURS_FROM: "8", HOURS_TO: "22", LLM_ENGINE: ""}
+            HOURS_FROM: "8", HOURS_TO: "22"}
 
 
 def get(conn: sqlite3.Connection, key: str) -> str:

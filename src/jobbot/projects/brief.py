@@ -1,21 +1,20 @@
-"""Sinh ĐỀ BÀI cho một project nhỏ — và kiểm tra nó trước khi tin.
+"""Đề bài project: cấu trúc, và CỔNG kiểm nó trước khi tin.
 
-Vì sao cần project mới thay vì dùng project cũ: project lớn có CHI PHÍ ĐỌC cao.
-Không ai trả cái giá đó cho ứng viên chưa quyết định thích. Project nhỏ đọc 5
-phút, và quan trọng hơn — **nó không có chỗ nào để nấp**. Người có kinh nghiệm
-đọc xong là biết ngay có làm thật hay không.
+Vì sao project nhỏ chứ không phải project lớn: project lớn có CHI PHÍ ĐỌC cao,
+và không ai trả cái giá đó cho một ứng viên chưa quyết định thích. Project nhỏ
+đọc 5 phút, và quan trọng hơn — **nó không có chỗ nào để nấp**. Người có kinh
+nghiệm đọc xong là biết ngay có làm thật hay không.
 
-Đây là chỗ DUY NHẤT trong hệ thống mà LLM được nghĩ ra cái mới. Ở CV và trang
-kết quả nó chỉ được chọn và sắp xếp. Ở đây nó đang đề xuất *việc nên làm*, không
-khai *việc đã làm*, nên không có sự thật nào để bịa.
-
-Nhưng KHÔNG tin thẳng. Mọi đề bài phải qua `validate()`:
+Đề bài do khuôn trong frame.py dựng, không do LLM sinh — xem lời chú ở đó.
+Module này chỉ còn hai việc: HÌNH DẠNG một đề bài (`Brief`), và CỔNG cho nó qua:
 
     câu hỏi phải là câu hỏi           dataset phải TRUY CẬP ĐƯỢC (kiểm HTTP thật)
-    số đo phải kèm cách đo            phải ≤ 3 ngày
-    phải chạm kỹ năng nhóm JD đòi     không được trùng project đã có
+    câu hỏi phải BÁC BỎ ĐƯỢC          số đo phải kèm cách đo
+    không phải bài mẫu ai cũng làm    phải ≤ 3 ngày
+    phải chạm kỹ năng thị trường đòi  không được trùng project đã có
 
-Đề bài trượt là trượt, không dùng. LLM giỏi hay dở không đổi được điều đó.
+Cổng còn đây kể cả khi đề bài do khuôn dựng: URL vẫn chết, khuôn vẫn mục. Nó
+đổi vai từ CHẶN LLM sang KIỂM LẠI KHUÔN.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
 
-from ..core import llm
 from ..ingest.base import UA, norm
 
 MAX_DAYS = 3.0
@@ -174,103 +172,3 @@ def validate(brief: Brief, wanted_skills: list[str], existing: list[str],
             out.append(Problem("question", f"trùng project đã có: {old[:50]}"))
             break
     return out
-
-
-# ---------------------------------------------------------------- sinh
-
-PROMPT = """You are helping a job applicant design ONE small portfolio project.
-
-THE POSTINGS THEY ARE TARGETING ({jobs} of them, at {companies}) list these requirement lines more than once (each line's count is given;
-most lines appear in only one posting, so treat these as samples, not consensus):
-{needs}
-
-Concepts these postings name most often: {concepts}
-Data sources they name: {data}
-Skills the cluster demands: {skills}
-
-THE APPLICANT ALREADY BUILT (do not repeat these):
-{existing}
-
-Design ONE project that answers a single sharp question a reader can check in
-five minutes. Hard constraints — a brief that breaks any of these is useless:
-
-  - Finishable in at most {max_days:g} days by one person
-  - Uses a PUBLIC dataset with a real, working URL
-  - Produces ONE number, with the method of measuring stated
-  - Touches at least 2 of the skills listed above
-  - Small enough that there is nowhere to hide sloppiness
-
-Reply with ONLY a JSON object, no prose around it:
-{{"question": "...?",
-  "answers_jd": "which requirement above it answers",
-  "dataset": "name",
-  "dataset_url": "https://...",
-  "method": ["step 1", "step 2", "step 3"],
-  "measure": "what number, and how it is measured",
-  "days": 2,
-  "skills": ["skill", "skill"],
-  "deliverable": "one notebook + a one-page write-up"}}"""
-
-
-def build_prompt(findings, existing: list[str]) -> str:
-    return PROMPT.format(
-        jobs=findings.jobs,
-        companies=", ".join(findings.companies[:6]) or "several firms",
-        needs="\n".join(f"  - ({n} postings) {t}" for t, n in findings.core_needs[:6])
-              or "  - (nothing repeated clearly)",
-        concepts=", ".join(k for k, _ in findings.concepts[:8]) or "—",
-        data=", ".join(k for k, _ in findings.data_named[:5]) or "none named",
-        skills=", ".join(findings.skills[:10]),
-        existing="\n".join(f"  - {e}" for e in existing[:5]) or "  - nothing yet",
-        max_days=MAX_DAYS)
-
-
-def parse_brief(text: str) -> Brief | None:
-    """Bóc JSON ra khỏi câu trả lời. LLM hay bọc thêm chữ quanh nó."""
-    if not text:
-        return None
-    found = re.search(r"\{.*\}", text, re.S)
-    if not found:
-        return None
-    try:
-        data = json.loads(found.group())
-    except ValueError:
-        return None
-    known = set(Brief.__dataclass_fields__)
-    clean = {k: v for k, v in data.items() if k in known}
-    try:
-        clean["days"] = float(clean.get("days", 0) or 0)
-    except (TypeError, ValueError):
-        clean["days"] = 0.0
-    clean["method"] = [str(s) for s in (clean.get("method") or [])]
-    clean["skills"] = [str(s) for s in (clean.get("skills") or [])]
-    return Brief(**clean)
-
-
-def generate(conn: sqlite3.Connection, findings, existing: list[str],
-             check_url=url_ok) -> dict:
-    """Sinh đề bài rồi KIỂM. Trả về trạng thái, không bao giờ trả đề bài chưa kiểm."""
-    if findings.thin:
-        return {"state": "not_enough",
-                "why": f"chỉ {findings.jobs} tin có mô tả trong nhóm này — "
-                       "không đủ để biết họ cần gì"}
-
-    prompt = build_prompt(findings, existing)
-    answer = llm.ask(conn, f"project_brief:{findings.cluster}", prompt)
-
-    if answer.pending:
-        return {"state": "pending", "engine": answer.engine, "prompt": prompt,
-                "why": "đã xếp hàng chờ Claude trả lời trong phiên"}
-    if not answer.text:
-        return {"state": "no_llm", "engine": answer.engine, "prompt": prompt,
-                "why": "chưa bật LLM — xem Settings"}
-
-    brief = parse_brief(answer.text)
-    if brief is None:
-        return {"state": "unreadable", "engine": answer.engine,
-                "why": "câu trả lời không phải JSON đọc được"}
-
-    problems = validate(brief, findings.skills, existing, check_url)
-    return {"state": "ok" if not problems else "rejected",
-            "engine": answer.engine, "brief": brief,
-            "problems": [asdict(p) for p in problems]}

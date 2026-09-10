@@ -14,7 +14,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .vocab import MUST_WORDS, NICE_HEADS, NICE_WORDS, REQ_HEADS, STOP_HEADS
+from .vocab import (DO_HEADS, MUST_WORDS, NICE_HEADS, NICE_WORDS,
+                    REQ_HEADS, STOP_HEADS)
 
 BULLET = re.compile(r"^\s*(?:[·•\-–*]|\d+[.)])\s+(.{6,400})$")
 
@@ -52,11 +53,16 @@ def _is_heading(line: str) -> bool:
         return False
     # tiêu đề thường ngắn, không kết thúc bằng dấu chấm
     return bool(REQ_HEADS.match(stripped) or NICE_HEADS.match(stripped)
-                or STOP_HEADS.match(stripped))
+                or STOP_HEADS.match(stripped) or DO_HEADS.match(stripped))
 
 
 def sections(text: str) -> list[tuple[str, list[str]]]:
-    """Cắt thành (loại phần, các dòng). Loại: req | nice | stop | body."""
+    """Cắt thành (loại phần, các dòng). Loại: req | nice | do | stop | body.
+
+    `do` là phần VIỆC PHẢI LÀM. Nó KHÔNG được lẫn vào `req`: yêu cầu nói "anh
+    phải có gì", việc phải làm nói "anh sẽ làm gì". Lẫn hai thứ là chấm điểm
+    ứng viên bằng mô tả công việc.
+    """
     out: list[tuple[str, list[str]]] = []
     kind, buffer = "body", []
     for line in (text or "").splitlines():
@@ -66,6 +72,7 @@ def sections(text: str) -> list[tuple[str, list[str]]]:
             stripped = line.strip()
             kind = ("nice" if NICE_HEADS.match(stripped)
                     else "stop" if STOP_HEADS.match(stripped)
+                    else "do" if DO_HEADS.match(stripped)
                     else "req")
             buffer = []
         else:
@@ -127,6 +134,8 @@ def requirements(text: str) -> list[Requirement]:
             continue                       # phúc lợi, giới thiệu — không phải yêu cầu
         if kind == "body":
             continue                       # đoạn văn mở đầu, để vòng dự phòng lo
+        if kind == "do":
+            continue                       # việc phải làm — xem duties()
         for item in _bullets(lines):
             must = kind == "req"
             if NICE_WORDS.search(item):
@@ -182,6 +191,48 @@ def _from_prose(parts: list[tuple[str, list[str]]]) -> list[Requirement]:
                 continue
             out.append(Requirement(sentence, not NICE_WORDS.search(sentence), "prose"))
     return out
+
+
+# Câu VIỆC PHẢI LÀM thật thì mở đầu bằng một ĐỘNG TỪ. Câu kiểu "You will be
+# part of one of our flagship teams" là giới thiệu, không phải việc.
+DUTY_VERB = re.compile(
+    r"^\s*(?:you(?:'ll| will)?\s+(?:be\s+)?)?"
+    r"(build|develop|design|research|conduct|create|analys|analyz|model|"
+    r"implement|maintain|monitor|improve|optimis|optimiz|automat|test|"
+    r"validat|backtest|investigat|explore|identif|measur|forecast|predict|"
+    r"deploy|support|manage|own|deliver|produce|write|generat|evaluat|"
+    r"collaborat|work with|partner with|contribute)", re.I)
+
+MAX_DUTIES = 12
+
+
+def duties(text: str) -> list[str]:
+    """Việc tin này bảo mình sẽ LÀM gì — nửa JD trước giờ bị vứt.
+
+    Khác requirements() ở chỗ hỏi khác nhau: yêu cầu là "anh phải có gì",
+    việc phải làm là "anh sẽ làm gì". Nửa thứ hai mới mô tả một project.
+
+    Lọc theo ĐỘNG TỪ MỞ ĐẦU: mục "The Role" của nhiều tin mở bằng một đoạn
+    quảng cáo đội nhóm ("you will be part of one of our flagship teams"), và
+    lấy nguyên cả mục là nhặt về quảng cáo thay vì việc.
+    """
+    out: list[str] = []
+    for kind, lines in sections(text):
+        if kind != "do":
+            continue
+        items = _bullets(lines) or _runs(lines)
+        for item in items:
+            if BENEFIT_WORDS.search(item) or not DUTY_VERB.match(item):
+                continue
+            out.append(item.strip())
+
+    seen, unique = set(), []
+    for item in out:
+        key = item.lower()[:80]
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique[:MAX_DUTIES]
 
 
 def confidence(reqs: list[Requirement]) -> str:

@@ -13,6 +13,7 @@ khi cần — và chỉ khi cần, vì JD thường đã tự nói.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections import Counter
@@ -49,6 +50,7 @@ class Findings:
     companies: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
     skill_counts: list[tuple[str, int]] = field(default_factory=list)
+    duties: list[str] = field(default_factory=list)   # việc tin bảo mình SẼ LÀM
     sample_lines: list[str] = field(default_factory=list)
     web_notes: list = field(default_factory=list)          # đọc từ trang công ty
     web_vocabulary: list[tuple[str, int]] = field(default_factory=list)
@@ -77,8 +79,18 @@ def study(conn: sqlite3.Connection, cluster) -> Findings:
         return Findings(cluster.title)
     marks = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"SELECT title, company, description, via_agency FROM posting"
+        f"SELECT title, company, description, via_agency, score_json FROM posting"
         f" WHERE id IN ({marks})", ids).fetchall()
+
+    # Nửa JD nói mình SẼ LÀM gì. Đếm theo dòng lặp lại nhiều nhất — đó là thứ
+    # cả nhóm cùng đòi, chứ không phải câu riêng của một công ty.
+    duty_counts: Counter[str] = Counter()
+    for row in rows:
+        try:
+            for d in json.loads(row["score_json"] or "{}").get("duties", []):
+                duty_counts[d.strip()] += 1
+        except (TypeError, ValueError):
+            pass
 
     need_counts: Counter[str] = Counter()
     need_text: dict[str, str] = {}
@@ -138,6 +150,7 @@ def study(conn: sqlite3.Connection, cluster) -> Findings:
         # — đo ngày 09/09 trên nhóm 'machine learning': 571 khoá khác nhau trên
         # 696 dòng yêu cầu, dòng lặp nhiều nhất chỉ có ở 3/55 tin.
         skill_counts=skills.most_common(12),
+        duties=[d for d, _ in duty_counts.most_common(6)],
         sample_lines=lines,
     )
 

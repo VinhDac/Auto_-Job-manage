@@ -280,18 +280,6 @@ def needs_you(conn: sqlite3.Connection) -> list[dict]:
     out: list[dict] = []
     unique = postings.count_groups(conn)
 
-    # Số liệu lỗi thời phải báo TRƯỚC mọi thứ khác — đọc số cũ mà tưởng mới
-    # thì mọi quyết định phía sau đều dựa trên nền sai.
-    waiting = llm_waiting(conn)
-    if waiting:
-        out.append({
-            "kind": "approve",
-            "text": f"{waiting} project brief request(s) waiting on Claude",
-            "href": "/projects",
-            "note": "The engine is set to answer in-session. Open a Claude Code session "
-                    "and the queued request gets answered; or switch the engine in Settings.",
-        })
-
     state = health(conn)
     if state["stale"]:
         out.append({
@@ -391,7 +379,7 @@ def sources(conn: sqlite3.Connection) -> list[dict]:
 
 def settings(conn: sqlite3.Connection) -> dict:
     """Ba núm + một dòng tình trạng. Không hơn."""
-    from ..core import llm, prefs, versions
+    from ..core import prefs, versions
     from ..core.derive import stale_count
     from ..core.scheduler import MAX_EVERY, MIN_EVERY, human_window
 
@@ -405,11 +393,6 @@ def settings(conn: sqlite3.Connection) -> dict:
     return {
         "every": prefs.num(conn, prefs.SCAN_EVERY, MIN_EVERY, MAX_EVERY),
         "hours": human_window(),
-        "engine": llm.engine_name(),
-        "engines": list(llm.ENGINES),
-        # Biến môi trường đè lên lựa chọn ở menu. Không nói ra thì người dùng
-        # chọn xong mà không có gì đổi, và không hiểu vì sao.
-        "engine_forced": llm.env_override(),
         "status": [
             ("Chrome", "đang mở" if ch.alive() else "tắt"),
             ("Board đang quét", f"{boards}"),
@@ -466,16 +449,6 @@ def health(conn: sqlite3.Connection) -> dict:
         "broken": broken,
         "flaky": flaky,
     }
-
-
-def llm_waiting(conn: sqlite3.Connection) -> int:
-    """Yêu cầu LLM đang chờ Claude trả lời trong phiên."""
-    from ..core import llm
-    llm.ensure_table(conn)
-    return int(conn.execute(
-        "SELECT COUNT(*) FROM llm_request WHERE answer = ''").fetchone()[0])
-
-
 # ---------------------------------------------------------------- projects
 
 def cv_projects(conn: sqlite3.Connection) -> list:
@@ -492,20 +465,9 @@ def project_board(conn: sqlite3.Connection) -> dict:
     Lưới KHÔNG lưu trong bảng — nó là phép trừ giữa cầu (tin đòi gì) và cung
     (CV + kho). Lưu thì phải giữ nó khớp với hai thứ luôn đổi.
     """
-    from ..core import llm
-    from ..projects import inventory, make
+    from ..projects import inventory
 
     mine = cv_projects(conn)
-    llm.ensure_table(conn)
-    waiting = []
-    for req in llm.pending(conn, limit=10):
-        row = dict(req)
-        row["stale"] = make.is_stale(row["purpose"])
-        # Dấu thời gian trong bảng là UTC, còn nhật ký hiện giờ máy — để cạnh
-        # nhau thì cùng một việc đọc ra hai giờ khác nhau. Tuổi thì không lệch.
-        row["age"] = _ago(row["created_at"])
-        waiting.append(row)
     return {"grid": inventory.coverage(conn, mine),
             "store": inventory.all(conn),
-            "scored": inventory.total_scored(conn),
-            "waiting": waiting}
+            "scored": inventory.total_scored(conn)}

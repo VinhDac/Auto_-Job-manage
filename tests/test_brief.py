@@ -1,7 +1,8 @@
-"""Test sinh đề bài project — chủ yếu test BỘ KIỂM TRA.
+"""Test CỔNG kiểm đề bài, và chặng kiểm dữ liệu.
 
-Không test được LLM sáng tạo hay dở. Test được: đề bài không đạt chuẩn thì
-KHÔNG BAO GIỜ lọt qua. Đó mới là thứ giữ chất lượng.
+Đề bài do khuôn trong projects/frame.py dựng chứ không do LLM sinh, nên cổng
+đổi vai: từ CHẶN LLM sang KIỂM LẠI KHUÔN. Nó vẫn phải đứng đây — URL vẫn chết,
+tệp vẫn đổi định dạng, khuôn vẫn mục.
 
     python3 tests/test_brief.py
 """
@@ -11,9 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from jobbot.core import db, llm
-from jobbot.projects.brief import (Brief, build_prompt, generate, parse_brief,
-                                   validate)
+from jobbot.core import db
+from jobbot.projects.brief import Brief, validate
 from jobbot.projects.research import Findings
 
 ok = fail = 0
@@ -103,57 +103,9 @@ check("không nói nộp gì -> chặn",
       any(p.field == "deliverable" for p in validate(broken(deliverable="something nice"),
                                                      WANTED, [], YES)))
 
-print("\n[bóc JSON khỏi câu trả lời]")
-check("JSON thuần", parse_brief('{"question":"a?","days":2}').question == "a?")
-check("JSON bọc trong chữ",
-      parse_brief('Sure! Here it is:\n{"question":"b?","days":1}\nHope that helps')
-      .question == "b?")
-check("không phải JSON -> None", parse_brief("xin lỗi tôi không làm được") is None)
-check("JSON hỏng -> None", parse_brief('{"question": ') is None)
-check("bỏ trường lạ", parse_brief('{"question":"c?","hack":"rm -rf"}').question == "c?")
-check("days không phải số -> 0", parse_brief('{"question":"d?","days":"hai"}').days == 0.0)
-
-print("\n[luồng sinh]")
-F = Findings(cluster="quant", jobs=6,
-             core_needs=[("Strong Python and validation", 3), ("Time series", 2)],
-             concepts=[("backtesting", 5)], data_named=[("market data", 3)],
-             companies=["Man Group"], skills=WANTED)
-prompt = build_prompt(F, ["Quant Trading Studio"])
-check("prompt có yêu cầu thật của nhóm", "Strong Python and validation" in prompt)
-check("prompt cấm lặp project cũ", "Quant Trading Studio" in prompt)
-check("prompt ép giới hạn 3 ngày", "3 days" in prompt)
-check("prompt đòi URL thật", "working URL" in prompt)
-
-with tempfile.TemporaryDirectory() as tmp:
-    conn = db.connect(Path(tmp) / "b.db")
-    thin = Findings(cluster="x", jobs=1, core_needs=[])
-    check("nhóm quá mỏng -> KHÔNG sinh bừa",
-          generate(conn, thin, [], YES)["state"] == "not_enough")
-
-    import os
-    os.environ["JOBBOT_LLM"] = "none"
-    check("không có LLM -> nói thẳng, không bịa đề bài",
-          generate(conn, F, [], YES)["state"] == "no_llm")
-
-    os.environ["JOBBOT_LLM"] = "claude_code"
-    first = generate(conn, F, [], YES)
-    check("claude_code -> xếp hàng chờ", first["state"] == "pending")
-    check("và ghi lại yêu cầu", len(llm.pending(conn)) == 1)
-
-    req = llm.pending(conn)[0]
-    llm.answer_request(conn, req["id"], '{"question":"Too vague","days":30}')
-    bad = generate(conn, F, [], YES)
-    check("đề bài tệ -> BỊ TỪ CHỐI, không lọt", bad["state"] == "rejected")
-    check("và nêu đủ lý do", len(bad["problems"]) >= 4)
-    conn.close()
-    os.environ.pop("JOBBOT_LLM", None)
-
-
 # ---------------------------------------------------------------- feasibility
 
 from jobbot.projects.feasible import DataCheck, inspect, judge
-from jobbot.projects.rank import rank as rank_mod, score as rank_score
-from jobbot.projects.pipeline import _parse_many, run
 
 def fake_fetch(body: bytes, ctype="text/csv", size=None):
     return lambda _u, timeout=0: (body, ctype, size)
@@ -235,24 +187,6 @@ c3 = inspect("https://x/page", fetch=fake_fetch(html, "text/html"))
 check("trang web -> chặn", not c3.ok and c3.kind == "html")
 check("URL không http -> chặn", not inspect("file.csv").ok)
 
-print("\n[xếp hạng]")
-W = ["python", "backtesting", "validation"]
-GOODQ = Brief(question="How much does a random split inflate out-of-sample Sharpe?",
-              method=["Build 40 momentum signals on daily closes",
-                      "Score each with a random and a time-ordered split",
-                      "Compare Sharpe across all 40 signals"],
-              days=1, skills=["python", "backtesting", "validation"])
-WEAKQ = Brief(question="An analysis of market data using machine learning.",
-              method=["Explore the data", "Clean the data", "Build a model"],
-              days=5, skills=["python"])
-s_good, s_weak = rank_score(GOODQ, W), rank_score(WEAKQ, W)
-check("đề bài tốt hơn hẳn đề bài yếu", s_good.total > s_weak.total + 30)
-check("bước chung chung -> điểm cụ thể thấp", s_weak.parts["concrete"] < 0.3)
-check("thước chỉ còn chiều NHIỀU MỨC, không còn chiều đúng/sai",
-      set(rank_score(GOODQ, W).parts) == {"coverage", "concrete", "lean", "in_reach"})
-
-# Ba luật dưới đây ĐÃ RỜI khỏi bộ chấm sang bộ cổng — chúng vốn là đúng/sai.
-# Kiểm ở chỗ mới, để không ai lặng lẽ đem chúng về làm thước lần nữa.
 print("\n[ba luật cũ giờ là CỔNG, không phải thước]")
 def gate(b, seen=()):
     return {p.field for p in validate(b, WANTED, list(seen), YES)}
@@ -265,56 +199,6 @@ check("bài mẫu phổ biến -> LOẠI",
 check("trùng project cũ -> LOẠI",
       "question" in gate(broken(), seen=["How much does a random split inflate "
                                          "out-of-sample Sharpe"]))
-
-# Lỗi DỮ LIỆU cũng là cổng: nó phải đẩy đề bài xuống cuối bảng xếp hạng, chứ
-# không phải chỉ trừ điểm rồi vẫn có thể đứng đầu. Đã xảy ra: đề bài lỗi dữ
-# liệu điểm cao leo lên đầu -> pipeline báo "cả 4 đều trượt", trong khi ngay
-# dưới nó có một đề bài sạch.
-dirty = (GOODQ, [], ["bảng tra cứu, không phải chuỗi"], rank_score(GOODQ, W))
-clean = (WEAKQ, [], [], rank_score(WEAKQ, W))
-check("đề bài lỗi dữ liệu bị đẩy xuống sau đề bài sạch, dù điểm cao hơn",
-      rank_mod([dirty, clean])[0][0] is WEAKQ)
-
-
-print("\n[bóc nhiều phương án]")
-check("mảng JSON", len(_parse_many('[{"question":"a?"},{"question":"b?"}]')) == 2)
-check("object rời", len(_parse_many('{"question":"a?"}\n{"question":"b?"}')) == 2)
-check("rác -> rỗng", _parse_many("sorry") == [])
-
-print("\n[luồng đầy đủ]")
-import json as _json, os as _os
-with tempfile.TemporaryDirectory() as tmp:
-    conn = db.connect(Path(tmp) / "p.db")
-    F2 = Findings(cluster="quant", jobs=8,
-                  core_needs=[("Strong Python and validation", 3)],
-                  concepts=[("backtesting", 5)], companies=["Man Group"],
-                  skills=["python", "backtesting", "validation"])
-    _os.environ["JOBBOT_LLM"] = "claude_code"
-    first = run(conn, F2, [])
-    check("chưa có câu trả lời -> chờ", first.state == "pending")
-
-    req = llm.pending(conn)[0]
-    llm.answer_request(conn, req["id"], _json.dumps([
-        {"question": "An analysis of markets.", "dataset_url": "https://x/a.csv",
-         "method": ["Explore"], "measure": "good", "days": 9,
-         "skills": ["python"], "deliverable": "notebook"},
-        {"question": "How much does a random split inflate out-of-sample Sharpe?",
-         "dataset_url": "https://x/b.csv",
-         "method": ["Build 40 momentum signals on daily closes",
-                    "Score each with a random and a time-ordered split",
-                    "Compare Sharpe across all 40 signals"],
-         "measure": "Mean Sharpe under each split, measured across 40 signals",
-         "days": 2, "skills": ["python", "backtesting", "validation"],
-         "deliverable": "one notebook plus a write-up"}]))
-    out = run(conn, F2, [], check_url=YES,
-              inspect=lambda _u: inspect("https://x/y.csv", fetch=fake_fetch(series, size=400000)))
-    check("chọn được đề bài tốt", out.state == "ok")
-    check("chọn ĐÚNG cái tốt, không phải cái đầu tiên",
-          "random split" in out.chosen.question)
-    check("giữ lại cái bị loại kèm lý do", len(out.rejected) == 1)
-    check("cái bị loại có nêu lỗi", len(out.rejected[0][1]) > 0)
-    conn.close()
-    _os.environ.pop("JOBBOT_LLM", None)
 
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

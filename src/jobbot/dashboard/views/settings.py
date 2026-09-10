@@ -5,7 +5,7 @@ nút bánh răng. Làm thành tab thì nó chiếm một chỗ trong thanh bên 
 với Search và Projects — trong khi nó không phải một việc, nó là mấy cái công
 tắc mở ra chỉnh rồi đóng lại.
 
-Chỉ ba núm. Thước để một thứ được vào đây:
+Chỉ hai núm. Thước để một thứ được vào đây:
 
     1. có nhiều hơn một câu trả lời đúng
     2. NGƯỜI DÙNG là người nên chọn
@@ -15,7 +15,7 @@ Thiếu một trong ba thì nó là thứ khác: một câu trả lời đúng -
 code; máy tự báo về mình -> đó là SỐ ĐỌC VỀ; không đổi được cố ý -> đó là
 RANH GIỚI AN TOÀN. Trang cũ có 18 dòng mà chỉ 2 dòng qua được thước này.
 
-Ba núm này đều KHÔNG đụng tới phán quyết — đổi chúng chỉ đổi cách chạy, có
+Hai núm này đều KHÔNG đụng tới phán quyết — đổi chúng chỉ đổi cách chạy, có
 tác dụng từ lần quét sau. Thứ đổi phán quyết nằm ở ô Lưới lọc bên tab Search,
 và ở đó nút Áp dụng nói rõ sẽ phán lại bao nhiêu tin.
 
@@ -26,23 +26,13 @@ from __future__ import annotations
 
 from html import escape as esc
 
-ENGINE_LABEL = {"none": "Không dùng",
-                "claude_code": "Claude Code (phiên đang mở)",
-                "api": "API (cần khoá)"}
-
-
 def _num(name: str, value: int, low: int, high: int, unit: str) -> str:
     return (f"<input type=number name={name} value='{value}'"
             f" min={low} max={high} step=1><span class=unit>{esc(unit)}</span>")
 
 
-def render(*, every: int, hours: tuple[int, int], engine: str,
-           engines: list[str], status: list[tuple[str, str]],
-           engine_forced: str = "") -> str:
-    picks = "".join(
-        f"<option value='{esc(e)}'{' selected' if e == engine else ''}>"
-        f"{esc(ENGINE_LABEL.get(e, e))}</option>" for e in engines)
-
+def render(*, every: int, hours: tuple[int, int],
+           status: list[tuple[str, str]]) -> str:
     rows = "".join(f"<div class=strow><span>{esc(k)}</span><b>{esc(v)}</b></div>"
                    for k, v in status)
 
@@ -57,13 +47,6 @@ def render(*, every: int, hours: tuple[int, int], engine: str,
         + _num("from", hours[0], 0, 23, "giờ") + "</label>"
         "<label class=srow><span>… đến</span>"
         + _num("to", hours[1], 1, 24, "giờ") + "</label>"
-
-        "<label class=srow><span>Máy LLM</span>"
-        f"<select name=engine{' disabled' if engine_forced else ''}>{picks}"
-        "</select></label>"
-        + (f"<div class=forced>đang bị biến môi trường "
-           f"<code>JOBBOT_LLM={esc(engine_forced)}</code> ép — bỏ biến đó đi "
-           f"thì ô này mới có tác dụng</div>" if engine_forced else "")
 
         + "<div class=setfoot>"
         "<button class='mbtn apply' type=submit>Lưu</button>"

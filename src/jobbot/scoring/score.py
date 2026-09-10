@@ -200,9 +200,14 @@ def _title_fit(title: str, answers: dict) -> tuple[float, str]:
 
 def score_job(title: str, description: str, answers: dict) -> dict:
     reqs = extract.requirements(description)
+    # Nửa còn lại của JD: việc tin này bảo mình SẼ LÀM. Không dùng để chấm
+    # điểm — chấm điểm ứng viên bằng mô tả công việc là sai. Cất lại vì đó là
+    # thứ mô tả sẵn một project trông thế nào (xem projects/frame.py).
+    todo = extract.duties(description)
     confidence = extract.confidence(reqs)
     if confidence == "none":
         return {"score": None, "confidence": "none", "requirements": [],
+                "duties": todo,
                 "reason": "Could not read any requirements from this posting — read it yourself.",
                 "breakdown": {}}
 
@@ -236,6 +241,7 @@ def score_job(title: str, description: str, answers: dict) -> dict:
         "requirements": [
             {"text": j.text, "met": j.met, "must": j.must, "evidence": j.evidence}
             for j in judged],
+        "duties": todo,
         "blockers": blockers,
         "capped": capped,
         "weak_evidence": sum(1 for j in judged if j.weak_only),

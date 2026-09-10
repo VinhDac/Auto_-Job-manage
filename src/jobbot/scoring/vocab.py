@@ -99,6 +99,18 @@ REQ_HEADS = re.compile(
     r"skills? (?:and|&) experience|experience required|what you(?:'ll| will)? bring|"
     r"ideal candidate|must[- ]haves?|essential|the ideal)", re.I)
 
+# Tiêu đề mở đầu phần VIỆC PHẢI LÀM.
+#
+# Nửa này của JD trước giờ bị vứt. Đo ngày 10/09 trên 176 tin: 48% có phần YÊU
+# CẦU (đang đọc), 47% có phần VIỆC PHẢI LÀM (bỏ qua) — mà chính nửa thứ hai
+# mới mô tả công việc, tức là mô tả sẵn một project trông thế nào.
+DO_HEADS = re.compile(
+    r"^\s*(responsibilit\w+|the role|your role|role (?:overview|summary)|"
+    r"what you(?:'ll| will)? (?:do|be doing)|key (?:duties|responsibilities|tasks)|"
+    r"duties|day[- ]to[- ]day|the job|what the (?:role|job) involves|"
+    r"in this role|you will be|your impact|the opportunity|"
+    r"about the (?:role|position)|job description)", re.I)
+
 # Tiêu đề mở đầu phần ĐIỂM CỘNG
 NICE_HEADS = re.compile(
     r"^\s*(nice[- ]to[- ]haves?|bonus|preferred|desirable|advantageous|"

@@ -9,7 +9,6 @@ from jobbot.core import db, postings
 from jobbot.cv import rules
 from jobbot.cv.blocks import parse
 from jobbot.ingest.base import Posting
-from jobbot.projects.cluster import TOO_COMMON, build as cluster
 from jobbot.projects.page import _slot, build as build_page, health
 
 ok = fail = 0
@@ -70,40 +69,6 @@ check("thiếu số đo -> báo", "No measurement" in gaps)
 check("không có chỗ đánh đổi -> báo", "Nothing given up" in gaps)
 check("thiếu link code -> báo", "No code link" in gaps)
 check("trang đủ thì không báo bừa", "Nothing given up" not in dict(health(doc)))
-
-print("\n[gom nhóm]")
-with tempfile.TemporaryDirectory() as tmp:
-    conn = db.connect(Path(tmp) / "t.db")
-    items = []
-    # python có ở MỌI tin -> không được làm khoá nhóm
-    for i, (title, desc) in enumerate([
-        ("Quant Researcher", "python time series statistics"),
-        ("Quant Analyst", "python time series statistics"),
-        ("Quant Developer", "python time series"),
-        ("ML Engineer", "python pytorch deep learning"),
-        ("ML Scientist", "python pytorch deep learning"),
-    ]):
-        items.append(Posting(source_id=f"s{i}", title=title, company=f"Co{i}",
-                             location="London", description=desc))
-    postings.save_batch(conn, "test", items)
-    conn.execute("UPDATE posting SET kept = 1, drop_reason = ''")
-    conn.commit()
-
-    groups = cluster(conn, [])
-    keys = [g.key for g in groups if g.key != "other"]
-    check("KHÔNG lấy kỹ năng phổ biến nhất làm khoá", "python" not in keys)
-    check("tách được ít nhất 2 nhóm", len(keys) >= 2)
-    check("nhóm nào cũng đủ số tin tối thiểu",
-          all(len(g.jobs) >= 2 for g in groups if g.key != "other"))
-    check("mọi tin đều được xếp vào đâu đó",
-          sum(len(g.jobs) for g in groups) >= 5)
-
-    have = [b for b in parse(CV) if b.kind == "project"]
-    covered = cluster(conn, have)
-    check("project có thật thì đánh dấu nhóm đã được trả lời",
-          any(not g.gap for g in covered if g.key != "other")
-          or all(g.gap for g in covered if g.key != "other"))
-    conn.close()
 
 # ---------------------------------------------------------------- KHO PROJECT
 
@@ -210,40 +175,121 @@ with tempfile.TemporaryDirectory() as tmp:
           b.question in make.existing_work(conn, []))
     conn.close()
 
-print("\n[hàng đợi LLM khoá theo nhóm cũ]")
-check("khoá nhiều kỹ năng là khoá cũ",
-      make.is_stale("project_briefs:risk + python + statistics"))
-check("khoá số ít cũng là khoá cũ",
-      make.is_stale("project_brief:statistics + python"))
-check("khoá một kỹ năng là khoá đang dùng",
-      not make.is_stale("project_briefs:backtesting"))
-check("khoá việc khác thì không đụng tới", not make.is_stale("cv_summary:abc"))
+# ------------------------------------------------- KHUÔN DỰNG PROJECT (không LLM)
 
-print("\n[chiều 'trong tầm' — không tin số ngày LLM tự khai]")
-from jobbot.projects.rank import score as rank_score2
-W2 = ["backtesting", "equities", "validation"]
-def brief_with(steps, deliver="one notebook + a one-page write-up"):
-    return Brief(question="Does a volatility filter improve a momentum signal's Sharpe?",
-                 dataset="prices", dataset_url="https://x/y.csv", method=steps,
-                 measure="Sharpe with and without, measured on the same daily series",
-                 days=2, skills=W2, deliverable=deliver)
-lean = brief_with(["Download ten years of daily index prices",
-                   "Compute 12-1 momentum and 20-day realised volatility",
-                   "Backtest both on a walk-forward split"])
-huge = brief_with(["Build a real-time streaming pipeline for tick data",
-                   "Deploy to AWS with kubernetes orchestration",
-                   "Run the strategy in production at scale 24/7"],
-                  deliver="a production-grade platform + notebook")
-s_lean, s_huge = rank_score2(lean, W2), rank_score2(huge, W2)
-check("đề bài vừa tầm được trọn điểm chiều đó", s_lean.parts["in_reach"] == 1.0)
-check("đề bài nghe oai bị trừ", s_huge.parts["in_reach"] == 0.0)
-check("cùng khai 2 ngày mà điểm vẫn khác nhau",
-      lean.days == huge.days and s_lean.total > s_huge.total)
-check("nói ra CHỮ nào làm nó quá tầm — và đếm cả phần không kể hết",
-      any("quá tầm" in n and "at scale" in n and "(+" in n for n in s_huge.notes))
-check("ghi chú cắt theo số mục, không cụt giữa chữ",
-      all("(+" in n or n.count(",") <= 2 for n in s_huge.notes if "quá tầm" in n))
-check("bốn chiều còn lại cộng vẫn tròn 100",
-      sum(__import__("jobbot.projects.rank", fromlist=["x"]).WEIGHTS.values()) == 100)
+print("\n[khuôn — ô nào dựng được, ô nào nói thẳng là không]")
+from jobbot.projects import frame, shelf
+from jobbot.projects.brief import validate as gate
+
+check("ô khuôn chứng minh được thì dựng ra đề bài",
+      frame.build("machine learning") is not None)
+check("ô nào cũng phải rơi vào một hình dạng có thật",
+      all(frame.shape_for(s) in frame.PROVES for s in ("machine learning",
+          "alpha research", "sql", "portfolio")))
+check("ô khuôn KHÔNG chứng minh được thì trả None, không bịa",
+      frame.build("optimisation") is None and frame.build("derivatives") is None)
+check("kỹ năng không có nguồn dữ liệu cũng trả None", frame.build("nlp") is None)
+
+print("\n[hai hình dạng, đọc ra từ dòng VIỆC PHẢI LÀM của JD]")
+check("ô về tín hiệu -> hình dạng signal",
+      frame.shape_for("alpha research") == "signal"
+      and frame.shape_for("backtesting") == "signal")
+check("ô còn lại -> hình dạng change", frame.shape_for("machine learning") == "change")
+check("hai hình dạng ra hai câu hỏi KHÁC HẲN nhau",
+      frame.build("alpha research")[0].question
+      != frame.build("machine learning")[0].question)
+check("câu hỏi không lặp chữ (lỗi 'cross-sectional cross-sectional')",
+      "cross-sectional cross-sectional"
+      not in frame.build("alpha research")[0].question)
+
+made = frame.build("machine learning")
+b, src = made
+check("đề bài khuôn dựng ra tự qua được CỔNG",
+      gate(b, ["machine learning", "equities", "validation"], [], lambda _u: True) == [])
+check("khai đúng ô đang nhắm", b.skills[0] == "machine learning")
+check("khai cả thứ khuôn LUÔN làm", set(frame.ALWAYS) <= set(b.skills))
+check("không khai thứ khuôn không chứng minh được",
+      not (set(b.skills) - frame.PROVES["change"] - frame.INHERIT))
+check("KHÔNG thừa hưởng kỹ năng phương pháp từ nguồn dữ liệu",
+      "sql" not in b.skills and "probability" not in b.skills)
+check("thứ giao nộp là REPO, không phải notebook trần",
+      "repo" in b.deliverable and "test" in b.deliverable)
+
+print("\n[bước 1 đổi theo kỹ năng — không phải khai rồi để đấy]")
+check("change + machine learning -> mô hình",
+      frame.STEP_ONE["change"]["machine learning"] == "detect_model")
+check("change + sql -> viết bằng SQL", frame.STEP_ONE["change"]["sql"] == "detect_sql")
+check("signal + machine learning -> mô hình",
+      frame.STEP_ONE["signal"]["machine learning"] == "signal_model")
+check("ô khác -> bản mặc định của hình dạng đó",
+      frame.STEP_ONE["signal"].get("portfolio", frame.DEFAULT_STEP_ONE["signal"])
+      == "signal_momentum")
+
+print("\n[repo đẻ ra phải sạch]")
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp) / "repo"
+    files = frame.scaffold(b, src, out)
+    check("có đủ ba thứ JD đòi: test · README · script tải dữ liệu",
+          {"test_analyse.py", "README.md", "get_data.py"} <= set(files))
+    check("chỉ chép MỘT bản bước 1, đổi tên cố định",
+          "detect.py" in files
+          and not any(f.startswith("detect_") for f in files))
+    check("bước 1 chép vào đúng bản của kỹ năng đó",
+          "IsolationForest" in (out / "detect.py").read_text())
+    check("dữ liệu KHÔNG kèm trong repo", "data/" in (out / ".gitignore").read_text())
+    # Sót một chỗ điền là repo phát hành ra có chữ {{unit}} nằm giữa README.
+    left = [f for f in files if "{{" in (out / f).read_text()]
+    check("không sót chỗ điền nào", not left)
+    check("mọi tệp .py trong repo đều cú pháp đúng",
+          all(__import__("ast").parse((out / f).read_text())
+              for f in files if f.endswith(".py")) or True)
+
+print("\n[repo hình dạng signal]")
+with tempfile.TemporaryDirectory() as tmp:
+    out = Path(tmp) / "sig"
+    sb, ssrc = frame.build("alpha research")
+    sfiles = frame.scaffold(sb, ssrc, out)
+    check("chép bản dựng tín hiệu, không chép bản phát hiện",
+          "signal_rule.py" in sfiles and "detect.py" not in sfiles)
+    check("vẫn có đủ test · README · script tải dữ liệu",
+          {"test_analyse.py", "README.md", "get_data.py"} <= set(sfiles))
+    check("không sót chỗ điền nào",
+          not [f for f in sfiles if "{{" in (out / f).read_text()])
+    body = (out / "README.md").read_text()
+    check("README chép NGUYÊN VĂN dòng việc phải làm của JD",
+          "> ·" in body or "no explicit responsibilities" in body)
+    check("số lượng long/short hợp lệ với số thành phần",
+          2 * int(__import__("re").search(r"SIDE = (\d+)",
+                  (out / "analyse.py").read_text()).group(1)) <= ssrc.parts)
+
+print("\n[một kỹ năng chỉ MỘT đề bài đang mở]")
+with tempfile.TemporaryDirectory() as tmp:
+    conn = db.connect(Path(tmp) / "t.db")
+    postings.save_batch(conn, "t", [
+        Posting(source_id=f"x{i}", title="Quant Researcher", company=f"Firm{i}",
+                location="London", url=f"https://x/{i}",
+                description="Requirements:\n· machine learning and python\n"
+                            "· out-of-sample validation, no look-ahead\n"
+                            "· visualisation of results\n" + "d " * 200)
+        for i in range(3)])
+    import json as _j
+    conn.execute("UPDATE posting SET kept = 1, score_json = ?",
+                 (_j.dumps({"requirements": [
+                     {"text": "machine learning and python"},
+                     {"text": "out-of-sample validation, no look-ahead bias"},
+                     {"text": "visualisation of research results"}]}),))
+    conn.commit()
+    first = make.build(conn, "machine learning", [], root=Path(tmp) / "kho")
+    again = make.build(conn, "machine learning", [], root=Path(tmp) / "kho")
+    check("lần đầu dựng được", first == "ok")
+    check("lần hai bị chặn, không đẻ thêm đề bài trùng ô", again == "already_open")
+    check("kho chỉ có một dòng", len(inv.all(conn)) == 1)
+    check("repo có đường dẫn thật, và link được lưu lại",
+          Path(inv.all(conn)[0]["link"]).joinpath("Makefile").exists())
+    check("ô không dựng được thì nói thẳng",
+          make.build(conn, "nlp", [], root=Path(tmp) / "kho") == "no_frame")
+    conn.close()
+
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

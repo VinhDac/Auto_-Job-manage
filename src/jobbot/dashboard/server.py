@@ -309,13 +309,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/settings":
             conn = db.connect()
             try:
-                from ..core import llm, prefs
+                from ..core import prefs
                 prefs.put(conn, prefs.SCAN_EVERY, form.get("every", ["60"])[0])
                 prefs.put(conn, prefs.HOURS_FROM, form.get("from", ["8"])[0])
                 prefs.put(conn, prefs.HOURS_TO, form.get("to", ["22"])[0])
-                engine = form.get("engine", [""])[0]
-                prefs.put(conn, prefs.LLM_ENGINE,
-                          engine if engine in llm.ENGINES else "")
                 journal.log.emit(journal.SYSTEM, "cài đặt đã đổi")
                 return self._html(settings.render(**live.settings(conn)))
             finally:
@@ -378,47 +375,6 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             return self._json({"ok": True, "reload": True})
-
-        if path == "/api/llm/answer":
-            purpose = ""              # gán trước: dùng lại SAU khối finally
-            conn = db.connect()
-            try:
-                from ..core import llm
-                text = form.get("text", [""])[0].strip()
-                req_id = form.get("id", ["0"])[0]
-                if not (text and req_id.isdigit()):
-                    return self._redirect("/projects")
-                llm.answer_request(conn, int(req_id), text)
-                purpose = (conn.execute(
-                    "SELECT purpose FROM llm_request WHERE id = ?",
-                    (int(req_id),)).fetchone() or {"purpose": ""})["purpose"]
-                journal.log.ok(journal.PROJECT,
-                               f"nhận câu trả lời cho {purpose}")
-            finally:
-                conn.close()
-
-            # Khép vòng: câu trả lời vừa dán vào là chạy tiếp bảy chặng ngay.
-            # Không có đoạn này thì người dùng phải tự đoán rằng còn phải quay
-            # sang bấm Dựng lần nữa — mà không chỗ nào nói ra điều đó.
-            skill = purpose.partition(":")[2]
-            if purpose.startswith("project_briefs:") and skill:
-                self._resume_build(skill)
-            return self._redirect("/projects")
-
-        if path == "/api/llm/drop":
-            conn = db.connect()
-            try:
-                from ..core import llm
-                from ..projects import make
-                dead = [r["id"] for r in llm.pending(conn, limit=100)
-                        if make.is_stale(r["purpose"])]
-                if dead:
-                    llm.drop(conn, dead)
-                    journal.log.emit(journal.PROJECT,
-                                     f"dọn {len(dead)} yêu cầu thuộc nhóm cũ")
-            finally:
-                conn.close()
-            return self._redirect("/projects")
 
         if path == "/api/pause":
             runner = sched.current()

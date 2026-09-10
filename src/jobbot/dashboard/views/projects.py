@@ -80,50 +80,6 @@ def _gaps(grid: list[dict], scored: int) -> str:
             + "".join(_gap_row(c, most, scored) for c in grid) + "</div>")
 
 
-def _queue(waiting: list[dict]) -> str:
-    """Hàng đợi LLM — chỗ RA, thứ trước giờ chưa có.
-
-    llm.ask() xếp yêu cầu vào bảng và llm.answer_request() lấy ra, nhưng KHÔNG
-    chỗ nào trong giao diện gọi cái thứ hai: 5 yêu cầu treo từ 07/09 không ai
-    trả lời được. Hàng đợi chỉ có đường vào thì nó là cái hố, không phải hàng đợi.
-    """
-    if not waiting:
-        return ""
-    dead = sum(1 for r in waiting if r.get("stale"))
-    items = ""
-    for req in waiting:
-        # Khoá theo nhóm cũ thì trả lời cũng vô ích — nói thẳng ra chỗ đó,
-        # đừng để người dùng ngồi chép prompt rồi công cốc.
-        if req.get("stale"):
-            items += (
-                f"<div class='lqitem old'><span>{esc(req['purpose'])}</span>"
-                f"<span class=lqwhen>nhóm cũ · không còn dùng</span></div>")
-            continue
-        items += (
-            f"<details class=lqitem><summary>{esc(req['purpose'])}"
-            f"<span class=lqwhen>{esc(req.get('age') or '')}</span></summary>"
-            f"<div class=lqbody>"
-            f"<label class=lqlab>1 · bấm vào ô dưới để chọn hết, chép sang Claude</label>"
-            f"<textarea class=lqprompt readonly rows=6"
-            f" onclick='this.select()'>{esc(req['prompt'])}</textarea>"
-            f"<form method=post action='/api/llm/answer'>"
-            f"<input type=hidden name=id value='{req['id']}'>"
-            f"<label class=lqlab>2 · dán câu trả lời vào đây</label>"
-            f"<textarea class=lqanswer name=text rows=4"
-            f" placeholder='dán nguyên câu trả lời, kể cả phần JSON'></textarea>"
-            f"<button class='mbtn apply' type=submit>Nhận câu trả lời</button>"
-            f"</form></div></details>")
-
-    clean = (f"<form method=post action='/api/llm/drop' class=lqclean>"
-             f"<button class='mbtn tiny' type=submit>Dọn {dead} cái cũ</button>"
-             f"</form>" if dead else "")
-    live = len(waiting) - dead
-    head = (f"{live} đề bài đang chờ Claude trả lời" if live
-            else f"{dead} yêu cầu cũ còn sót")
-    return (f"<div class=lq><div class=lqhead>{head}{clean}</div>"
-            f"{items}</div>")
-
-
 def _project_row(row: dict) -> str:
     skills = "".join(f"<span class=sk>{esc(s)}</span>" for s in row["skills"])
     inds = "".join(f"<span class=ind>{esc(i)}</span>" for i in row["industries"])
@@ -140,7 +96,7 @@ def _project_row(row: dict) -> str:
             f"<div class=pact>{act}</div></div>")
 
 
-def _store(rows: list[dict], waiting: list[dict]) -> str:
+def _store(rows: list[dict]) -> str:
     if not rows:
         body = ("<div class=empty-box>kho còn trống. Bấm <b>Dựng</b> ở một ô "
                 "bên trái — đề bài nào qua được kiểm cứng và kiểm dữ liệu thì "
@@ -150,13 +106,12 @@ def _store(rows: list[dict], waiting: list[dict]) -> str:
         body = (f"<div class=gapnote>{len(rows)} đề bài · {done} đã xong</div>"
                 + "<div class=plist>"
                 + "".join(_project_row(r) for r in rows) + "</div>")
-    return _queue(waiting) + body
+    return body
 
 
 # ------------------------------------------------------------------ trang
 
-def render(*, grid: list[dict], store: list[dict],
-           waiting: list[dict], scored: int = 0) -> str:
+def render(*, grid: list[dict], store: list[dict], scored: int = 0) -> str:
     open_cells = sum(1 for c in grid if not c["covered"] and not c["planned"])
     done = sum(1 for c in grid if c["covered"])
     return runtime.render(
@@ -169,7 +124,7 @@ def render(*, grid: list[dict], store: list[dict],
         journal_at=(1, 2),
         panels=[
             runtime.panel("Khoảng trống", _gaps(grid, scored), at=(1, 1)),
-            runtime.panel("Kho", _store(store, waiting), rows=2, at=(2, 1)),
+            runtime.panel("Kho", _store(store), rows=2, at=(2, 1)),
         ],
     )
 

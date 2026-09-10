@@ -199,24 +199,6 @@ with tempfile.TemporaryDirectory() as tmp:
     check("POST /api/project/state với id rác -> 400",
           post_form("/api/project/state", "arg=xyz:dang_lam") == 400)
 
-    from jobbot.core import llm as llm2
-    llm2.ensure_table(conn2)
-    conn2.execute("INSERT INTO llm_request (created_at, purpose, prompt)"
-                  " VALUES (?,?,?)", (postings.now(),
-                                      "project_briefs:risk + python", "hỏi gì đó"))
-    conn2.commit(); conn2.close()
-    _s, body = get("/projects")
-    check("yêu cầu LLM đang chờ thì hiện ra", "yêu cầu cũ còn sót" in body)
-    check("khoá theo nhóm cũ được đánh dấu, không mời trả lời",
-          "không còn dùng" in body)
-    check("POST /api/llm/drop dọn được", post_form("/api/llm/drop", "") in (200, 303))
-    conn2 = db.connect(Path(tmp) / "jobbot.db")
-    check("yêu cầu cũ biến mất thật", not llm2.pending(conn2))
-    conn2.close()
-
-    check("POST /api/llm/answer rỗng -> không sập",
-          post_form("/api/llm/answer", "id=0&text=") in (200, 303))
-
     print("\n[tấm phủ KHÔNG được chắn cả trang khi đang đóng]")
     # LỖI THẬT, và là loại tệ nhất: cả app không bấm được gì.
     # `hidden` chỉ là luật [hidden]{display:none} của trình duyệt.
@@ -247,7 +229,7 @@ with tempfile.TemporaryDirectory() as tmp:
           panel.lstrip().startswith("<form") and "<!doctype" not in panel.lower())
 
     # Ba núm — và ĐÚNG ba. Trang cũ có 18 dòng mà chỉ 2 dòng là setting thật.
-    for name in ("every", "from", "to", "engine"):
+    for name in ("every", "from", "to"):
         check(f"có ô {name}", f"name={name}" in panel)
     check("có nút Lưu", "Lưu" in panel)
     check("nói rõ hậu quả: chỉ đổi CÁCH CHẠY, không đụng phán quyết",
@@ -255,22 +237,16 @@ with tempfile.TemporaryDirectory() as tmp:
     check("số máy tự báo tách riêng, ghi rõ chỉ để xem",
           "chỉ để xem" in panel.lower() or "CHỈ ĐỂ XEM" in panel)
 
-    # Biến môi trường ĐÈ lên lựa chọn ở menu — nếu không nói ra thì người dùng
-    # chọn xong mà không có gì đổi, và không hiểu vì sao.
-    import os as _os3
-    _os3.environ["JOBBOT_LLM"] = "none"
-    _, forced = get("/settings")
-    check("bị biến môi trường ép -> nói thẳng ra", "JOBBOT_LLM" in forced)
-    check("và khoá ô chọn lại, không cho bấm hụt", "select name=engine disabled" in forced)
-    _os3.environ.pop("JOBBOT_LLM", None)
-    _, free = get("/settings")
-    check("bỏ biến đi thì ô chọn dùng được lại",
-          "select name=engine disabled" not in free and "JOBBOT_LLM" not in free)
+    # Núm "Máy LLM" ĐÃ BỎ cùng cả đường sinh đề bài bằng LLM. Đề bài giờ do
+    # khuôn dựng, nên núm đó không điều khiển gì — mà một cái nút không điều
+    # khiển gì còn tệ hơn không có nút: người dùng bấm rồi tưởng app hỏng.
+    check("không còn núm giả nào trong Cài đặt",
+          "name=engine" not in panel and "JOBBOT_LLM" not in panel)
 
     print("\n[Cài đặt: lưu xong phải ĂN NGAY, không cần mở lại app]")
     from jobbot.core.scheduler import scan_every_min, human_window
     before = scan_every_min()
-    body = b"every=25&from=9&to=21&engine=none"
+    body = b"every=25&from=9&to=21"
     req = urllib.request.Request(base.rstrip("/") + "/settings", data=body)
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
     with urllib.request.urlopen(req, timeout=25) as r:
@@ -282,8 +258,8 @@ with tempfile.TemporaryDirectory() as tmp:
     check("khung giờ cũng vậy", human_window() == (9, 21))
 
     # Người dùng gõ gì cũng không được làm chết vòng quét nền.
-    for junk in (b"every=abc&from=x&to=y&engine=hack",
-                 b"every=-5&from=99&to=-1&engine="):
+    for junk in (b"every=abc&from=x&to=y",
+                 b"every=-5&from=99&to=-1"):
         req = urllib.request.Request(base.rstrip("/") + "/settings", data=junk)
         req.add_header("Content-Type", "application/x-www-form-urlencoded")
         with urllib.request.urlopen(req, timeout=25) as r:
@@ -293,7 +269,7 @@ with tempfile.TemporaryDirectory() as tmp:
               5 <= scan_every_min() <= 1440 and 0 <= low <= 23 and 1 <= high <= 24)
 
     req = urllib.request.Request(base.rstrip("/") + "/settings",
-                                 data=f"every={before}&from=8&to=22&engine=".encode())
+                                 data=f"every={before}&from=8&to=22".encode())
     req.add_header("Content-Type", "application/x-www-form-urlencoded")
     urllib.request.urlopen(req, timeout=25).read()
 
