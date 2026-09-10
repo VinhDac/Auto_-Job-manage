@@ -124,6 +124,24 @@ class Tab:
             self.ws.close()
 
 
+def pages(port: int = PORT) -> list[dict]:
+    """Các tab đang mở. Dùng để tìm lại một trang đã mở từ trước, thay vì giữ
+    tay cầm trong bộ nhớ máy chủ — tay cầm thì mất khi khởi động lại, còn tab
+    thì vẫn nằm đó."""
+    try:
+        return [t for t in _targets(port) if t.get("type") == "page"]
+    except (OSError, ValueError):
+        return []
+
+
+def attach(target_id: str, port: int = PORT) -> Tab:
+    """Nối vào một tab CÓ SẴN. Không mở tab mới, không điều hướng."""
+    tab = Tab(WebSocket(f"ws://127.0.0.1:{port}/devtools/page/{target_id}"),
+              target_id, port)
+    tab.call("Runtime.enable")
+    return tab
+
+
 def open_tab(url: str = "about:blank", port: int = PORT) -> Tab:
     """Mở tab mới qua Target.createTarget.
 

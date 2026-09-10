@@ -23,5 +23,19 @@ boards  = []
 apply_threshold = 0.75
 
 [mail]
-address = ""
-# Không để mật khẩu ở đây. Dùng biến môi trường.
+# HỘP THƯ RIÊNG cho việc làm, KHÔNG phải hộp thư chính.
+#
+# Vì sao riêng: app password của Google là chìa khoá TOÀN QUYỀN — đọc, gửi,
+# xoá, cả hộp thư, tới khi thu hồi. Google không cho tạo loại chỉ-đọc. Chìa
+# đó nằm dạng chữ ngay dưới đây. Đặt nó lên hộp thư chính là đặt sai chỗ;
+# đặt lên một hộp chỉ chứa thư từ chối việc làm thì mất cũng chẳng sao.
+#
+# Lấy app password:
+#   1. bật xác minh 2 bước cho tài khoản đó
+#   2. myaccount.google.com/apppasswords  ->  tạo, đặt tên "jobbot"
+#   3. dán chuỗi 16 ký tự vào dưới (KHÔNG phải mật khẩu tài khoản —
+#      Gmail đã ngắt đăng nhập IMAP bằng mật khẩu tài khoản từ 2022)
+#
+# Tệp này đã nằm trong .gitignore.
+address  = ""
+password = ""

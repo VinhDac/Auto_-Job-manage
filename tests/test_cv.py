@@ -170,5 +170,22 @@ check("khối mới vào được chỉ số bằng chứng ngay",
           for e in __import__("jobbot.scoring.score", fromlist=["x"])
           .build_index({**PROFILE, "cv_text": fresh})))
 
+print("\n[chứng chỉ — tên mục không in hai lần]")
+from jobbot.cv.blocks import parse as _parse
+_cv = ("EDUCATION\n"
+       "MSc Computational Finance — Royal Holloway Sep 2025 – Sep 2026\n"
+       "Certifications — CFA Level I, October 2024 · IBM Data Science\n"
+       "TECHNICAL SKILLS\n"
+       "Programming — Python, C++\n")
+_cert = [b for b in _parse(_cv) if b.kind == "cert"]
+check("có đúng một khối chứng chỉ", len(_cert) == 1)
+# render.py đặt tiêu đề mục theo kind ("cert" -> "Certifications"). Giữ chữ đó
+# trong thân nữa thì bản in ra hai dòng chồng nhau — đo được trên CV thật.
+check("thân KHÔNG lặp lại chữ Certifications",
+      bool(_cert) and not _cert[0].lines[0].lower().startswith("certification"))
+check("nội dung còn nguyên",
+      bool(_cert) and _cert[0].lines[0].startswith("CFA Level I"))
+check("nhãn thành tiêu đề khối", bool(_cert) and _cert[0].title == "Certifications")
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

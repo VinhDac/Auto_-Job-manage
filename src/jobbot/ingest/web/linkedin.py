@@ -144,6 +144,20 @@ def places_for(markets: list[str]) -> list[str]:
 MAX_QUERIES = 20
 
 
+def signed_in(tab) -> bool:
+    """Profile này có đang đăng nhập LinkedIn không.
+
+    `li_at` là cookie phiên của LinkedIn. Đọc bằng JS không thấy (httpOnly),
+    nên hỏi thẳng trình duyệt qua CDP.
+    """
+    try:
+        got = tab.call("Network.getCookies",
+                       {"urls": ["https://www.linkedin.com/"]})
+    except Exception:                                # noqa: BLE001
+        return False
+    return any(c.get("name") == "li_at" for c in got.get("cookies", []))
+
+
 def fetch(tab, queries: list[str], location: str = "United Kingdom",
           levels: list[str] | None = None, pages: int = 3,
           deep: bool = True, skip: frozenset[str] = frozenset()) -> list[Posting]:
@@ -156,6 +170,15 @@ def fetch(tab, queries: list[str], location: str = "United Kingdom",
     từ trước, nên 97% thời gian là đọc lại thứ đã đọc — 8-16 phút mở Chrome
     liên tục mỗi tiếng, ~4.600 lượt gọi mỗi ngày, và LinkedIn bóp lại 40-82%.
     """
+    # Ranh buộc ở đầu tệp — "không có tài khoản thì không có tài khoản nào để
+    # mất" — giờ do MÁY canh, không do người nhớ. Đã xảy ra một lần: cửa sổ
+    # quét và cửa sổ nộp trông giống hệt nhau, đăng nhập nhầm là mỗi lần quét
+    # chạy dưới tài khoản thật.
+    if signed_in(tab):
+        raise Blocked(
+            "profile QUÉT đang đăng nhập LinkedIn — quét bằng tài khoản thật là "
+            "cách mất tài khoản. Đăng xuất ở cửa sổ quét; đăng nhập ở cửa sổ NỘP.")
+
     if len(queries) > MAX_QUERIES:
         jlog.warn(SEARCH, f"chỉ tìm {MAX_QUERIES}/{len(queries)} chức danh"
                           f" — bỏ: {', '.join(queries[MAX_QUERIES:])}")

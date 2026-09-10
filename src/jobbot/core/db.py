@@ -257,6 +257,13 @@ MIGRATIONS: list[str] = [
     );
     CREATE INDEX project_state ON project(state);
     """,
+    # 15 — BẢN CV nào đã gửi cho lần nộp nào. Không có cột này thì mở bảng ra
+    # chỉ biết "đã nộp Point72", không biết đã đưa họ bản nào — mà 43 bản khác
+    # nhau, và khi họ gọi phỏng vấn thì phải đọc lại đúng bản đó.
+    """
+    ALTER TABLE application ADD COLUMN cv_file TEXT NOT NULL DEFAULT '';
+    ALTER TABLE application ADD COLUMN note    TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 

@@ -52,6 +52,15 @@ def _tags(text: str) -> list[str]:
     return found
 
 
+def _label(line: str) -> tuple[str, str]:
+    """'Nhãn — nội dung' -> ('Nhãn', 'nội dung'). Không có gạch thì nhãn rỗng."""
+    for dash in (" — ", " – "):
+        head, sep, rest = line.partition(dash)
+        if sep and rest.strip():
+            return head.strip(), rest.strip()
+    return "", line.strip()
+
+
 def _split_role(line: str) -> tuple[str, str]:
     """'Research Consultant — WorldQuant Jan 2025 – Sep 2025' -> (chức danh, ngày)."""
     found = DATE_TAIL.search(line)
@@ -148,7 +157,18 @@ def parse(cv_text: str) -> list[Block]:
         # --- học vấn / chứng chỉ / kỹ năng: mỗi dòng một khối ---
         if line.lower().startswith("certification"):
             flush()
-            blocks.append(Block("cert", "", "", [line]))
+            # 'Certifications — CFA Level I, …'
+            #
+            # Chữ "Certifications" đã LÀ tên mục: render.py đặt tiêu đề theo
+            # kind ("cert" -> "Certifications"). Để nguyên trong thân thì bản
+            # in ra hai dòng chồng nhau:
+            #     Certifications
+            #     Certifications — CFA Level I, October 2024, …
+            # Tách nhãn ra làm tiêu đề khối, đúng cách khối kỹ năng đang làm
+            # với 'Programming — Python…'. Tiêu đề cũng là thứ write_block cần
+            # để ghi ngược lại đúng hình dạng cũ.
+            label, rest = _label(line)
+            blocks.append(Block("cert", label, "", [rest]))
             continue
         # kỹ năng: mỗi nhóm ('Programming — ...') là một khối riêng
         if section == "skill":

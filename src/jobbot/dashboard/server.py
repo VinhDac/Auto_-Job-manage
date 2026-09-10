@@ -25,7 +25,7 @@ from .views import cv as cvview
 from .views import cvhealth, importcv
 from .filters import JobFilter
 from .views import (cvlist, home, jobs, profile, projects, search,
-                    settings)
+                    settings, track)
 
 HOST = "127.0.0.1"          # chỉ máy này truy cập được. Không mở ra mạng.
 DEFAULT_PORT = 8765
@@ -157,6 +157,98 @@ class Handler(BaseHTTPRequestHandler):
         return text[:at] + block + "\n" + text[at:]
 
 
+    def _start_apply(self, row: dict, pdf) -> None:
+        """Mở trang nộp và điền phần chứng minh được, ở NỀN.
+
+        Cửa sổ Chrome ở lại. Máy không bấm Gửi — xem `apply/run.py`: trong đó
+        không có lệnh bấm nào, nên không thể lỡ tay.
+        """
+        def _run():
+            from ..apply import run as apply_run
+            from ..apply.answer import book
+            from ..profile import store as pstore
+
+            who = f"{row['company']}: {row['title'][:38]}"
+            conn = db.connect()
+            try:
+                journal.log.emit(journal.SEARCH, f"mở form nộp — {who}")
+                report, _tab = apply_run.open_and_fill(
+                    row["url"], book(pstore.load(conn)),
+                    pdf if pdf and pdf.exists() else None, job=row["id"])
+                if report.needs_login:
+                    site = report.needs_login.split("/")[2] if "//" in report.needs_login else "trang này"
+                    journal.log.error(
+                        journal.SEARCH,
+                        f"{who} — CHƯA ĐĂNG NHẬP {site}. Cửa sổ Chrome nộp đang "
+                        f"mở sẵn trang đó: đăng nhập một lần rồi bấm Nộp lại.")
+                    return
+                journal.log.ok(journal.SEARCH, f"{who} — {report.line()}")
+                if report.note:
+                    journal.log.emit(journal.SEARCH, f"  {report.note}")
+                for label, why, must in report.asks[:8]:
+                    journal.log.warn(
+                        journal.SEARCH,
+                        f"  cần bạn{' (bắt buộc)' if must else ''}: "
+                        f"{label[:60]}" + (f" — {why}" if why else ""))
+                for key in dict.fromkeys(report.missing):
+                    journal.log.warn(journal.SEARCH,
+                                     f"  hồ sơ thiếu {key} — điền ở tab Hồ sơ, "
+                                     f"lần sau máy tự điền")
+                if not pdf or not pdf.exists():
+                    journal.log.warn(journal.SEARCH,
+                                     "  chưa in PDF cho tin này — bấm In hàng loạt")
+                journal.log.emit(journal.SEARCH,
+                                 "  cửa sổ đang mở — trả nốt mấy ô trên, rồi bấm "
+                                 "Gửi ở tab Quản lí (máy kiểm lại trước khi bấm)")
+            except Exception as exc:                # noqa: BLE001
+                journal.log.error(journal.SEARCH,
+                                  f"{who} — mở form hỏng: "
+                                  f"{type(exc).__name__}: {exc}")
+            finally:
+                journal.log.done(journal.SEARCH)
+                conn.close()
+
+        threading.Thread(target=_run, daemon=True, name="apply").start()
+
+    def _start_send(self, row: dict) -> None:
+        """Bấm Gửi cho một lá đơn, ở NỀN.
+
+        Chuyển dòng sang "đã nộp" CHỈ KHI thật sự bấm được. Bấm hụt mà vẫn đổi
+        trạng thái thì bảng nói dối, đúng cái đã tránh khi thêm chặng nháp.
+        """
+        def _run():
+            from ..apply import send as apply_send
+            from ..track import board
+
+            who = f"{row['company']}: {row['role'][:38]}"
+            conn = db.connect()
+            try:
+                tab = apply_send.find(int(row["posting_id"]))
+                if tab is None:
+                    journal.log.error(
+                        journal.SEARCH,
+                        f"{who} — không thấy cửa sổ form. Bấm Nộp lại ở tab Search.")
+                    return
+                done = apply_send.submit(tab, int(row["posting_id"]))
+                if not done.ok:
+                    journal.log.warn(journal.SEARCH, f"{who} — KHÔNG gửi: {done.why}")
+                    for gap in done.missing[:8]:
+                        journal.log.warn(journal.SEARCH, f"  còn trống: {gap[:70]}")
+                    return
+                board.set_stage(conn, int(row["id"]), board.SENT, "bấm gửi từ app")
+                journal.log.ok(journal.SEARCH,
+                               f"{who} — {done.why} (nút \"{done.button}\")")
+                if done.landed:
+                    journal.log.emit(journal.SEARCH, f"  trang sau khi gửi: {done.landed}")
+            except Exception as exc:                # noqa: BLE001
+                journal.log.error(journal.SEARCH,
+                                  f"{who} — gửi hỏng: {type(exc).__name__}: {exc}")
+            finally:
+                journal.log.done(journal.SEARCH)
+                conn.close()
+
+        threading.Thread(target=_run, daemon=True, name="send").start()
+
     def _resume_build(self, skill: str) -> None:
         """Chạy bảy chặng cho một kỹ năng, ở NỀN.
 
@@ -267,6 +359,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(cvlist.draft(row, tocv.facts(row["link"]),
                                                tocv.lines(row, tocv.facts(row["link"])),
                                                tocv.title(row, tocv.facts(row["link"]))))
+            finally:
+                conn.close()
+
+        if path == "/track":
+            conn = db.connect()
+            try:
+                from ..track import board, mail, scan
+                return self._html(track.render(
+                    rows=board.all(conn), asks=scan.proposals(conn),
+                    counts=board.counts(conn),
+                    mail_ready=all(mail.account(conn))))
             finally:
                 conn.close()
 
@@ -430,23 +533,117 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             return self._json({"ok": True, "reload": True})
 
+        if path == "/api/apply":
+            job = form.get("arg", [""])[0].strip()
+            if not job.isdigit():
+                return self._json({"ok": False}, status=400)
+            conn = db.connect()
+            try:
+                row = conn.execute(
+                    "SELECT id, title, company, url FROM posting WHERE id = ?",
+                    (int(job),)).fetchone()
+                if row is None:
+                    return self._404()
+                if not row["url"]:
+                    return self._json({"ok": False, "note": "tin này không có link"},
+                                      status=400)
+                pdf = live.cv_pdf_for(conn, row["id"])
+                from ..track import board
+                board.add(conn, row["company"], row["title"], posting_id=row["id"],
+                          cv_file=pdf.name if pdf and pdf.exists() else "",
+                          origin="apply", stage=board.DRAFT)
+            finally:
+                conn.close()
+            self._start_apply(dict(row), pdf)
+            return self._json({"ok": True, "note": "đang mở form…"})
+
+        if path == "/api/track/state":
+            pid, _, stage = form.get("arg", [""])[0].partition(":")
+            conn = db.connect()
+            try:
+                from ..track import board
+                board.set_stage(conn, int(pid or 0), stage, "sửa tay")
+            except ValueError:
+                return self._json({"ok": False}, status=400)
+            finally:
+                conn.close()
+            return self._json({"ok": True, "reload": True})
+
+        if path == "/api/apply/send":
+            # BẤM GỬI. Đây là đường DUY NHẤT tới `apply/send.py`, và nó chỉ
+            # chạy khi Vin bấm đúng dòng đó. Máy đọc lại form trước khi bấm và
+            # từ chối nếu còn ô bắt buộc trống — xem send.submit.
+            try:
+                app_id = int(form.get("arg", ["0"])[0] or 0)
+            except ValueError:
+                return self._json({"ok": False}, status=400)
+            conn = db.connect()
+            try:
+                row = conn.execute(
+                    "SELECT a.id, a.company, a.role, a.posting_id, a.stage"
+                    " FROM application a WHERE a.id = ?", (app_id,)).fetchone()
+                if row is None or not row["posting_id"]:
+                    return self._json({"ok": False, "note": "không có tin gốc"},
+                                      status=400)
+                row = dict(row)
+            finally:
+                conn.close()
+            self._start_send(row)
+            return self._json({"ok": True, "note": "đang kiểm form…"})
+
+        if path == "/api/track/drop":
+            # Chỉ xoá được bản nháp — xem board.drop.
+            conn = db.connect()
+            try:
+                from ..track import board
+                gone = board.drop(conn, int(form.get("arg", ["0"])[0] or 0))
+            except ValueError:
+                return self._json({"ok": False}, status=400)
+            finally:
+                conn.close()
+            return self._json({"ok": gone, "reload": True})
+
+        if path == "/api/track/mail":
+            mid, _, answer = form.get("arg", [""])[0].partition(":")
+            conn = db.connect()
+            try:
+                from ..track import scan
+                scan.settle(conn, int(mid or 0), answer == "yes")
+            except ValueError:
+                return self._json({"ok": False}, status=400)
+            finally:
+                conn.close()
+            return self._json({"ok": True, "reload": True})
+
+        if path == "/api/track/mail/scan":
+            def _mail():
+                from ..track import scan
+                conn = db.connect()
+                try:
+                    scan.run(conn)
+                except Exception as exc:            # noqa: BLE001
+                    journal.log.error(journal.SEARCH,
+                                      f"quét thư hỏng — {type(exc).__name__}: {exc}")
+                finally:
+                    journal.log.done(journal.SEARCH)
+                    conn.close()
+
+            threading.Thread(target=_mail, daemon=True, name="mail").start()
+            return self._json({"ok": True, "note": "đang đọc…"})
+
         if path == "/cv/pdf/all":
             # MỘT bản cho MỖI BẢN CV, không phải mỗi tin: 117 tin nhưng chỉ 41
             # bản khác nhau, in đủ 117 là 76 tệp trùng nội dung.
             base = f"http://127.0.0.1:{self.server.server_address[1]}"
 
             def _print_all():
-                from ..cv.pdf import render_many, slug
+                from ..cv.pdf import render_many
                 conn = db.connect()
                 try:
-                    versions = live.cv_versions(conn)["versions"]
+                    plan = live.cv_pdf_plan(conn)
                     root = Path(db.db_path()).parent / "cv"
-                    jobs = []
-                    for ver in versions:
-                        best = max(ver["jobs"], key=lambda j: j["score"] or 0)
-                        jobs.append((
-                            f"{base}/jobs/{best['id']}/cv",
-                            root / f"{slug(best['company'])}-{slug(best['title'])}.pdf"))
+                    jobs = [(f"{base}/jobs/{item['best']['id']}/cv", item["file"])
+                            for item in plan]
                     journal.log.emit(journal.SCORE,
                                      f"in {len(jobs)} bản CV ra PDF — vào {root}")
                     made = render_many(jobs, on_done=lambda i, n, _p:

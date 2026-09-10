@@ -45,7 +45,6 @@ Kéo tin thật về, gộp trùng, lưu cache.
 |x| Nối `/` và `/jobs` vào dữ liệu thật | `dashboard/live.py` |
 |x| **Chrome tự lái** — client WebSocket + CDP tự viết | `browser/` |
 |x| **eFinancialCareers** — board tài chính lớn nhất London | `ingest/web/` |
-| | **Adzuna GB** — cần key miễn phí của Vin | `ingest/adzuna.py` |
 | | Bright Network · Milkround · Prospects | `ingest/web/` |
 
 **Kết quả lần chạy 04/09/2026:**

@@ -921,3 +921,64 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px
 .allpdf{display:flex;align-items:center;gap:11px;flex-wrap:wrap;
   margin-bottom:13px;padding-bottom:12px;border-bottom:1px solid var(--line)}
 .allpdf .muted{font-size:11px;flex:1;min-width:180px}
+
+/* lưới chức danh đang bỏ sót — máy chỉ chỗ, người bấm nhận */
+.missed{margin:9px 0 4px}
+.missedhead{font-size:10px;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--warn);margin-bottom:6px}
+.addtag{font:inherit;font-size:11px;color:var(--dim);cursor:pointer;
+  background:var(--warn-bg);border:1px solid var(--warn);border-radius:20px;
+  padding:3px 9px;margin:0 4px 4px 0}
+.addtag:hover{color:var(--ink);background:rgba(216,161,94,.2)}
+.addtag b{color:var(--warn);font-weight:600;margin-left:6px}
+
+/* ---------------- Quản lí: bảng đã nộp ---------------- */
+
+.boardtop{margin-bottom:13px}
+.needcfg{font-size:11.5px;color:var(--warn);background:var(--warn-bg);
+  border-left:2px solid var(--warn);border-radius:0 6px 6px 0;padding:6px 10px;
+  display:inline-block}
+.needcfg code{font-size:10.5px}
+
+/* dải CẦN VIN — thư đề xuất, máy không tự đổi */
+.asklist{border:1px solid var(--warn);background:var(--warn-bg);
+  border-radius:11px;padding:11px 13px;margin-bottom:14px}
+.askhead{font-size:12px;font-weight:600;color:var(--warn);margin-bottom:8px}
+.askrow{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;
+  padding:8px 0;border-top:1px solid rgba(216,161,94,.22)}
+.askmain{min-width:0}
+.askwho{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.askwho b{font-size:13px;color:var(--ink)}
+.askmove{font-size:11px;color:var(--mute)}
+.askmove b{color:var(--acc);font-weight:600}
+.asksub{font-size:11.5px;color:var(--dim);margin-top:3px}
+.asksnip{font-size:10.5px;color:var(--mute);margin-top:2px;line-height:1.5}
+.askact{display:flex;gap:6px;align-items:center;flex:none}
+
+/* bảng */
+.board{width:100%;border-collapse:collapse;font-size:12.5px}
+.board th{text-align:left;font-size:10px;font-weight:700;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--mute);padding:0 10px 7px 0;
+  border-bottom:1px solid var(--line-2)}
+.board td{padding:9px 10px 9px 0;border-bottom:1px solid var(--line);
+  vertical-align:top}
+.board tr:hover td{background:var(--panel-2)}
+/* xong việc rồi thì mờ đi — mắt phải rơi vào dòng còn đang chờ */
+.board tr.rejected td,.board tr.offer td{opacity:.5}
+.board tr.quiet .tev{color:var(--warn)}
+
+.tco b{font-weight:600;color:var(--ink)}
+.tco i{display:block;font-style:normal;font-size:11px;color:var(--mute);margin-top:2px}
+.twhen{white-space:nowrap;color:var(--dim)}
+.tcv{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tev i{display:block;font-style:normal;font-size:10.5px;color:var(--mute);margin-top:2px}
+.silent{color:var(--warn)}
+.tact{white-space:nowrap;text-align:right}
+.tact .mbtn{margin-left:5px}
+
+.pill{font-size:10.5px;border-radius:20px;padding:2px 9px;white-space:nowrap;
+  border:1px solid var(--line-2);color:var(--mute)}
+.pill.applied{border-color:var(--acc-2);color:var(--acc);background:var(--acc-bg)}
+.pill.interview{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
+.pill.rejected{border-color:var(--bad);color:var(--bad)}
+.pill.offer{border-color:var(--acc);color:var(--acc-ink);background:var(--acc)}

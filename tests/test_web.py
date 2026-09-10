@@ -147,6 +147,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("POST /profile/import rỗng -> không sập",
           post("/profile/import", b"") in (200, 303))
 
+    print("\n[nút gọi việc nền phải THẬT SỰ tới được trình nghe]")
+    # Trình nghe [data-post] nằm ở `document`. Một nút gắn stopPropagation là
+    # nút chết: bấm không làm gì, không báo lỗi, không có dấu vết. Đã xảy ra
+    # với nút Nộp ở tab Search.
+    for page in ("/search", "/cv", "/track", "/projects"):
+        _s, body = get(page)
+        if _s != 200:
+            continue
+        for chunk in body.split("data-post=")[1:]:
+            head = chunk[:220]
+            check(f"{page:<10} nút data-post không chặn lan truyền",
+                  "stopPropagation" not in head)
+
     print("\n[PDF: bản in KHÔNG phải bản màn hình thu nhỏ]")
     css = (Path("src/jobbot/dashboard/web/app.css")).read_text()
     rule = css[css.index("@media print"):] if "@media print" in css else ""
@@ -470,6 +483,23 @@ with tempfile.TemporaryDirectory() as tmp:
     _, hacked = get(f"/jobs/{job_id}")
     check("thẻ script bị thoát", "<script>alert(1)</script>" not in hacked)
     check("và vẫn hiện dạng chữ", "&lt;script&gt;" in hacked)
+
+    print("\n[tên tệp PDF — một bản CV một tệp]")
+    # Lỗi thật: Jane Street có HAI bản CV khác nhau cùng ra tên
+    # "jane-street-machine-learning-researcher.pdf". Bản sau đè bản trước, và
+    # 7 tin thì có tin cầm nhầm CV. In ra 43 bản mà `ls` chỉ đếm được 42 —
+    # không ai để ý, vì không có gì báo.
+    from jobbot.dashboard import live as _live
+    conn = db.connect(Path(tmp) / "jobbot.db")
+    plan = _live.cv_pdf_plan(conn)
+    names = [item["file"].name for item in plan]
+    check("mỗi bản CV một tên tệp riêng", len(names) == len(set(names)),
+          f"{len(names)} bản, {len(set(names))} tên")
+    covered = [pid for item in plan for pid in item["ids"]]
+    check("một tin chỉ thuộc đúng một bản", len(covered) == len(set(covered)))
+    check("tra ngược ra đúng tệp",
+          all(_live.cv_pdf_for(conn, item["ids"][0]) == item["file"] for item in plan))
+    conn.close()
 
     httpd.shutdown(); httpd.server_close()
     os.environ.pop("JOBBOT_DATA_DIR", None)

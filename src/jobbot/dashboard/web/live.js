@@ -298,6 +298,15 @@
         syncNav();
         return;
       }
+      // Chip "lưới đang bỏ sót": bấm là thẻ rơi vào ô chức danh. KHÔNG tự
+      // lưu — vẫn phải bấm Áp dụng, vì đổi lưới là phán lại cả bảng.
+      const add = e.target.closest('[data-addtag]');
+      if (add) {
+        e.preventDefault();
+        const box = document.querySelector('[data-tags]');
+        if (box && addTag(box, add.dataset.addtag)) add.remove();
+        return;
+      }
       const untag = e.target.closest('[data-untag]');
       if (untag) { e.preventDefault(); untag.closest('.tag').remove(); return; }
 

@@ -10,7 +10,9 @@ Còn dùng giả: proposals · pipeline · projects · stats   (bước 4-6)
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+from pathlib import Path
 from datetime import datetime, timezone
 
 from ..core import postings
@@ -59,7 +61,7 @@ def run_status(conn: sqlite3.Connection) -> dict:
         "window": "08:00 – 22:00 (human-paced sources)",
         "sources_ok": sum(1 for r in runs if r["ok"]),
         "sources_total": len(runs),
-        "sources_failed": failed or ["Adzuna GB — no API key (biggest UK source)"],
+        "sources_failed": failed,
     }
 
 
@@ -158,6 +160,7 @@ def sieve(conn: sqlite3.Connection) -> dict:
         "markets": answers.get("markets") or [],
         "seniority_options": opts.get("seniority", []),
         "market_options": opts.get("markets", []),
+        "missed": missed_titles(conn),
         "total": total,
         # Đo thật trên 4.660 tin: 1,1 giây. Làm tròn lên để câu hứa không hụt.
         "seconds": max(1, round(total / 4000)),
@@ -330,13 +333,6 @@ def needs_you(conn: sqlite3.Connection) -> list[dict]:
             "note": "The deep-read pass has not reached them. Run "
                     "python3 scripts/scan.py to fetch the full text.",
         })
-    out.append({
-        "kind": "mail",
-        "text": "Adzuna GB is off — the biggest UK source",
-        "href": "#settings",
-        "note": "Free key at developer.adzuna.com, about 2 minutes. Without it, UK "
-                "graduate schemes are largely invisible to the system.",
-    })
     return out
 
 
@@ -552,6 +548,44 @@ def cv_versions(conn: sqlite3.Connection) -> dict:
     return value
 
 
+def cv_pdf_plan(conn: sqlite3.Connection) -> list[dict]:
+    """Kế hoạch in: MỘT tệp cho MỖI BẢN CV, và tin nào dùng tệp nào.
+
+    MỘT NGUỒN đặt tên. Trước đây máy in đặt tên theo tin điểm cao nhất trong
+    bản, còn nút Nộp lại tự ghép tên từ tin ĐANG BẤM — hai công thức, nên bấm
+    Nộp trên tin thứ hai của cùng một bản là đi tìm tệp không tồn tại. Giờ cả
+    hai đọc ở đây.
+    """
+    from pathlib import Path as _Path
+
+    from ..core import db as _db
+    from ..cv.pdf import slug
+
+    root = _Path(_db.db_path()).parent / "cv"
+    plan = []
+    for ver in cv_versions(conn)["versions"]:
+        best = max(ver["jobs"], key=lambda j: j["score"] or 0)
+        # Kèm số hiệu tin. Đo được: Jane Street có HAI bản CV khác nhau cùng
+        # tên "machine-learning-researcher" — hai bản ghi đè nhau, và 7 tin
+        # thì có tin cầm nhầm CV của bản kia. Tên người đọc được không đủ để
+        # phân biệt hai bản; số hiệu thì đủ.
+        plan.append({
+            "best": best,
+            "file": root / (f"{slug(best['company'])}-{slug(best['title'])}"
+                            f"-{best['id']}.pdf"),
+            "ids": [j["id"] for j in ver["jobs"]],
+        })
+    return plan
+
+
+def cv_pdf_for(conn: sqlite3.Connection, posting_id: int) -> Path | None:
+    """Bản PDF sẽ gửi kèm cho tin này. Chưa in thì trả None."""
+    for item in cv_pdf_plan(conn):
+        if posting_id in item["ids"]:
+            return item["file"]
+    return None
+
+
 def cv_blocks(conn: sqlite3.Connection) -> list[dict]:
     """Khối trong CV gốc, kèm số đo NÓ ĐANG LÀM ĐƯỢC GÌ.
 
@@ -585,3 +619,53 @@ def cv_blocks(conn: sqlite3.Connection) -> list[dict]:
         })
     out.sort(key=lambda b: -b["reach"])
     return out
+
+
+# ------------------------------------------------------- chức danh bỏ sót
+
+# Chữ cho biết tin này THUỘC NGÀNH của Vin, dù chức danh không khớp lưới.
+NEAR_TITLE = re.compile(
+    r"\b(quant\w*|machine learning|market microstructur\w*|"
+    r"algorithmic trading|systematic trading|alpha research)\b", re.I)
+
+# Chức danh cấp cao — bỏ sót chúng là ĐÚNG, không phải lỗ hổng.
+ABOVE_ME = re.compile(
+    r"\b(senior|lead|principal|head|director|vp|chief|staff|manager|"
+    r"associate director|executive)\b", re.I)
+
+MIN_SEEN = 2        # thấy một lần thì chưa đủ để đổi hồ sơ
+
+
+def missed_titles(conn: sqlite3.Connection, limit: int = 12) -> list[dict]:
+    """Chức danh bị lưới bỏ mà TRÔNG NHƯ việc của Vin.
+
+    Lưới chức danh là mấy chuỗi gõ tay, nên thiếu một chuỗi là mất cả một loạt
+    tin — và mất trong im lặng. Đo ngày 10/09: 163 tin cấp junior có chữ
+    quant/machine learning bị bỏ, trong đó `Quantitative Trader` chín lần.
+
+    Máy KHÔNG tự nới lưới. Nới lưới là đổi hồ sơ, và hồ sơ đổi thì mọi tin
+    phải phán lại — đó là việc của người, không phải của vòng quét. Ở đây chỉ
+    chỉ chỗ.
+    """
+    from ..profile import store as pstore
+
+    have = {t.strip().lower()
+            for t in (pstore.load(conn).get("job_titles") or "").splitlines()
+            if t.strip()}
+    seen: dict[str, dict] = {}
+    for row in conn.execute(
+            "SELECT title, company FROM posting WHERE kept = 0"
+            " AND drop_reason LIKE 'title does not%'"):
+        title = (row["title"] or "").strip()
+        if not NEAR_TITLE.search(title) or ABOVE_ME.search(title):
+            continue
+        key = title.lower()
+        if key in have:
+            continue
+        slot = seen.setdefault(key, {"title": title, "n": 0, "firms": []})
+        slot["n"] += 1
+        if row["company"] and row["company"] not in slot["firms"]:
+            slot["firms"].append(row["company"])
+    out = [s for s in seen.values() if s["n"] >= MIN_SEEN]
+    out.sort(key=lambda s: -s["n"])
+    return out[:limit]

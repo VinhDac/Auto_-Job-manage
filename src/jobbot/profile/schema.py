@@ -114,7 +114,7 @@ SECTIONS: list[Section] = [
                 why="Decides which sources are used — and which are useless.",
                 options=[
                     _o("uk_onsite", "UK — on-site / hybrid",
-                       "Adzuna GB, Reed, jobs.service.gov.uk. Filtered further by your area."),
+                       "Greenhouse, Lever, Ashby, LinkedIn. Filtered further by your area."),
                     _o("uk_remote", "UK — remote, UK-based company",
                        "Same sources, remote postings only. No cross-border tax or legal mess."),
                     _o("eu_remote", "Europe — remote",

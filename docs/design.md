@@ -69,7 +69,6 @@ Người dùng ở **UK**, nhắm **UK + global**. Đã kiểm chứng thật:
 Tỉ lệ thấp KHÔNG tự nó là lý do bỏ: greenhouse cũng chỉ 2% vì phải tải trọn
 board rồi mới lọc, nhưng đó là chủ việc TRỰC TIẾP và chỉ tốn HTTP. Bỏ hai
 nguồn trên là vì chúng phục vụ một thị trường khác hẳn.
-| `api.adzuna.com/.../gb/` | **Có** (miễn phí) | Nhà UK, phủ thị trường UK rộng nhất. Cần `app_id` + `app_key`. |
 | `reed.co.uk/api` | **Có** (miễn phí) | Board lớn ở UK. Trả 401 nếu thiếu key. |
 | `jobs.service.gov.uk` | — | Board của chính phủ UK (findAJob đã chuyển sang đây). |
 

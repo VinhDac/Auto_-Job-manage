@@ -33,6 +33,7 @@ NAV = [
     ("/search",    "Search",   "⌕"),      # rt — bước 1
     ("/projects",  "Projects", "▦"),      # rt — bước 4
     ("/cv",        "CV",       "▤"),      # rt — mọi bản sẽ gửi
+    ("/track",     "Quản lí",  "▣"),      # rt — bước 5-6: nộp và theo dõi
     ("/profile",   "Profile",  "◇"),
 ]
 

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from ..browser import cdp, chrome
 
-PORT = 9334          # cổng RIÊNG, không đụng vòng quét (9333)
+PORT = chrome.PDF_PORT   # cổng RIÊNG, profile RIÊNG — xem chrome.PROFILE
 
 PAPER = {                                    # A4, lề 14mm — khớp @page trong CSS
     "paperWidth": 8.27, "paperHeight": 11.69,

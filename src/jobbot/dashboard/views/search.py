@@ -80,7 +80,17 @@ def _row(job: dict) -> str:
         f"<div class=jsub><b>{esc(job['company'])}</b> · {esc(job['location'])}"
         f"{money}</div>{why}</div>"
         f"<div class=jtags>{chance}{marks}{merged}"
-        f"<span class=jwhen>{esc(job['posted'])}</span></div></a>")
+        f"<span class=jwhen>{esc(job['posted'])}</span>"
+        # Nút Nộp: mở trang nộp bằng trình duyệt mặc định và ghi một dòng vào
+        # bảng Quản lí.
+        #
+        # KHÔNG gắn onclick stopPropagation ở đây. Trình nghe [data-post] nằm ở
+        # `document`, nên chặn lan truyền là giết luôn sự kiện trước khi nó tới
+        # nơi — nút bấm không làm gì cả, mà cũng không báo lỗi. Bản thân trình
+        # nghe đã gọi preventDefault(), đủ để thẻ <a> bao ngoài không nhảy trang.
+        f"<button class='mbtn tiny' data-post='/api/apply'"
+        f" data-arg='{esc(job['id'])}'>Nộp</button>"
+        f"</div></a>")
 
 
 def _list(jobs: list[dict], flt, counts: dict) -> str:
@@ -140,6 +150,27 @@ def _tags(titles: list[str]) -> str:
             " placeholder='thêm chức danh…'></div>")
 
 
+def _missed(missed: list[dict]) -> str:
+    """Chức danh lưới đang bỏ sót mà trông như việc của Vin.
+
+    Lưới là mấy chuỗi gõ tay: thiếu một chuỗi là mất cả loạt tin, và mất TRONG
+    IM LẶNG. Đo ngày 10/09: `Quantitative Trader` bị bỏ chín lần, toàn ở Jane
+    Street; 47 tin `machine learning` bị bỏ, mà ML là ô cầu cao nhất (56/178).
+
+    Máy KHÔNG tự nới lưới — nới là đổi hồ sơ, và hồ sơ đổi thì cả bảng phải
+    phán lại. Nó chỉ chỗ; bấm vào là thẻ rơi vào ô trên, rồi vẫn phải bấm
+    Áp dụng như mọi thay đổi khác.
+    """
+    if not missed:
+        return ""
+    chips = "".join(
+        f"<button type=button class=addtag data-addtag='{esc(m['title'])}'"
+        f" title='{esc(', '.join(m['firms'][:3]))}'>"
+        f"+ {esc(m['title'][:34])}<b>{m['n']}</b></button>" for m in missed)
+    return (f"<div class=missed><div class=missedhead>"
+            f"lưới đang bỏ sót — bấm để thêm</div>{chips}</div>")
+
+
 def _sieve(sieve: dict) -> str:
     """Ô sửa lưới GIỮ/BỎ. FORM thật, không phải bảng đọc.
 
@@ -160,6 +191,7 @@ def _sieve(sieve: dict) -> str:
         "<label class=slab>Chức danh nhắm tới<span>gõ rồi Enter để thêm · "
         "vừa là từ khoá gửi cho LinkedIn, vừa là điều kiện giữ tin</span></label>"
         + _tags(sieve["titles"])
+        + _missed(sieve.get("missed") or [])
         + "<label class=slab>Cấp bậc nhận</label>"
         f"<div class=ticks>{levels}</div>"
         "<label class=slab>Thị trường<span>quyết định LinkedIn tìm ở đâu, "
