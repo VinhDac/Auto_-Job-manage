@@ -103,6 +103,28 @@ def assess(title: str, description: str, explain: dict | None,
     if explain and explain.get("capped"):
         score -= 1
 
+    # ĐÁP ỨNG ĐƯỢC THỨ HỌ ĐÒI cũng là bằng chứng, và trước đây nó không được
+    # tính. Thang này chỉ biết TRỪ — PhD, số năm, chức danh senior — còn cộng
+    # thì chỉ có đúng một đường: JD phải viết chữ "graduate". Hậu quả đo được
+    # ngày 10/09: 81 tin khớp ≥80 điểm, không blocker, không bị chặn trần, mà
+    # 75 trong số đó vẫn bị xếp "có thể" hoặc "khó" — kể cả một tin 100 điểm
+    # và một tin 92 điểm ở Point72. Bộ lọc "đáng nộp" đang giấu đi đúng những
+    # tin khớp nhất.
+    #
+    # Dùng TỈ LỆ YÊU CẦU BẮT BUỘC ĐÁP ỨNG, không dùng điểm tổng: điểm tổng có
+    # cả phần hợp chức danh và hợp cấp bậc, mà hai thứ đó đã được tính riêng
+    # ở trên rồi.
+    must = ((explain or {}).get("breakdown") or {}).get("must") or {}
+    total, met = must.get("total") or 0, must.get("met") or 0
+    if total >= 3 and not (explain or {}).get("blockers"):
+        share = met / total
+        if share >= 0.8:
+            score += 2
+            reasons.append(f"you meet {met} of their {total} stated must-haves")
+        elif share >= 0.6:
+            score += 1
+            reasons.append(f"you meet {met} of their {total} stated must-haves")
+
     if not description or len(description) < 300:
         return {"band": "unknown", "why": "no description to judge from",
                 "score": 0}

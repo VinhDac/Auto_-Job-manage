@@ -217,6 +217,7 @@ def scaffold(brief: Brief, src: Source, out: Path, headline: str = "") -> list[s
         "{{parts}}": str(src.parts),
         "{{since}}": src.since,
         "{{how}}": _how(skill),
+        "{{short}}": STEP_SHORT[pick],
         "{{side}}": str(max(2, src.parts // 6)),
         "{{cost}}": "10",
         "{{duties}}": "\n".join(f"> · {d}" for d in duties) or "> (the postings "

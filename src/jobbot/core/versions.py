@@ -9,4 +9,4 @@ cùng một bảng, không cách nào biết cái nào tính bằng luật nào.
 
 FILTER_RULES = "2026-09-07.1"  # ingest/filter.py + ingest/base.norm_*
 # scoring/vocab.py + scoring/extract.py + scoring/score.py + realism + deadline
-SCORE_RULES = "2026-09-10.1"   # + bóc phần VIỆC PHẢI LÀM (extract.duties)
+SCORE_RULES = "2026-09-10.3"   # + realism cộng điểm khi đáp ứng yêu cầu bắt buộc

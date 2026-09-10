@@ -84,10 +84,15 @@ def _project_row(row: dict) -> str:
     skills = "".join(f"<span class=sk>{esc(s)}</span>" for s in row["skills"])
     inds = "".join(f"<span class=ind>{esc(i)}</span>" for i in row["industries"])
     nxt, label = NEXT.get(row["state"], ("", ""))
-    act = (f"<button class='mbtn tiny' data-post='/api/project/state'"
-           f" data-arg='{row['id']}:{nxt}'>{esc(label)}</button>"
-           if nxt else f"<a class=plink href='{esc(row['link'])}'>xem</a>"
-           if row["link"] else "")
+    if nxt:
+        act = (f"<button class='mbtn tiny' data-post='/api/project/state'"
+               f" data-arg='{row['id']}:{nxt}'>{esc(label)}</button>")
+    else:
+        # Làm xong rồi thì việc tiếp theo KHÔNG phải "xem lại repo" — mà là
+        # đưa nó vào CV. Đó là chỗ vòng lặp khép: trước đây làm xong xong thôi,
+        # điểm không đổi, CV không đổi, kho tích vào một cái hộp kín.
+        act = (f"<button class='mbtn tiny apply'"
+               f" data-settings='/cv/draft?id={row['id']}'>Vào CV</button>")
 
     return (f"<div class='prow {esc(row['state'])}'>"
             f"<div class=pstate>{esc(STATE_LABEL.get(row['state'], '?'))}</div>"

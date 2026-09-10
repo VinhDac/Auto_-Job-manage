@@ -126,10 +126,20 @@ def all(conn: sqlite3.Connection) -> list[dict]:
 
 def set_state(conn: sqlite3.Connection, project_id: int, state: str,
               link: str = "") -> None:
+    """Đổi trạng thái. `link` RỖNG nghĩa là 'không đụng tới', không phải 'xoá'.
+
+    Lỗi đã có thật: nút Bắt đầu / Xong gọi set_state không kèm link, và mỗi
+    lần bấm là đường dẫn repo bị ghi đè thành rỗng — làm xong project thì mất
+    luôn chỗ chứa nó, đúng lúc cần nó nhất để dựng dòng CV.
+    """
     if state not in STATES:
         return
-    conn.execute("UPDATE project SET state = ?, link = ? WHERE id = ?",
-                 (state, link, project_id))
+    if link:
+        conn.execute("UPDATE project SET state = ?, link = ? WHERE id = ?",
+                     (state, link, project_id))
+    else:
+        conn.execute("UPDATE project SET state = ? WHERE id = ?",
+                     (state, project_id))
     conn.commit()
 
 

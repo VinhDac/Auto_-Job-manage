@@ -82,7 +82,7 @@ SKILLS: dict[str, set[str]] = {
 DEGREE_WORDS = {
     "phd": {"phd", "ph.d", "doctorate", "doctoral"},
     "masters": {"master", "masters", "msc", "ms", "m.sc", "mba", "postgraduate", "meng"},
-    "bachelors": {"bachelor", "bachelors", "bsc", "b.sc", "ba", "beng",
+    "bachelors": {"bachelor", "bachelors", "bsc", "b.sc", "ba", "bs", "beng",
                   "undergraduate", "degree"},
 }
 QUANT_FIELD = {"mathematics", "maths", "math", "physics", "statistics", "computer science",

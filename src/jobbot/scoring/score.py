@@ -33,15 +33,12 @@ JUNIOR_TITLE = re.compile(
 
 @dataclass
 class Evidence:
-    """Một mẩu hồ sơ, kèm chỗ nó đến từ đâu — để còn trích dẫn lại.
-
-    `strong` phân biệt BẰNG CHỨNG với MONG MUỐN. "Từ khoá tìm kiếm" và "công nghệ
-    muốn làm" không chứng minh được gì — dùng chúng làm chứng cứ là lập luận vòng.
-    """
     where: str
     text: str
-    normal: str = ""
-    strong: bool = True
+    normal: str
+    strong: bool
+    kind: str = ""        # experience | project | "" (trường hồ sơ)
+    meta: str = ""        # ngày tháng / tổ chức, để dựng CV
 
 
 @dataclass
@@ -55,19 +52,45 @@ class Judged:
 
 
 def build_index(answers: dict) -> list[Evidence]:
-    """Gom mọi thứ trong hồ sơ thành các mẩu bằng chứng tra cứu được."""
-    # Xếp theo độ MẠNH — hàm tra cứu lấy cái đầu tiên khớp, nên bằng chứng
-    # tốt nhất phải đứng trước.
+    """Gom hồ sơ thành bằng chứng tra cứu được — ở mức CÂU, không mức TRƯỜNG.
+
+    Trước đây cả `cv_text` là MỘT mẩu. Khớp được thì bằng chứng trả về là 80
+    ký tự đầu của toàn bộ CV — tầng chấm điểm *biết* hồ sơ có gì, nhưng không
+    biết CÂU NÀO chứng minh. Nên tầng dựng CV phải tự đi chọn lại từ đầu bằng
+    một bộ trọng số riêng, và hai bên lệch nhau: đo ngày 10/09, một tin 92
+    điểm nhận bản CV mà 76% số câu không chạm gì tới nó.
+
+    Ở mức câu thì một chỉ số phục vụ được cả ba việc:
+
+        chấm điểm  bao nhiêu câu hỏi của họ mình trả được
+        dựng CV    chính những câu đó, theo thứ tự họ hỏi
+        lưới       câu hỏi nào KHÔNG có câu nào trả lời
+    """
+    from ..cv.blocks import parse as parse_cv, sentences as split_cv
+
+    out: list[Evidence] = []
+
+    # Từng câu trong CV, mang theo khối chứa nó — để dựng CV còn biết xếp nó
+    # dưới đầu mục nào.
+    for block in parse_cv(str(answers.get("cv_text") or "")):
+        if block.kind not in ("experience", "project"):
+            continue
+        for line in split_cv(block):
+            text = line.strip()
+            if len(text) < 25:            # mẩu vụn do bóc PDF, không phải câu
+                continue
+            out.append(Evidence(block.title or block.kind, text, norm(text), True,
+                                kind=block.kind, meta=block.meta))
+
+    # Các trường còn lại vẫn ở mức trường: chúng vốn là danh sách, không phải văn.
     fields = [
         ("your strong skills", "skills_strong", True),
-        ("your CV", "cv_text", True),
         ("your education", "education", True),
         ("your certifications", "certifications", True),
         ("skills you're still learning", "skills_weak", False),
         ("a keyword you set (not proof)", "search_keywords", False),
         ("tech you want to move into (not proof)", "stack_want", False),
     ]
-    out = []
     for label, key, strong in fields:
         value = answers.get(key)
         if not value:
@@ -89,16 +112,28 @@ def _signals(text: str) -> list[str]:
 
 def _find(signal: str, index: list[Evidence]) -> tuple[bool, str, bool]:
     """Hồ sơ có bằng chứng cho tín hiệu này không, ở đâu, và có MẠNH không."""
-    forms = SKILLS.get(signal, {signal})
+    hit = _match(signal, index)
+    if hit is None:
+        return False, "", False
+    return True, f"{hit.where} — {hit.text}", hit.strong
+
+
+def _match(signal: str, index: list[Evidence]) -> Evidence | None:
+    """Mẩu bằng chứng ĐẦU TIÊN trả lời được tín hiệu này."""
+    for ev in _matches(signal, index):
+        return ev
+    return None
+
+
+def _matches(signal: str, index: list[Evidence]):
+    """MỌI mẩu trả lời được tín hiệu này. Tầng dựng CV cần cả danh sách."""
+    forms = SKILLS.get(signal, {signal}) | {signal}
     for ev in index:
-        for form in forms | {signal}:
+        for form in forms:
             needle = f" {form.strip()} " if len(form.strip()) <= 3 else form.strip()
             if needle in f" {ev.normal} ":
-                snippet = ev.text.strip().replace("\n", " ")
-                if len(snippet) > 80:
-                    snippet = snippet[:80] + "…"
-                return True, f"{ev.where} — {snippet}", ev.strong
-    return False, "", False
+                yield ev
+                break
 
 
 def _years_needed(text: str) -> int | None:
@@ -106,14 +141,37 @@ def _years_needed(text: str) -> int | None:
     return int(found.group(1)) if found else None
 
 
+# Chấm dứt giữa các CHỮ CÁI ĐƠN, dán lại trước khi norm(). norm() thay dấu
+# chấm bằng khoảng trắng, nên "B.S., M.S. or PhD" thành "b s m s or phd" —
+# mất sạch bachelors và masters, chỉ còn phd. Hậu quả: JD viết "B.S., M.S.
+# HOẶC PhD" bị đọc thành "bắt buộc PhD", tin đó thành blocker và bị chặn trần
+# 55 điểm, dù Vin có MSc và thừa điều kiện. "B.Sc." còn tệ hơn: không nhận ra
+# bằng nào cả.
+# Bỏ dấu chấm nằm GIỮA hai chữ cái, trước khi norm(). norm() thay dấu chấm
+# bằng khoảng trắng, nên "B.S., M.S. or PhD" thành "b s m s or phd" — mất sạch
+# bachelors và masters, chỉ còn phd. Hậu quả: JD viết "B.S., M.S. HOẶC PhD"
+# bị đọc thành "bắt buộc PhD", tin đó thành blocker và bị chặn trần 55 điểm,
+# dù Vin có MSc và thừa điều kiện.
+#
+# Chỉ bỏ dấu chấm CÓ CHỮ CÁI HAI BÊN, nên dấu chấm hết câu không bị đụng:
+#   B.S. -> BS.    M.Sc. -> MSc.    Ph.D. -> PhD.    "...field. The" giữ nguyên
+_DOTTED = re.compile(r"(?<=[A-Za-z])\.(?=[A-Za-z])")
+
+
+def _undot(text: str) -> str:
+    return _DOTTED.sub("", text or "")
+
+
 def _degrees_needed(text: str) -> list[str]:
     """MỌI bằng cấp được nhắc tới, không phải cái cao nhất.
 
-    LỖI ĐÃ SỬA: trước đây lấy bằng cao nhất rồi đòi đúng cái đó, nên dòng
+    LỖI ĐÃ SỬA (1): trước đây lấy bằng cao nhất rồi đòi đúng cái đó, nên dòng
     "Undergraduate, MS, or PhD candidates" bị chấm trượt dù có MSc — JD viết
     "hoặc", mình đọc thành "phải là PhD".
+
+    LỖI ĐÃ SỬA (2): dạng viết tắt có dấu chấm. Xem _undot.
     """
-    low = f" {norm(text)} "
+    low = f" {norm(_undot(text))} "
     return [level for level in ("phd", "masters", "bachelors")
             if any(f" {word.strip()} " in low for word in DEGREE_WORDS[level])]
 

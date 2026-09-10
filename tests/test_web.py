@@ -84,7 +84,7 @@ def seeded(path: Path):
     return conn
 
 
-ROUTES = ["/", "/search", "/projects", "/profile",
+ROUTES = ["/", "/search", "/projects", "/cv", "/profile",
           "/profile/muc_tieu", "/profile/import", "/profile/health",
           "/settings", "/api/profile", "/api/state"]
 
@@ -139,17 +139,84 @@ with tempfile.TemporaryDirectory() as tmp:
             return e.code
         except Exception:                            # noqa: BLE001
             return 0
+
+    def post_form(path, body):
+        return post(path, body.encode())
     check("POST /profile/muc_tieu",
           post("/profile/muc_tieu", b"job_titles=Analyst&markets=uk_onsite") == 200)
     check("POST /profile/import rỗng -> không sập",
           post("/profile/import", b"") in (200, 303))
 
+    print("\n[PDF: bản in KHÔNG phải bản màn hình thu nhỏ]")
+    css = (Path("src/jobbot/dashboard/web/app.css")).read_text()
+    rule = css[css.index("@media print"):] if "@media print" in css else ""
+    check("có khối @media print", bool(rule))
+    # Ẩn `nav` thôi thì chưa đủ: thanh bên là <aside class=side>, nên dấu ◆ và
+    # chữ "jobbot" vẫn in ra. Và `.lead` là ghi chú CHO VIN ("Built for … the
+    # system selects and orders"), không phải cho nhà tuyển dụng.
+    for gone in (".side", ".lead", ".topbar", "button"):
+        check(f"bản in giấu {gone}", gone in rule.split("}")[1] or gone in rule)
+    check("nền giấy trắng, không nền tối của app", "#fff !important" in rule)
+    check("khổ A4", "size: A4" in rule)
+    check("không cắt đôi một mục qua hai trang", "break-inside:avoid" in rule)
+
+    check("POST /cv/pdf thiếu id -> 400", post_form("/cv/pdf", "arg=") == 400)
+    _s, body = get("/cv")
+    check("có nút in hàng loạt", "data-post='/cv/pdf/all'" in body)
+    # MỘT tệp mỗi BẢN, không phải mỗi tin: 117 tin nhưng chỉ ~41 bản khác nhau,
+    # in đủ 117 là đẻ ra 76 tệp trùng nội dung.
+    check("in theo BẢN, không theo tin",
+          "In tất cả" in body and " bản ra PDF" in body)
+    check("POST /cv/pdf id không phải số -> 400",
+          post_form("/cv/pdf", "arg=abc") == 400)
+
+    print("\n[tấm phủ: mỗi form phải đi đúng action của nó]")
+    # live.js từng chặn MỌI .setform rồi gửi cứng tới '/settings'. Hậu quả:
+    # bấm "Xoá khối" trong tấm phủ soạn CV lại mở ra Cài đặt. Thử bằng
+    # form.submit() không lộ, vì cách đó bỏ qua trình nghe submit.
+    js = (Path("src/jobbot/dashboard/web/live.js")).read_text()
+    check("live.js chỉ chặn form có action /settings",
+          "pathname !== '/settings'" in js)
+    for url in ("/cv/block?title=", "/cv/draft?id=1"):
+        _s, frag = get(url)
+        if _s != 200:
+            continue
+        check(f"{url:<22} form trỏ đúng action của mình",
+              "action='/settings'" not in frag)
+
+    print("\n[CV: project xong -> dòng CV]")
+    # Lỗi trong một route POST làm ĐỨT kết nối, không trả gì cả — curl báo
+    # "empty reply", trình duyệt hiện 404, nhật ký im lặng. Đã xảy ra thật với
+    # /cv/draft (thiếu `self.`). Mọi route POST phải được gọi ít nhất một lần.
+    check("GET /cv/draft với id lạ -> 404, không sập",
+          get("/cv/draft?id=999999")[0] == 404)
+    check("POST /cv/draft rỗng -> không sập",
+          post_form("/cv/draft", "id=0&head=&line=") in (200, 303))
+
+    print("\n[CV: mọi bản sẽ gửi, xem trước khi gửi]")
+    _s, body = get("/cv")
+    check("/cv có trong thanh bên", 'href="/cv"' in body or "href='/cv'" in body)
+    check("gộp bản trùng, không liệt kê từng tin",
+          body.count("class=cvrow") <= 60)
+    check("nói THẲNG mức may đo thật, không khoe số bản",
+          "giống hệt nhau ở mọi bản" in body)
+    check("mỗi dòng trỏ tới bản CV đọc được", "/cv'" in body and "cvrow" in body)
+    check("nói ra kỹ năng hồ sơ KHÔNG nói được câu nào",
+          "KHÔNG nói được câu nào" in body)
+
+    from jobbot.dashboard import live as live2
+    data = live2.cv_versions(db.connect(Path(tmp) / "jobbot.db"))
+    if data["versions"]:
+        check("phần RIÊNG của mỗi bản không lẫn vào phần lõi",
+              all(len(v["only"]) == v["lines"] - data["core"]
+                  for v in data["versions"]))
+        check("bản nhiều tin nhất đứng đầu",
+              [len(v["jobs"]) for v in data["versions"]]
+              == sorted((len(v["jobs"]) for v in data["versions"]), reverse=True))
+
     print("\n[Projects: ba nút phải thật sự làm gì đó]")
     # Cả bốn đường này mới có. Không test qua HTTP thì lỗi kiểu "quên định
     # nghĩa hàm" chỉ lộ ra lúc người dùng bấm — đúng bốn lần đã xảy ra.
-    def post_form(path, body):
-        return post(path, body.encode())
-
     status, body = get("/projects")
     check("/projects vẽ được lưới khoảng trống", "KHOẢNG TRỐNG" in body.upper())
     check("/projects vẽ được kho", ">Kho<" in body or "KHO" in body.upper())

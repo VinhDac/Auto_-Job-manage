@@ -130,9 +130,12 @@ def build(conn: sqlite3.Connection, skill: str, cv_projects: list,
                             f"{problems[0].field}: {problems[0].why}")
         return "rejected"
 
+    # KHÔNG gọi jlog.done() ở đây. `done` là tín hiệu bảo trang vẽ lại; gọi
+    # giữa chừng thì trang nạp lại TRƯỚC khi đề bài kịp vào kho, và người dùng
+    # thấy kho có đề bài mới mà lưới bên trái vẫn mời Dựng lại ô đó. Chỉ khối
+    # `finally` ở server được đóng luồng, vì chỉ nó biết việc đã xong thật.
     jlog.progress(PROJECT, f"{skill}: kiểm dữ liệu")
     bad = feasible.judge(brief, feasible.inspect(brief.dataset_url))
-    jlog.done(PROJECT)
     if bad:
         jlog.error(PROJECT, f"{skill}: nguồn dữ liệu hỏng — {bad[0][:80]}")
         return "data_bad"

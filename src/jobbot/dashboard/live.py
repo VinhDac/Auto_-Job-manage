@@ -471,3 +471,117 @@ def project_board(conn: sqlite3.Connection) -> dict:
     return {"grid": inventory.coverage(conn, mine),
             "store": inventory.all(conn),
             "scored": inventory.total_scored(conn)}
+
+
+# ---------------------------------------------------------------------- CV
+
+# Dựng CV cho 101 tin mất 1,4 giây. Không được trả cái giá đó MỖI LẦN mở trang
+# — đúng lỗi trang /projects/<nhóm> cũ. Nhớ lại trong bộ nhớ tiến trình, và
+# quên đi khi một trong ba thứ đầu vào đổi: chữ CV, luật chấm, tập tin.
+_CV_CACHE: dict = {}
+
+
+def _cv_key(conn: sqlite3.Connection, cv_text: str) -> tuple:
+    from ..core import versions
+    row = conn.execute(
+        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM posting"
+        " WHERE kept = 1 AND realism IN ('likely','possible')").fetchone()
+    return (hash(cv_text), versions.SCORE_RULES, row[0], row[1])
+
+
+def cv_versions(conn: sqlite3.Connection) -> dict:
+    """Mọi bản CV hệ thống SẼ GỬI, gộp những bản giống hệt nhau làm một.
+
+    Vì sao gộp: 101 tin đáng nộp nhưng chỉ ra 29 bản khác nhau — cấu trúc CV
+    cố định (2 việc · 3 project · 2 học vấn · 1 chứng chỉ · 4 kỹ năng = 16
+    câu), phần đổi chỉ là CÂU NÀO trong mỗi khối được chọn. Liệt kê 101 dòng
+    là bắt Vin đọc lại cùng một bản 3-4 lần.
+    """
+    import json as _json
+    from ..cv.build import build as build_cv
+    from ..profile import store as pstore
+
+    answers = pstore.load(conn)
+    key = _cv_key(conn, answers.get("cv_text") or "")
+    if _CV_CACHE.get("key") == key:
+        return _CV_CACHE["value"]
+
+    rows = conn.execute(
+        "SELECT id, title, company, score, realism, description, score_json"
+        " FROM posting WHERE kept = 1 AND realism IN ('likely','possible')"
+        " ORDER BY score DESC").fetchall()
+
+    groups: dict[tuple, dict] = {}
+    for row in rows:
+        explain = _json.loads(row["score_json"]) if row["score_json"] else None
+        cv = build_cv(answers, explain, row["description"] or "")
+        # Khoá gộp là ĐÚNG NHỮNG CÂU sẽ in ra. Gộp theo kỹ năng JD đòi thì hụt:
+        # đo được 85 bộ kỹ năng khác nhau mà chỉ ra 29 bản.
+        sig = tuple(line.text for section in cv.sections for line in section.lines)
+        slot = groups.setdefault(sig, {
+            "cv": cv, "jobs": [], "wanted": set(), "missing": set()})
+        slot["jobs"].append({"id": row["id"], "title": row["title"],
+                             "company": row["company"], "score": row["score"],
+                             "realism": row["realism"]})
+        slot["wanted"] |= set(cv.wanted)
+        slot["missing"] |= set(cv.missing)
+
+    # Câu nào có ở MỌI bản = phần lõi, không đổi theo JD. Phần còn lại mới là
+    # thứ "may đo" thật. Đo được: 14/16 câu là lõi, chỉ 2 câu đổi — hiện con số
+    # cấu trúc (2 việc, 3 project…) thì 29 dòng giống hệt nhau và vô nghĩa.
+    core = set.intersection(*[set(sig) for sig in groups]) if groups else set()
+
+    out = []
+    for sig, slot in sorted(groups.items(), key=lambda kv: -len(kv[1]["jobs"])):
+        cv = slot["cv"]
+        out.append({
+            "jobs": slot["jobs"],
+            "lines": len(sig),
+            "dropped": len(cv.dropped),
+            "only": [line for line in sig if line not in core],
+            "wanted": sorted(slot["wanted"]),
+            "missing": sorted(slot["missing"]),
+            "top": [j["company"] for j in slot["jobs"][:3]],
+        })
+
+    value = {"versions": out, "jobs": len(rows), "core": len(core),
+             # Kỹ năng CẢ THỊ TRƯỜNG đòi mà hồ sơ không nói được câu nào. Đây
+             # là danh sách đáng đọc nhất trên trang: nó nói CV thiếu gì.
+             "gaps": sorted({m for v in out for m in v["missing"]})}
+    _CV_CACHE.update(key=key, value=value)
+    return value
+
+
+def cv_blocks(conn: sqlite3.Connection) -> list[dict]:
+    """Khối trong CV gốc, kèm số đo NÓ ĐANG LÀM ĐƯỢC GÌ.
+
+    Kho nguyên liệu là trần thật của cả hệ thống: 34 câu văn, mà một bản CV
+    cần 18 — nên 13/18 câu giống hệt nhau ở mọi bản, và mọi thiết kế chọn lọc
+    đều đụng trần đó. Muốn CV trúng hơn thì phải VIẾT THÊM, không phải chọn
+    khéo hơn. Bảng này nói rõ khối nào đang gánh, khối nào chỉ chiếm chỗ.
+    """
+    from ..cv.blocks import parse as parse_cv, sentences as split_cv
+    from ..cv.build import skills_in
+    from ..profile import store as pstore
+    from ..projects import inventory
+
+    text = pstore.load(conn).get("cv_text") or ""
+    demand = inventory.demand(conn)
+    out = []
+    for block in parse_cv(text):
+        if block.kind not in ("experience", "project"):
+            continue
+        lines = [s for s in split_cv(block)]
+        skills = sorted({k for s in lines for k in skills_in(s)})
+        out.append({
+            "kind": block.kind,
+            "title": block.title,
+            "meta": block.meta,
+            "lines": lines,
+            "skills": skills,
+            # Bao nhiêu TIN đang cần thứ khối này nói được. Khối 0 tin là khối
+            # chiếm chỗ: nó lên CV vì có ô trống, không vì nó chứng minh gì.
+            "reach": sum(demand.get(s, 0) for s in skills),
+        })
+    out.sort(key=lambda b: -b["reach"])
+    return out

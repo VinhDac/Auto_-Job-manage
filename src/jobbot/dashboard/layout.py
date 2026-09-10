@@ -32,6 +32,7 @@ NAV = [
     ("/",          "Home",     "◈"),
     ("/search",    "Search",   "⌕"),      # rt — bước 1
     ("/projects",  "Projects", "▦"),      # rt — bước 4
+    ("/cv",        "CV",       "▤"),      # rt — mọi bản sẽ gửi
     ("/profile",   "Profile",  "◇"),
 ]
 

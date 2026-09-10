@@ -189,3 +189,93 @@ def sentences(block: Block) -> list[str]:
     # nên phải nối hết lại rồi mới bẻ theo dấu câu.
     joined = re.sub(r"\s+", " ", " ".join(block.lines)).strip()
     return [part.strip() for part in SENTENCE.split(joined) if len(part.strip()) > 25]
+
+
+# ---------------------------------------------------------------- ghi ngược
+
+SECTION_FOR = {"experience": "EXPERIENCE", "project": "SELECTED PROJECTS"}
+
+
+def _bounds(lines: list[str], title: str) -> tuple[int, int] | None:
+    """Khối mang tiêu đề này nằm từ dòng nào tới dòng nào.
+
+    Định vị bằng DÒNG TIÊU ĐỀ chứ không dựng lại cả tệp từ blocks: parse() bỏ
+    dòng trống và cắt khoảng trắng cuối, nên dựng lại là mất định dạng của
+    những khối mình không hề đụng tới.
+    """
+    # Khớp theo TIỀN TỐ. Không dùng bằng-nhau: khối kinh nghiệm có đuôi ngày
+    # tháng ('… Startup Jan 2026 – Present') mà title đã cắt bỏ, và khối
+    # project có phần mô tả nối sau ' — '. Không khớp được thì write_block rơi
+    # vào nhánh thêm mới và đẻ ra một khối trùng tên.
+    head = title.strip()
+    start = next((i for i, l in enumerate(lines) if l.strip().startswith(head)), None)
+    if start is None:
+        return None
+    stop = len(lines)
+    for i in range(start + 1, len(lines)):
+        line = lines[i].strip()
+        if not line:
+            continue
+        if SECTION.match(line):                       # sang mục khác
+            stop = i
+            break
+        # Dòng tiêu đề của khối kế tiếp: có " — " và đủ ngắn.
+        head_part = re.split(r"\s+[—–]\s+", line, maxsplit=1)[0]
+        if (re.search(r"\s+[—–]\s+", line) and len(head_part) < 60
+                and head_part[:1].isupper()):
+            stop = i
+            break
+    return start, stop
+
+
+def write_block(cv_text: str, kind: str, title: str, meta: str,
+                body: list[str]) -> str:
+    """Thay khối `title`, hoặc thêm mới nếu chưa có. Trả về cv_text mới.
+
+    Chỉ đụng đúng khối đó. Không có khối nào bị dựng lại, nên không khối nào
+    bị đổi định dạng ngoài ý muốn.
+    """
+    lines = (cv_text or "").splitlines()
+    body = [b.strip() for b in body if b.strip()]
+
+    # Thân rỗng = XOÁ khối. Giữ lại một khối không hợp tin nào chỉ làm bẩn CV
+    # gốc; đo được: `Compress EA` hợp 0/117 tin mà vẫn nằm đó.
+    if not body:
+        found = _bounds(lines, title)
+        if not found:
+            return cv_text
+        start, stop = found
+        return "\n".join(lines[:start] + lines[stop:]).rstrip() + "\n"
+
+    # Mỗi loại khối có HÌNH DẠNG riêng, và parse() nhận ra khối mới bằng chính
+    # hình dạng đó. Viết sai hình dạng thì khối vừa ghi bị nuốt vào khối trước
+    # và biến mất — đã xảy ra khi ghi "Compress EA" trơ trọi, vì khối project
+    # bắt buộc phải có " — " trên dòng tiêu đề.
+    # Mỗi loại khối có HÌNH DẠNG riêng, và parse() nhận ra khối mới bằng chính
+    # hình dạng đó. Viết sai hình dạng thì khối vừa ghi bị nuốt vào khối trước
+    # và biến mất — đã xảy ra hai lần: khối project ghi trơ trọi "Compress EA"
+    # (thiếu " — "), và khối kinh nghiệm ghi thiếu đuôi ngày tháng.
+    if kind == "experience":
+        # 'Chức danh — Tổ chức  Jan 2025 – Sep 2025'
+        # KHÔNG thêm "· ": parse() không bóc dấu đó ra, nó dính nguyên vào
+        # câu và đi thẳng lên CV.
+        head = f"{title.strip()} {meta.strip()}".strip()
+        chunk = [head] + body
+    elif meta.strip():
+        chunk = [f"{title.strip()} — {meta.strip()}"] + body
+    elif body:
+        # 'Tên — câu đầu', các câu sau xuống dòng
+        chunk = [f"{title.strip()} — {body[0]}"] + body[1:]
+    else:
+        chunk = [f"{title.strip()} — "]
+
+    found = _bounds(lines, title)
+    if found:
+        start, stop = found
+        return "\n".join(lines[:start] + chunk + lines[stop:]).rstrip() + "\n"
+
+    name = SECTION_FOR.get(kind, "SELECTED PROJECTS")
+    at = next((i for i, l in enumerate(lines) if l.strip().upper() == name), None)
+    if at is None:                                    # chưa có mục thì mở mục
+        return "\n".join(lines + ["", name] + chunk).rstrip() + "\n"
+    return "\n".join(lines[:at + 1] + chunk + lines[at + 1:]).rstrip() + "\n"

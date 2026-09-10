@@ -117,6 +117,30 @@ def main() -> None:
     for name, value in parts.head(5).items():
         print(f"   {name:<18} {value:+.4f}   {abs(value)/parts.abs().sum():>6.1%}")
     chart(series, hits, biggest, parts)
+    save({
+        "shape": "change",
+        "headline": f"{share:.1%} of the largest abnormal change in {{watch}} "
+                    f"came from one {{unit}} ({parts.index[0]})",
+        "number": round(float(share), 4),
+        "unit_of_number": "share of the move explained by one {{unit}}",
+        "days": len(frame), "dropped": dropped, "parts": frame.shape[1],
+        "from": str(frame.index.min().date()), "to": str(frame.index.max().date()),
+        "events": len(hits), "biggest": str(biggest.date()),
+        "driver": str(parts.index[0]), "detector": HOW,
+    })
+
+
+def save(facts: dict) -> None:
+    """Write the numbers to result.json as well as the screen.
+
+    A number that only ever reaches stdout cannot be cited later. This file is
+    what the CV line is built from — so every claim about this project points
+    back at a value this script actually produced.
+    """
+    import json
+    out = Path(__file__).parent / "result.json"
+    out.write_text(json.dumps(facts, indent=2, default=str))
+    print(f"facts: {out.name}")
 
 
 if __name__ == "__main__":

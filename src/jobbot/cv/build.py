@@ -1,10 +1,21 @@
-"""Dựng CV riêng cho một JD — CHỌN và SẮP XẾP, không viết mới.
+"""Dựng CV riêng cho một JD — CV LÀ TỜ TRẢ LỜI.
 
-Mọi câu trên CV sinh ra đều là câu Vin đã viết trong hồ sơ. Hệ thống chỉ quyết
-định câu nào lên, theo thứ tự nào, và bỏ câu nào — kèm lý do bỏ, để kiểm chứng.
+Mọi câu trên CV đều là câu Vin đã viết trong hồ sơ. Không có LLM ở đây.
 
-Không có LLM ở đây. LLM (bước 2b) sau này chỉ dùng để VIẾT LẠI cho gọn,
-không bao giờ để thêm sự thật mới.
+ĐỔI GỐC (10/09): trước đây đây là bộ máy chọn THỨ HAI. Tầng chấm điểm tra hồ
+sơ theo yêu cầu JD ra một con số; tầng này lại đi cân trọng số từ đầu rồi lấp
+cho đủ `BUDGET`. Hai đường độc lập, nên lệch nhau — đo được: một tin 92 điểm
+nhận bản CV mà **76% số câu không chạm gì tới nó**, và 2/18 câu là rác bóc từ
+PDF ("·", "Sep 2025") vẫn đi ra ngoài vì có ô trống phải lấp.
+
+Giờ chỉ còn MỘT bộ máy. `score.build_index` gom hồ sơ thành bằng chứng ở mức
+CÂU; tầng này chỉ hỏi lại đúng chỉ số đó:
+
+    họ hỏi gì  ->  câu nào của mình trả lời  ->  in ra, theo thứ tự họ hỏi
+
+Câu không trả lời gì thì không lên. Không còn ngân sách, nên độ dài CV là SỐ
+ĐO của hồ sơ chứ không phải một cái đích: năm câu nghĩa là hồ sơ trả được năm
+thứ. Muốn dài hơn thì làm thêm project, không phải lấp thêm câu.
 """
 
 from __future__ import annotations
@@ -15,6 +26,7 @@ from dataclasses import dataclass, field
 from ..ingest.base import norm
 from ..scoring.vocab import ALIASES, alias_hits
 from . import rules
+from ..scoring.score import Evidence
 from .blocks import Block, parse, sentences
 
 
@@ -65,94 +77,81 @@ def wanted_skills(explain: dict | None, jd_text: str = "") -> set[str]:
     return out
 
 
-def _pick(block: Block, wanted: set[str], cap: int,
-          dropped: list) -> list[Line]:
-    kept: list[Line] = []
-    for text in sentences(block):
-        text = rules.clean(text)
-        tags = sorted(skills_in(text))
-        verdict, why = rules.sentence_ok(text, tags)
-        if verdict == "drop":
-            dropped.append((text, why))
-            continue
-        kept.append(Line(text, rules.sentence_weight(text, wanted, tags),
-                         sorted(set(tags) & wanted),
-                         why if verdict == "review" else ""))
-    kept.sort(key=lambda l: -l.weight)
-    return kept[:cap]
-
-
 def build(profile: dict, explain: dict | None, jd_text: str = "") -> TailoredCV:
+    from ..scoring.score import build_index, _matches
+
     blocks = parse(profile.get("cv_text") or "")
     wanted = wanted_skills(explain, jd_text)
-    dropped: list[tuple[str, str]] = []
+    index = build_index(profile)
+    header, summary = _identity(profile, blocks, wanted)
 
-    header = [profile.get("full_name") or "",
-              " · ".join(x for x in [profile.get("location"), profile.get("phone"),
-                                     profile.get("email")] if x)]
-    links = (profile.get("links") or "").splitlines()
-    if links:
-        header.append(" · ".join(l.strip() for l in links if l.strip()))
-    visa = next((" ".join(b.lines) for b in blocks
-                 if b.kind == "header" and "visa" in " ".join(b.lines).lower()), "")
-    if visa:
-        header.append(visa)
+    # Câu nào TRẢ LỜI được thứ tin này hỏi — dùng CHUNG chỉ số với tầng chấm
+    # điểm, nên hai bên không thể hiểu khác nhau về cùng một câu nữa.
+    answers: dict[str, list[str]] = {}
+    for signal in wanted:
+        for ev in _matches(signal, index):
+            if ev.kind:
+                answers.setdefault(ev.text, []).append(signal)
 
-    # --- tóm tắt: ghép từ SỰ THẬT, không viết câu mới ---
-    facts = []
-    education = (profile.get("education") or "").splitlines()
-    if education:
-        facts.append(education[0].split("—")[0].strip())
-    certs = (profile.get("certifications") or "").splitlines()
-    if certs:
-        facts.append(certs[0].split("—")[0].strip() if "—" in certs[0] else certs[0])
-    # Kỹ năng JD đòi lên trước, rồi bù thêm cho đủ — không để tóm tắt trơ trọi
-    strong = [s.strip() for s in (profile.get("skills_strong") or "").split(",") if s.strip()]
-    want_norm = {norm(w) for w in wanted}
-    hit = [s for s in strong if norm(s) in want_norm]
-    rest = [s for s in strong if norm(s) not in want_norm]
-    lead = (hit + rest)[:6]
-    if lead:
-        facts.append(" · ".join(lead))
-    summary = " · ".join(f for f in facts if f)
-
-    # --- các phần ---
+    # ĐÃ THỬ VÀ BỎ (10/09): lọc bỏ mọi câu không trả lời gì. Đo được thì hỏng
+    # hai lần. (1) Số câu trả lời được KHÔNG đo độ hợp — nó đo JD có tình cờ
+    # gọi tên nhiều kỹ năng không; tin `unlikely` trung bình 10,1 câu còn tin
+    # `likely` chỉ 6,9, và Millennium 84 điểm chỉ ra ĐÚNG MỘT câu. (2) Lọc
+    # theo "có chứng minh kỹ năng nào không" thì cắt mất đúng những câu hay
+    # nhất: "self-funded, across 17 instruments and five years of data",
+    # "I never budgeted the time a proof would take". Quy mô, vết xước và
+    # phán đoán không nằm trong vocab.SKILLS, mà đó mới là thứ thuyết phục.
+    #
+    # Nên TRẢ LỜI ĐƯỢC quyết định THỨ TỰ và quyết định khối nào bị cắt, chứ
+    # không quyết định từng câu có được sống hay không.
+    # KHỐI NÀO KHÔNG HỢP TIN NÀY THÌ KHÔNG LÊN. `cap` là TRẦN, không phải hạn
+    # ngạch phải lấp cho đủ — đó là chỗ `Compress EA` (0 kỹ năng, hợp 0/117
+    # tin) vẫn có mặt trên 115 bản CV, chỉ vì có đúng bốn project và ô cho ba.
+    #
+    # Lọc ở mức KHỐI, không ở mức CÂU: lọc câu theo từ khoá đã thử và bỏ, vì
+    # nó cắt mất "self-funded, across 17 instruments" và "I never budgeted the
+    # time a proof would take" — quy mô và vết xước không nằm trong từ vựng.
     sections: list[Section] = []
     for kind, cap in (("experience", rules.BUDGET["experience"]),
                       ("project", rules.BUDGET["project"])):
-        chosen = [b for b in blocks if b.kind == kind]
+        chosen = [b for b in blocks if b.kind == kind and set(b.tags) & wanted]
         chosen.sort(key=lambda b: -len(set(b.tags) & wanted))
+        if not chosen:
+            # Không khối nào hợp — 9/117 tin rơi vào đây. CV rỗng thì không
+            # gửi được, nên lấy khối mạnh nhất và để nguyên sự thật đó hiện ra.
+            chosen = sorted((b for b in blocks if b.kind == kind),
+                            key=lambda b: -len(b.tags))[:1]
         for block in chosen[:cap]:
-            lines = _pick(block, wanted, rules.BUDGET["exp_bullets"], dropped)
+            lines = _pick(block, wanted, answers, rules.BUDGET["exp_bullets"])
             if lines:
                 sections.append(Section(kind, block.title, block.meta, lines))
 
-    for block in [b for b in blocks if b.kind == "education"]:
-        sections.append(Section("education", block.title, block.meta,
-                                [Line(l) for l in block.lines]))
-    for block in [b for b in blocks if b.kind == "cert"]:
-        sections.append(Section("cert", "", "", [Line(l) for l in block.lines]))
-
-    skills = [b for b in blocks if b.kind == "skill"
-              and b.title.lower() not in rules.DROP_SKILL_GROUPS]
     for block in blocks:
-        if block.kind == "skill" and block.title.lower() in rules.DROP_SKILL_GROUPS:
-            dropped.append((f"{block.title} section",
-                            "teaches the reader basics — reads as junior"))
-    skills.sort(key=lambda b: -len(set(b.tags) & wanted))
-    for block in skills[:rules.BUDGET["skill"]]:
-        sections.append(Section("skill", block.title, "",
-                                [Line(" ".join(block.lines))]))
+        if block.kind == "education":
+            keep = [Line(l) for l in block.lines if _worth(l)]
+            sections.append(Section("education", block.title, block.meta, keep))
+    certs = [l for b in blocks if b.kind == "cert" for l in b.lines if _worth(l)]
+    if certs:
+        sections.append(Section("cert", "", "", [Line(l) for l in certs]))
+    for block in blocks:
+        if block.kind == "skill" and block.title.lower() not in rules.DROP_SKILL_GROUPS:
+            sections.append(Section("skill", block.title, "",
+                                    [Line(" ".join(block.lines))]))
 
-    covered = sorted({h for s in sections for l in s.lines for h in l.hits})
     have: set[str] = set()
     for block in blocks:
         have |= set(block.tags)
     have |= skills_in(profile.get("skills_strong", "") + " "
                       + profile.get("skills_weak", ""))
 
-    return TailoredCV(header, summary, sections, dropped,
-                      sorted(wanted), covered, sorted(_real_missing(explain, wanted, have)))
+    shown = {l.text for s in sections for l in s.lines}
+    dropped = [(rules.clean(t), "weaker than what this posting asks for")
+               for b in blocks if b.kind in ("experience", "project")
+               for t in sentences(b) if rules.clean(t) not in shown and _worth(t)]
+
+    return TailoredCV(header, summary, sections, dropped, sorted(wanted),
+                      sorted({s for v in answers.values() for s in v} & wanted),
+                      sorted(_real_missing(explain, wanted, have)))
 
 
 def _real_missing(explain: dict | None, wanted: set[str], have: set[str]) -> set[str]:
@@ -170,3 +169,56 @@ def _real_missing(explain: dict | None, wanted: set[str], have: set[str]) -> set
         if in_line & have:                 # dòng này đã có ít nhất một cái đáp ứng
             missing -= in_line
     return missing
+
+
+def _pick(block: Block, wanted: set[str], answers: dict, cap: int) -> list[Line]:
+    """Câu trong một khối: trả lời được đứng trước, rác bị bỏ hẳn."""
+    kept: list[Line] = []
+    for raw in sentences(block):
+        text = rules.clean(raw)
+        if not _worth(text):
+            continue                      # "·", "Sep 2025" — rác bóc từ PDF
+        hits = sorted(set(answers.get(raw, [])) | set(answers.get(text, [])))
+        kept.append(Line(text, rules.sentence_weight(text, wanted, sorted(skills_in(text))),
+                         hits))
+    # Trả lời được xếp trước; trong cùng nhóm thì theo trọng số cũ.
+    kept.sort(key=lambda l: (-len(l.hits), -l.weight))
+    return kept[:cap]
+
+
+def _worth(text: str) -> bool:
+    """Rác bóc từ PDF: dấu chấm trơ trọi, mẩu ngày tháng cụt. Trước đây chúng
+    lên CV vì `BUDGET` có ô trống phải lấp — "·" và "Sep 2025" đi ra ngoài
+    trong cả 117 bản."""
+    body = text.strip().strip("·-–—• ")
+    return len(body) >= 12 and any(c.isalpha() for c in body)
+
+
+def _identity(profile: dict, blocks: list[Block],
+              wanted: set[str]) -> tuple[list[str], str]:
+    header = [profile.get("full_name") or "",
+              " · ".join(x for x in [profile.get("location"), profile.get("phone"),
+                                     profile.get("email")] if x)]
+    links = (profile.get("links") or "").splitlines()
+    if links:
+        header.append(" · ".join(l.strip() for l in links if l.strip()))
+    visa = next((" ".join(b.lines) for b in blocks
+                 if b.kind == "header" and "visa" in " ".join(b.lines).lower()), "")
+    if visa:
+        header.append(visa)
+
+    facts = []
+    education = (profile.get("education") or "").splitlines()
+    if education:
+        facts.append(education[0].split("—")[0].strip())
+    certs = (profile.get("certifications") or "").splitlines()
+    if certs:
+        facts.append(certs[0].split("—")[0].strip() if "—" in certs[0] else certs[0])
+    strong = [s.strip() for s in (profile.get("skills_strong") or "").split(",") if s.strip()]
+    want_norm = {norm(w) for w in wanted}
+    hit = [s for s in strong if norm(s) in want_norm]
+    rest = [s for s in strong if norm(s) not in want_norm]
+    lead = (hit + rest)[:6]
+    if lead:
+        facts.append(" · ".join(lead))
+    return header, " · ".join(f for f in facts if f)

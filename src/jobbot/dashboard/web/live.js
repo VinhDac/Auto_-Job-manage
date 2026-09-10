@@ -9,7 +9,7 @@
  *   [data-nav]                nút gập thanh bên
  *   [data-tags]               ô thẻ: gõ + Enter để thêm, × để bỏ
  *   [data-post]               nút gọi việc nền; [data-arg] là tham số
- *   [data-settings]           nút bánh răng; [data-sheet] là tấm phủ
+ *   [data-settings]           mở tấm phủ; giá trị = URL mảnh HTML cần nạp
  *   [data-widget]             một ô; [data-expand] trong đó là nút mở to
  *
  * Không dùng polling: mở một kết nối SSE rồi để yên. Chạy 24/7 mà hỏi mỗi
@@ -197,13 +197,13 @@
   // Nạp nội dung LÚC BẤM, không nhúng sẵn vào mọi trang: cài đặt là thứ mở ra
   // vài lần một tuần, mà nhúng sẵn thì trang nào cũng phải mang theo dữ liệu
   // nó không dùng.
-  function openSheet() {
+  function openSheet(url) {
     const sheet = document.querySelector('[data-sheet]');
     if (!sheet) return;
     const box = sheet.querySelector('.sheetbox');
     box.innerHTML = '<div class=sheetwait>đang mở…</div>';
     sheet.hidden = false;
-    fetch('/settings')
+    fetch(url || '/settings')
       .then((r) => r.text())
       .then((html) => { box.innerHTML = html; })
       .catch(() => { box.innerHTML = '<div class=sheetwait>không mở được</div>'; });
@@ -216,14 +216,19 @@
 
   function wireSheet() {
     document.addEventListener('click', (e) => {
-      if (e.target.closest('[data-settings]')) { e.preventDefault(); openSheet(); return; }
+      const gear = e.target.closest('[data-settings]');
+      if (gear) { e.preventDefault(); openSheet(gear.dataset.settings || ''); return; }
       // Bấm ra ngoài hộp thì đóng — nhưng bấm TRONG hộp thì không.
       const sheet = e.target.closest('[data-sheet]');
       if (sheet && !e.target.closest('.sheetbox')) closeSheet();
     });
     document.addEventListener('submit', (e) => {
       const form = e.target.closest('.setform');
-      if (!form) return;
+      // CHỈ chặn form Cài đặt. Trước đây chặn MỌI .setform rồi gửi cứng tới
+      // '/settings', nên hai form khác trong cùng tấm phủ — soạn khối CV và
+      // đưa project vào CV — bấm tay là chạy vào Cài đặt. Bấm bằng
+      // form.submit() trong lúc thử thì không lộ, vì cách đó bỏ qua trình nghe.
+      if (!form || new URL(form.action, location.href).pathname !== '/settings') return;
       e.preventDefault();          // lưu tại chỗ, không rời trang đang xem
       // URLSearchParams chứ KHÔNG phải FormData trần: FormData gửi kiểu
       // multipart, mà server đọc urlencoded — gửi đi thì im lặng không lưu gì.

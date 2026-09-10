@@ -286,10 +286,75 @@ with tempfile.TemporaryDirectory() as tmp:
     check("kho chỉ có một dòng", len(inv.all(conn)) == 1)
     check("repo có đường dẫn thật, và link được lưu lại",
           Path(inv.all(conn)[0]["link"]).joinpath("Makefile").exists())
+    # Trang chỉ được vẽ lại KHI VIỆC XONG THẬT. Đã xảy ra: make.build đóng
+    # luồng nhật ký ngay sau chặng kiểm dữ liệu, trang nạp lại trước khi đề bài
+    # kịp vào kho, và kho hiện đề bài mới trong khi lưới vẫn mời Dựng lại ô đó.
+    import inspect as _inspect
+    code = [l for l in _inspect.getsource(make.build).splitlines()
+            if not l.strip().startswith("#")]
+    check("make.build KHÔNG tự đóng luồng nhật ký giữa chừng",
+          "jlog.done" not in "\n".join(code))
+
     check("ô không dựng được thì nói thẳng",
           make.build(conn, "nlp", [], root=Path(tmp) / "kho") == "no_frame")
     conn.close()
 
+
+
+# ------------------------------------------------ PROJECT XONG -> DÒNG CV
+
+print("\n[project xong -> dòng CV]")
+from jobbot.projects import tocv
+from jobbot.cv.blocks import parse as parse_cv
+from jobbot.cv.build import skills_in as cv_skills
+
+FACTS = {"shape": "signal", "number": 0.4348, "days": 14392, "dropped": 11904,
+         "parts": 49, "from": "1969-07-01", "to": "2026-07-31",
+         "in_sample_sharpe": 0.74, "held_out_sharpe": 0.322, "cost_bps": 10,
+         "turnover": 0.223, "held_out_from": "2007-07-06",
+         "signal": "trailing 252-day return skipping the last 21 days"}
+ROW = {"id": 1, "skills": ["alpha research", "validation", "visualisation",
+                           "equities", "market data"], "link": ""}
+
+check("chưa chạy make run thì KHÔNG có dòng nào", tocv.lines(ROW, {}) == [])
+check("có số rồi thì ra đúng ba dòng", len(tocv.lines(ROW, FACTS)) == 3)
+
+blk = tocv.block(ROW, FACTS, "https://github.com/vin/x")
+# BẤT BIẾN. Nếu dòng CV không mang nổi kỹ năng project chứng minh thì cả vòng
+# lặp nói dối: lưới bảo ô đã lấp, mà CV gửi đi không hề nói được điều đó. Đã
+# xảy ra thật — bản đầu viết "never used to choose anything" thay vì
+# "out-of-sample", và mất sạch equities · market data · validation.
+carried = cv_skills(blk)
+check("dòng CV MANG được mọi kỹ năng project khai",
+      not (set(ROW["skills"]) - carried))
+check("và mang thêm thứ nó làm thật, không ít hơn",
+      {"backtesting", "portfolio"} & carried)
+
+check("có nhắc con số đo được", "43%" in blk and "0.74" in blk)
+check("có nhắc CHỖ YẾU, không chỉ khoe", "Dropped" in blk and "45%" in blk)
+check("có link repo", "github.com/vin/x" in blk)
+
+# Định dạng phải khớp cv/blocks.py, nếu không khối lọt vào mục khác của CV.
+parsed = parse_cv("SELECTED PROJECTS\n" + blk)
+proj = [b for b in parsed if b.kind == "project"]
+check("bóc lại được đúng một khối project", len(proj) == 1)
+check("thân khối KHÔNG dính dấu gạch đầu dòng thừa",
+      all(not l.lstrip().startswith("·") for l in proj[0].lines))
+# cv/blocks.py coi MỌI dòng chứa " — " là tiêu đề khối mới, nên một dấu gạch
+# dài lọt vào thân là khối project tự tách làm đôi.
+for _shape, _f in (("signal", FACTS),
+                   ("change", {**FACTS, "shape": "change", "events": 79,
+                               "biggest": "2001-09-17", "driver": "Guns",
+                               "detector": "a rolling 4-sigma threshold",
+                               "headline": "25.5% from one industry"})):
+    _b = tocv.block({**ROW, "skills": ["machine learning"]}, _f, "")
+    check(f"[{_shape}] thân không chứa dấu gạch dài",
+          all(" — " not in l for l in tocv.lines(ROW, _f)))
+    check(f"[{_shape}] bóc lại vẫn đúng MỘT khối",
+          len([b for b in parse_cv("SELECTED PROJECTS\n" + _b)
+               if b.kind == "project"]) == 1)
+check("tag của khối khớp kỹ năng project", set(ROW["skills"]) <= set(proj[0].tags)
+      or set(proj[0].tags) & set(ROW["skills"]) != set())
 
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

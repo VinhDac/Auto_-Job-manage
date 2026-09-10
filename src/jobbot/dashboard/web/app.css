@@ -808,3 +808,116 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;padding:16px 20px 16px
 .lqanswer:focus{outline:none;border-color:var(--acc-2);color:var(--ink)}
 .lqbody form{display:flex;flex-direction:column;gap:5px;margin:0}
 .lqbody .mbtn.apply{align-self:flex-start;width:auto;padding:6px 15px}
+
+/* ---------------- CV: mọi bản sẽ gửi ---------------- */
+
+.cvgaps{font-size:11.5px;color:var(--mute);line-height:2;margin-bottom:12px;
+  padding-bottom:11px;border-bottom:1px solid var(--line)}
+.cvmiss{font-size:10px;color:var(--warn);background:var(--warn-bg);
+  border-radius:20px;padding:2px 8px;margin-right:4px;white-space:nowrap}
+
+.vlist{display:flex;flex-direction:column;gap:1px}
+.cvrow{display:grid;grid-template-columns:74px 1fr auto;gap:14px;align-items:center;
+  padding:11px 4px;border-bottom:1px solid var(--line);
+  text-decoration:none;color:inherit}
+.cvrow:last-child{border-bottom:none}
+.cvrow:hover{background:var(--panel-2)}
+
+.cvn{font-size:13px;font-weight:600;color:var(--dim)}
+.cvn span{display:block;font-size:10.5px;font-weight:400;color:var(--mute);margin-top:1px}
+
+.cvmain{min-width:0}
+.cvwho{font-size:13px;color:var(--ink)}
+.cvwho b{font-weight:600}
+.cvshape{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px;align-items:center}
+/* Hình dạng bản CV: nhìn một dòng là biết nó ghép từ khối gì, không phải mở ra
+   mới biết. Đây là phần "lắp ghép khối" hiện ra ở mức danh sách. */
+.cvk{font-size:10px;color:var(--mute);border:1px solid var(--line-2);
+  border-radius:20px;padding:1px 8px;white-space:nowrap}
+.cvk b{color:var(--acc);font-weight:600;margin-left:5px}
+.cvdrop{font-size:10.5px;color:var(--mute);margin-left:3px}
+.cvgap{font-size:10.5px;color:var(--mute);margin-top:6px;line-height:1.9}
+
+.cvact{display:flex;align-items:center;gap:11px;flex:none}
+.cvscore{font-size:14px;font-weight:600;color:var(--acc)}
+.cvonly{font-size:11.5px;color:var(--dim);line-height:1.55;margin-top:4px;
+  padding-left:9px;border-left:2px solid var(--acc-2)}
+.cvonly[muted]{color:var(--mute);border-left-color:var(--line-2)}
+.dfthead,.cvdraft{font:inherit;font-size:12px;line-height:1.55;width:100%;
+  color:var(--ink);background:var(--bg);border:1px solid var(--line);
+  border-radius:7px;padding:8px 10px;margin-bottom:6px;resize:vertical}
+.dfthead:focus,.cvdraft:focus{outline:none;border-color:var(--acc-2)}
+.setform .safe{margin-bottom:13px}
+
+/* ---------------- IN / PDF ----------------
+   Trang này in ra là thứ nộp cho nhà tuyển dụng, nên bản in KHÔNG phải bản
+   màn hình thu nhỏ: nền đen thành giấy trắng, thanh bên và mọi nút biến mất,
+   và phần kiểm toán (câu đã bỏ, kỹ năng còn thiếu) cũng biến mất — nó là ghi
+   chú cho Vin, không phải cho người đọc CV. */
+@media print {
+  @page { size: A4; margin: 14mm 15mm; }
+
+  html, body { height:auto; overflow:visible;
+    background:#fff !important; color:#111 !important; font-size:10.5pt }
+
+  /* Mọi thứ không phải tờ CV.
+     `.side` chứ không phải `nav`: thanh bên là <aside class=side>, bên trong
+     mới có <nav>. Ẩn mỗi <nav> thì dấu ◆ và chữ "jobbot" vẫn in ra.
+     `.lead` chứ không phải `.h1sub`: dòng "Built for … — the system selects
+     and orders" là ghi chú CHO VIN, không phải cho nhà tuyển dụng, và nó
+     đứng ngay đầu tờ CV. */
+  .side, nav, .topbar, .sheet, .back, .lead, .cvaudit, .note, .chiprow,
+  .mbtn, button, [data-journal], [data-progress], .tnote { display:none !important }
+
+  main, .flow, .wrap { margin:0 !important; padding:0 !important;
+    max-width:none !important; overflow:visible !important;
+    inset:auto !important; left:0 !important; width:auto !important }
+  h1 { display:none }
+
+  .cvpaper { background:#fff !important; border:none !important;
+    border-radius:0 !important; padding:0 !important; box-shadow:none !important }
+  .cvhead { border-bottom:1px solid #ccc !important; margin-bottom:10pt;
+    padding-bottom:8pt }
+  .cvline { color:#333 !important }
+  .cvline:first-child { color:#000 !important; font-size:19pt }
+  .cvsec { color:#000 !important; border-bottom:1px solid #ddd;
+    padding-bottom:2pt; margin:12pt 0 6pt }
+  .cvrole b { color:#000 !important }
+  .cvmeta, .cvsum { color:#444 !important }
+  .cvpaper li { color:#111 !important }
+
+  /* Đừng để một mục bị cắt đôi qua hai trang giấy */
+  .cvrole, .cvpaper ul, .cvsec { break-inside:avoid; page-break-inside:avoid }
+  .cvsec { break-after:avoid; page-break-after:avoid }
+
+  a { color:#111 !important; text-decoration:none }
+}
+
+/* ---------------- CV: kho khối ---------------- */
+.blklist{display:flex;flex-direction:column;gap:1px}
+.blk{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;
+  padding:10px 3px;border-bottom:1px solid var(--line);
+  text-decoration:none;color:inherit;cursor:pointer}
+.blk:last-child{border-bottom:none}
+.blk:hover{background:var(--panel-2)}
+/* Khối với tới 0 tin: nó lên CV vì có ô trống, không vì chứng minh được gì */
+.blk.dead{opacity:.45}
+.blkmain{min-width:0}
+.blkhead{display:flex;align-items:baseline;gap:8px}
+.blkhead b{font-size:13px;font-weight:600;color:var(--ink)}
+.blkkind{font-size:10px;color:var(--mute);border:1px solid var(--line-2);
+  border-radius:20px;padding:1px 7px;flex:none}
+.blktags{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
+.blkreach{text-align:right;flex:none;line-height:1.25}
+.blkreach b{font-size:15px;font-weight:600;color:var(--acc)}
+.blk.dead .blkreach b{color:var(--mute)}
+.blkreach span{font-size:10px;color:var(--mute);margin-left:3px}
+.blkreach i{display:block;font-style:normal;font-size:10px;color:var(--mute)}
+.blkfoot{margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
+.blkaim{font-size:11px;color:var(--mute);line-height:2;margin-top:9px}
+.setform select{margin-bottom:8px}
+.mbtn.kill{border-color:var(--bad);color:var(--bad);background:transparent}
+.mbtn.kill:hover{background:rgba(217,115,108,.12)}
+.allpdf{display:flex;align-items:center;gap:11px;flex-wrap:wrap;
+  margin-bottom:13px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.allpdf .muted{font-size:11px;flex:1;min-width:180px}

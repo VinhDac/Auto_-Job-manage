@@ -134,5 +134,41 @@ JD_GAP = {"requirements": [{"text": "Experience with equities and derivatives pr
 gap = build(PROFILE, JD_GAP, "equities derivatives")
 check("thiếu thật thì vẫn báo", {"equities", "derivatives"} & set(gap.missing))
 
+
+print("\n[soạn khối — sửa một khối, mọi khối khác NGUYÊN VẸN]")
+from jobbot.cv.blocks import write_block
+
+CV_IN = PROFILE["cv_text"]
+base = [(b.kind, b.title, b.meta) for b in parse(CV_IN)]
+check("hồ sơ mẫu có khối để sửa", len(base) >= 3)
+
+for blk in parse(CV_IN):
+    if blk.kind not in ("experience", "project"):
+        continue
+    out = write_block(CV_IN, blk.kind, blk.title, blk.meta, ["I built a walk-forward tester across 17 instruments.",
+                        "Live drawdown ran 30% deeper than the model said."])
+    got = [(b.kind, b.title, b.meta) for b in parse(out)]
+    # BẤT BIẾN: đây là chỗ dễ hỏng nhất. parse() nhận ra khối mới bằng HÌNH
+    # DẠNG dòng tiêu đề — project cần " — ", kinh nghiệm cần đuôi ngày tháng.
+    # Ghi sai hình dạng thì khối bị nuốt vào khối trước và BIẾN MẤT; ghi mà
+    # không định vị được thì đẻ thêm một khối trùng tên.
+    check(f"[{blk.kind}] {blk.title[:26]} — danh sách khối không đổi", got == base)
+    again = [b for b in parse(out) if b.title == blk.title]
+    check(f"[{blk.kind}] {blk.title[:26]} — đọc lại đúng nội dung mới",
+          bool(again) and again[0].lines == ["I built a walk-forward tester across 17 instruments.",
+                        "Live drawdown ran 30% deeper than the model said."])
+
+fresh = write_block(CV_IN, "project", "Regime Detector", "", ["I built a walk-forward tester across 17 instruments.",
+                        "Live drawdown ran 30% deeper than the model said."])
+made = [b for b in parse(fresh) if b.title == "Regime Detector"]
+check("khối mới thêm được", bool(made))
+check("khối mới nằm đúng mục project", bool(made) and made[0].kind == "project")
+check("thêm khối KHÔNG đụng khối cũ",
+      all(x in [(b.kind, b.title, b.meta) for b in parse(fresh)] for x in base))
+check("khối mới vào được chỉ số bằng chứng ngay",
+      any("Regime Detector" in e.where
+          for e in __import__("jobbot.scoring.score", fromlist=["x"])
+          .build_index({**PROFILE, "cv_text": fresh})))
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

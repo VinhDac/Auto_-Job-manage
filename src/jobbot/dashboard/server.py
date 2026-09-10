@@ -10,6 +10,7 @@ import queue
 import socket
 import sqlite3
 import threading
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -23,7 +24,8 @@ from . import upload
 from .views import cv as cvview
 from .views import cvhealth, importcv
 from .filters import JobFilter
-from .views import home, jobs, profile, projects, search, settings
+from .views import (cvlist, home, jobs, profile, projects, search,
+                    settings)
 
 HOST = "127.0.0.1"          # chỉ máy này truy cập được. Không mở ra mạng.
 DEFAULT_PORT = 8765
@@ -140,6 +142,21 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(json.dumps(payload, ensure_ascii=False).encode(),
                           status=status, ctype="application/json; charset=utf-8")
 
+    @staticmethod
+    def _add_project(text: str, block: str) -> str:
+        """Chèn khối vào ĐÚNG mục SELECTED PROJECTS, không nối vào đuôi tệp.
+
+        Nối vào đuôi thì cv/blocks.parse() xếp nó vào mục cuối cùng của CV —
+        thường là TECHNICAL SKILLS — và khối project thành một dòng kỹ năng.
+        """
+        import re
+        head = re.search(r"^(SELECTED PROJECTS|PROJECTS)\s*$", text, re.M)
+        if not head:
+            return text + "\n\nSELECTED PROJECTS\n" + block
+        at = head.end() + 1
+        return text[:at] + block + "\n" + text[at:]
+
+
     def _resume_build(self, skill: str) -> None:
         """Chạy bảy chặng cho một kỹ năng, ở NỀN.
 
@@ -233,6 +250,43 @@ class Handler(BaseHTTPRequestHandler):
                     jobs=live.jobs(conn, flt), flt=flt,
                     counts=live.job_counts(conn, flt),
                     sieve=live.sieve(conn)))
+            finally:
+                conn.close()
+
+        if path == "/cv/draft":
+            # Mảnh HTML cho tấm phủ: mấy dòng CV đề xuất từ result.json của
+            # repo. ĐỀ XUẤT, không tự dán — Vin đọc và sửa rồi mới đồng ý.
+            conn = db.connect()
+            try:
+                from ..projects import inventory, tocv
+                want = (query.get("id") or ["0"])[0]
+                row = next((r for r in inventory.all(conn)
+                            if str(r["id"]) == want), None)
+                if row is None:
+                    return self._404()
+                return self._html(cvlist.draft(row, tocv.facts(row["link"]),
+                                               tocv.lines(row, tocv.facts(row["link"])),
+                                               tocv.title(row, tocv.facts(row["link"]))))
+            finally:
+                conn.close()
+
+        if path == "/cv/block":
+            conn = db.connect()
+            try:
+                want = (query.get("title") or [""])[0]
+                blocks = live.cv_blocks(conn)
+                found = next((b for b in blocks if b["title"] == want), None)
+                gaps = live.cv_versions(conn)["gaps"]
+                return self._html(cvlist.edit(found, gaps))
+            finally:
+                conn.close()
+
+        if path == "/cv":
+            conn = db.connect()
+            try:
+                data = live.cv_versions(conn)
+                data["blocks"] = live.cv_blocks(conn)
+                return self._html(cvlist.render(**data))
             finally:
                 conn.close()
 
@@ -375,6 +429,122 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
             return self._json({"ok": True, "reload": True})
+
+        if path == "/cv/pdf/all":
+            # MỘT bản cho MỖI BẢN CV, không phải mỗi tin: 117 tin nhưng chỉ 41
+            # bản khác nhau, in đủ 117 là 76 tệp trùng nội dung.
+            base = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+            def _print_all():
+                from ..cv.pdf import render_many, slug
+                conn = db.connect()
+                try:
+                    versions = live.cv_versions(conn)["versions"]
+                    root = Path(db.db_path()).parent / "cv"
+                    jobs = []
+                    for ver in versions:
+                        best = max(ver["jobs"], key=lambda j: j["score"] or 0)
+                        jobs.append((
+                            f"{base}/jobs/{best['id']}/cv",
+                            root / f"{slug(best['company'])}-{slug(best['title'])}.pdf"))
+                    journal.log.emit(journal.SCORE,
+                                     f"in {len(jobs)} bản CV ra PDF — vào {root}")
+                    made = render_many(jobs, on_done=lambda i, n, _p:
+                                       journal.log.progress(journal.SCORE,
+                                                            "in PDF", i, n))
+                    journal.log.ok(journal.SCORE,
+                                   f"xong {len(made)}/{len(jobs)} bản · {root}")
+                except Exception as exc:            # noqa: BLE001
+                    journal.log.error(journal.SCORE,
+                                      f"in hàng loạt hỏng — "
+                                      f"{type(exc).__name__}: {exc}")
+                finally:
+                    journal.log.done(journal.SCORE)
+                    conn.close()
+
+            threading.Thread(target=_print_all, daemon=True, name="pdf-all").start()
+            return self._json({"ok": True, "note": "đang in…"})
+
+        if path == "/cv/pdf":
+            # In NỀN: mở Chrome headless, tải trang, in, tắt — tính bằng giây.
+            # Làm trong lúc vẽ trang là trình duyệt đứng hình.
+            job = form.get("arg", [""])[0].strip()
+            if not job.isdigit():
+                return self._json({"ok": False}, status=400)
+            base = f"http://127.0.0.1:{self.server.server_address[1]}"
+
+            def _print():
+                from ..cv.pdf import render, slug
+                conn = db.connect()
+                try:
+                    row = conn.execute(
+                        "SELECT title, company FROM posting WHERE id = ?",
+                        (int(job),)).fetchone()
+                    if row is None:
+                        return
+                    name = f"{slug(row['company'])}-{slug(row['title'])}.pdf"
+                    out = Path(db.db_path()).parent / "cv" / name
+                    journal.log.progress(journal.SCORE, f"in PDF — {row['title'][:40]}")
+                    render(f"{base}/jobs/{job}/cv", out)
+                    journal.log.ok(journal.SCORE, f"PDF: {out}")
+                except Exception as exc:            # noqa: BLE001
+                    journal.log.error(journal.SCORE,
+                                      f"in PDF hỏng — {type(exc).__name__}: {exc}")
+                finally:
+                    journal.log.done(journal.SCORE)
+                    conn.close()
+
+            threading.Thread(target=_print, daemon=True, name=f"pdf-{job}").start()
+            return self._json({"ok": True, "note": "đang in…"})
+
+        if path == "/cv/block":
+            # Ghi thẳng vào cv_text — MỘT nguồn sự thật. write_block chỉ đụng
+            # đúng khối đó, các khối khác giữ nguyên định dạng (có test khứ hồi
+            # trong test_cv.py, vì đây là chỗ dễ nuốt mất khối nhất).
+            conn = db.connect()
+            try:
+                from ..cv.blocks import write_block
+                title = form.get("title", [""])[0].strip()
+                body = [l.strip() for l in form.get("line", []) if l.strip()]
+                if form.get("kill"):
+                    body = []                      # thân rỗng = xoá khối
+                if title and (body or form.get("kill")):
+                    answers = store.load(conn)
+                    store.save(conn, {"cv_text": write_block(
+                        answers.get("cv_text") or "",
+                        form.get("kind", ["project"])[0],
+                        title, form.get("meta", [""])[0].strip(), body)},
+                        note=f"soạn khối: {title[:40]}")
+                    live._CV_CACHE.clear()
+                    journal.log.ok(journal.SCORE,
+                                   f"CV: khối «{title[:40]}» — "
+                                   + (f"{len(body)} câu" if body else "đã xoá"))
+            finally:
+                conn.close()
+            return self._redirect("/cv")
+
+        if path == "/cv/draft":
+            # Ghi vào CV GỐC. Đây là chữ của Vin sau khi sửa, không phải chữ máy.
+            conn = db.connect()
+            try:
+                from ..projects import inventory
+                pid = form.get("id", ["0"])[0]
+                head = form.get("head", [""])[0].strip()
+                body = [l.strip() for l in form.get("line", []) if l.strip()]
+                if head and body:
+                    answers = store.load(conn)
+                    text = (answers.get("cv_text") or "").rstrip()
+                    # KHÔNG thêm "· ": CV này không dùng gạch đầu dòng, và
+                    # cv/blocks.py bóc theo đúng định dạng của nó.
+                    block = head + "\n" + "\n".join(body)
+                    store.save(conn, {"cv_text": self._add_project(text, block)},
+                               note=f"project #{pid} vào CV")
+                    live._CV_CACHE.clear()
+                    journal.log.ok(journal.PROJECT,
+                                   f"project #{pid}: đã thêm vào CV gốc")
+            finally:
+                conn.close()
+            return self._redirect("/cv")
 
         if path == "/api/pause":
             runner = sched.current()

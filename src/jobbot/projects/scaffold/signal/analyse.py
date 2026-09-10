@@ -119,6 +119,32 @@ def main() -> None:
     print(f"HEADLINE: {survives:.0%} of the backtest's promise survived "
           f"being held out and paying costs")
     chart(gross, net, cut)
+    save({
+        "shape": "signal",
+        "headline": f"{survives:.0%} of a {{short}} signal's backtested Sharpe "
+                    f"survived being held out and paying {COST_BPS} bps",
+        "number": round(float(survives), 4),
+        "unit_of_number": "held-out net Sharpe as a share of in-sample gross",
+        "days": len(frame), "dropped": dropped, "parts": frame.shape[1],
+        "from": str(frame.index.min().date()), "to": str(frame.index.max().date()),
+        "in_sample_sharpe": round(promise, 3),
+        "held_out_sharpe": round(delivered, 3),
+        "cost_bps": COST_BPS, "turnover": round(float(turnover.mean()), 3),
+        "held_out_from": str(cut.date()), "signal": HOW,
+    })
+
+
+def save(facts: dict) -> None:
+    """Write the numbers to result.json as well as the screen.
+
+    A number that only ever reaches stdout cannot be cited later. This file is
+    what the CV line is built from — so every claim about this project points
+    back at a value this script actually produced.
+    """
+    import json
+    out = Path(__file__).parent / "result.json"
+    out.write_text(json.dumps(facts, indent=2, default=str))
+    print(f"facts: {out.name}")
 
 
 if __name__ == "__main__":
