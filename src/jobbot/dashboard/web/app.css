@@ -47,11 +47,18 @@
   --acc-ink:#10261B;      /* chữ trên nền xanh */
   --acc-bg:rgba(85,201,141,.11);
   --acc-bg-2:rgba(85,201,141,.20);
+  --info:#6CB6FF;         /* 7.5:1 trên pill — tin nền, đọc để biết */
   --warn:#D8A15E;
   --warn-bg:rgba(216,161,94,.11);
   --bad:#DD7D76;          /* 4.7:1 — bản cũ 4.3, hụt ngưỡng trên panel-2 */
+  --rim:#333333;          /* L*21.2 — xám VIỀN, sáng hơn xám khung +11.9 */
+  --gap:5px;              /* khoảng xám giữa hai khung và mép cửa sổ */
+  --round:8px;            /* góc bo của hai khung */
   --nav-w:216px;
-  --top:38px;             /* chừa chỗ cho traffic lights */
+  --main-l:calc(var(--nav-w) + var(--gap) * 2);  /* mép trái khung làm việc */
+  --top:28px;             /* chiều cao thanh tiêu đề — vừa đúng ba nút
+                             traffic light của macOS (12pt, tâm cách mép
+                             trên 14pt), không thừa một dòng trống nào */
 }
 /* KHUNG APP NÓI NHỎ — VÙNG LÀM VIỆC NÓI TO.
 
@@ -73,14 +80,27 @@
 
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
+body{margin:0;background:var(--side);color:var(--ink);overflow:hidden;
   font:14px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
   -webkit-font-smoothing:antialiased}
 
 /* ---------------- sidebar ---------------- */
-.side{position:fixed;inset:0 auto 0 0;width:var(--nav-w);background:var(--side);
-  border-right:1px solid var(--line);display:flex;flex-direction:column;
-  padding:var(--top) 10px calc(10px + var(--status-h))}
+/* HAI KHUNG LỒNG NHAU, KHÔNG KẺ VẠCH.
+
+   Khung ngoài là cả cửa sổ, màu xám (body). Thanh tiêu đề, thanh bên và thanh
+   trạng thái KHÔNG có nền riêng — chúng chính là mảng xám đó, nên giữa chúng
+   không có gì để ngăn.
+
+   Trên mảng xám đó nổi lên HAI khung bo tròn, cùng một viền --rim: cột nút
+   chuyển tab (nền xám như khung) và vùng làm việc (nền đen). Khoảng cách
+   giữa chúng là --gap, không phải một vạch kẻ — góc bo và viền đã tách rõ
+   hơn vạch 1px, mà lại không cắt ngang cái gì. */
+.titlebar{position:fixed;left:0;right:0;top:0;z-index:40;height:var(--top);
+  display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:600;color:var(--mute);user-select:none}
+.side{position:fixed;top:var(--top);left:var(--gap);bottom:var(--status-h);
+  width:var(--nav-w);display:flex;flex-direction:column;padding:10px;
+  border:1px solid var(--rim);border-radius:var(--round)}
 .brand{display:flex;align-items:center;gap:8px;
   font-size:15px;font-weight:700;letter-spacing:-.02em;padding:6px 10px 14px;
   color:var(--ink)}
@@ -112,7 +132,12 @@ body{margin:0;background:var(--bg);color:var(--ink);overflow:hidden;
   box-shadow:0 0 0 3px var(--acc-bg)}
 
 /* ---------------- vùng nội dung ---------------- */
-main{position:fixed;inset:0 0 0 var(--nav-w);overflow-y:auto;background:var(--bg)}
+/* Viền tấm đen là xám RIÊNG, sáng hơn xám khung một bậc (+6.9 L*) — đủ để
+   thấy rõ đường bo mà không thành cái vạch. Viền nằm TRONG hộp (box-sizing
+   border-box) nên thêm nó không xê dịch gì. */
+main{position:fixed;top:var(--top);left:var(--main-l);right:var(--gap);
+  bottom:var(--status-h);overflow-y:auto;background:var(--bg);
+  border:1px solid var(--rim);border-radius:var(--round)}
 /* KHUNG KHÔNG BAO GIỜ BỎ PHÍ. Trước đây `.inner` chặn cứng 840px nên trên màn
    1900px, khung chính rộng 1684 mà nội dung chỉ dùng 840 — bỏ trống 844px,
    đúng nửa cửa sổ, ở MỌI trang kiểu này.
@@ -124,7 +149,7 @@ main{position:fixed;inset:0 0 0 var(--nav-w);overflow-y:auto;background:var(--bg
    văn xuôi.
 
    Một luật ở một chỗ, không cần cờ `wide=` mà trang nào cũng phải nhớ truyền. */
-.inner{max-width:none;padding:var(--top) 34px calc(90px + var(--status-h))}
+.inner{max-width:none;padding:20px 26px 90px}
 .inner p,.inner .lead,.inner blockquote{max-width:78ch}
 
 h1{font-size:25px;margin:0 0 6px;letter-spacing:-.02em;font-weight:680}
@@ -494,7 +519,7 @@ body[data-run=paused]  .rdot{background:var(--warn)}
    overflow:hidden ở đây CẮT CỤT nội dung mà không có cách nào xem tiếp. */
 main:not(.flow){overflow-y:auto;display:flex;flex-direction:column}
 main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
-  padding:16px 20px calc(16px + var(--status-h)) 34px;
+  padding:14px 16px 14px 16px;
   display:flex;flex-direction:column}
 
 /* ---------------- lưới widget ---------------- */
@@ -518,7 +543,8 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
 .wbody{flex:1;min-height:0;overflow:auto;padding:12px}
 
 /* mở to: phủ toàn màn hình để xem kỹ / chỉnh, Esc thu về */
-.wid.big{position:fixed;inset:calc(var(--top) + 8px) 12px 12px calc(var(--nav-w) + 12px);
+.wid.big{position:fixed;inset:calc(var(--top) + 10px) calc(var(--gap) + 10px)
+  calc(var(--status-h) + 10px) calc(var(--main-l) + 10px);
   z-index:40;box-shadow:0 24px 70px rgba(0,0,0,.6);border-color:var(--line-2)}
 .wid.big .wexp{color:var(--acc)}
 
@@ -630,16 +656,16 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
 
 /* Đổi biến --nav-w là cả sidebar LẪN vùng nội dung (main inset trái) cùng co,
    không phải chỉnh hai chỗ rời nhau rồi lệch. */
-:root.navmin{--nav-w:58px}
+:root.navmin{--nav-w:62px}
 .navmin .brandrow{flex-direction:column;gap:3px;padding:0 0 12px;
   justify-content:center}
 .navmin .brand{flex:none;font-size:0;gap:0;padding:0}
-.navmin .logo{width:34px;height:11.5px}
+.navmin .logo{width:32px;height:10.8px}
 .navmin .navtoggle{transform:rotate(180deg)}
 .navmin .navlink{justify-content:center;padding:10px 0;gap:0}
 .navmin .navlink span{display:none}
 /* Lúc gập, icon là thứ DUY NHẤT để bấm — không được mờ như lúc có chữ bên cạnh. */
-.navmin .navlink i{width:auto;font-size:15px;color:var(--dim)}
+.navmin .navlink i{width:auto;font-size:22px;line-height:1;color:var(--dim)}
 .navmin .navlink:hover i{color:var(--ink)}
 .navmin .navlink.on i{color:var(--acc)}
 .navmin .navtoggle{color:var(--dim)}
@@ -1078,18 +1104,26 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
 .deckwrap{display:flex;justify-content:center;width:100%;min-width:0}
 
 .deckpill::-webkit-scrollbar{display:none}
-/* NỔI hẳn khỏi thanh: nền sáng hơn nền trang, viền ngả xanh, một quầng xanh
-   mờ và bóng đổ sâu. Không dùng vạch ngăn — khoảng trắng đủ để tách nhóm, mà
-   vạch thì chia viên thuốc thành ba ô nhìn như cái bảng. */
+/* Nền viên thuốc dùng ĐÚNG luật của mọi mặt khác trong vùng làm việc: nền
+   --panel phẳng + viền --line, y như cái thẻ nằm ngay dưới nó. Bản cũ chồng
+   SÁU lớp (gradient, viền xanh rgba, vệt sáng mép trên, quầng xanh 4px, quầng
+   toả 22px, bóng đổ 26px) — nó là thứ DUY NHẤT trong app có gradient, nên
+   nhìn lạc hẳn khỏi hai khung bo. Màu xanh chỉ giữ ở chỗ CÓ NGHĨA: chấm
+   trạng thái và nút Chạy.
+
+   Không dùng vạch ngăn bên trong — khoảng trắng đủ để tách nhóm, mà vạch thì
+   chia viên thuốc thành ba ô nhìn như cái bảng. */
 .deckpill{display:inline-flex;align-items:center;flex-wrap:nowrap;gap:4px;
   max-width:100%;overflow-x:auto;scrollbar-width:none;
   padding:0 7px 0 5px;border-radius:999px;
-  background:linear-gradient(180deg,#2F2F2F00,#282828 18%,var(--panel-2));
-  border:1px solid rgba(85,201,141,.32);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),
-             0 0 0 4px rgba(85,201,141,.07),
-             0 0 22px -6px rgba(85,201,141,.18),
-             0 10px 26px -12px rgba(0,0,0,.8)}
+  background:var(--panel);border:1px solid var(--line);
+  transition:border-color .2s,box-shadow .2s}
+/* CHỈ lúc đang chạy thì viền thanh mới bắt sáng. Không có luật cho `paused`:
+   trong live.js `paused` nghĩa là "tự quét TẮT" — đó là trạng thái NGHỈ bình
+   thường, không phải cảnh báo. Bắt nó sáng cam thì thanh cam suốt ngày, và
+   cái sáng đó lập tức hết nghĩa. */
+body[data-run=running] .deckpill{border-color:var(--acc-2);
+  box-shadow:0 0 0 3px var(--acc-bg)}
 .deckpillname{display:flex;align-items:center;gap:8px;flex:none;
   padding:8px 16px 8px 13px}
 .deckname{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
@@ -1100,10 +1134,20 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
   white-space:nowrap;flex:none}
 .metric b{font-size:15px;font-weight:650;color:var(--ink);
   font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+/* MÀU MANG NGHĨA — đây là chỗ DUY NHẤT trong app dùng nhiều hơn một màu, và
+   cố ý: thanh điều khiển phải nhìn ra ngay là thanh điều khiển, không lẫn
+   với nội dung. Luật vai->màu ghi ở layout.deck(). */
+.metric.act   b{color:var(--acc)}      /* việc phải làm */
+.metric.stock b{color:var(--info)}     /* kho đang giữ */
+.metric.new   b{color:var(--warn)}     /* vừa về */
+.metric.view  b{color:var(--dim)}      /* chỉ là bộ lọc màn hình */
+/* Số 0 thì TẮT màu, đè lên mọi vai ở trên. Thanh chỉ sáng khi có chuyện —
+   "0 mới" mà vẫn rực cam là nói dối. */
+.metric.zero b{color:var(--mute);font-weight:500}
 .deckbtns{display:flex;align-items:center;gap:6px;flex:none;padding:6px 0}
 .deckpill .mbtn{border-radius:999px;padding:5px 13px}
 .mbtn.go{border-color:var(--acc-2);color:var(--acc);background:var(--acc-bg-2);
-  box-shadow:0 0 12px -4px rgba(85,201,141,.45)}
+}
 .mbtn.knob{padding:5px 10px;font-size:13px;line-height:1}
 
 .sheethead{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
@@ -1116,8 +1160,7 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
 .statusbar{position:fixed;left:0;right:0;bottom:0;z-index:30;
   display:flex;align-items:center;gap:9px;height:var(--status-h);
   padding:0 16px 0 14px;font-size:11.5px;color:var(--dim);
-  background:rgba(26,26,26,.92);backdrop-filter:saturate(150%) blur(12px);
-  border-top:1px solid var(--line)}
+}
 .statusbar b{font-weight:600;color:var(--ink);flex:none}
 .sdot{width:6px;height:6px;border-radius:50%;background:var(--mute);flex:none}
 body[data-run=running] .sdot{background:var(--acc);animation:beat 1.1s ease-in-out infinite}

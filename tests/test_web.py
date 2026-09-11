@@ -503,7 +503,19 @@ with tempfile.TemporaryDirectory() as tmp:
     check("có nút Dừng của riêng nó", "/api/stage/stop" in _srch)
     check("nút chạy/dừng mang tên khúc", "data-arg='search'" in _srch)
     check("có nút Điều chỉnh ⚟", "data-settings='/adjust/search'" in _srch)
-    check("có số liệu, không phải câu văn", _srch.count("class=metric") >= 3)
+    check("có số liệu, không phải câu văn", _srch.count("class='metric ") >= 3)
+    # MÀU MANG NGHĨA. Mỗi số phải khai VAI, vì vai mới quyết định màu; không
+    # khai thì số nào cũng trắng như nhau và thanh điều khiển lẫn vào nội dung.
+    for _vai in ("stock", "act", "new", "view"):
+        check(f"số liệu khai vai '{_vai}'", f"class='metric {_vai}" in _srch)
+    # Luật SỐ 0 KHÔNG SÁNG — thử thẳng vào hàm, không phụ thuộc dữ liệu thật.
+    from jobbot.dashboard.layout import deck as _deck
+    _d0 = _deck("search", "S", "", [("0", "mới", "new")])
+    _d9 = _deck("search", "S", "", [("9", "mới", "new")])
+    check("số 0 bị tắt màu", "metric new zero" in _d0)
+    check("số khác 0 thì giữ màu", "zero" not in _d9)
+    check("dấu phẩy nghìn không làm hỏng luật",
+          "zero" not in _deck("search", "S", "", [("1,204", "giữ", "stock")]))
     # MỘT viên pill căn giữa, không phải dải kéo hết bề ngang: trên màn 1900px
     # dải đẩy tên khúc sang trái và nút sang phải cách nhau cả gang tay.
     check("có viên thuốc điều khiển", "class=deckpill" in _srch)
@@ -554,7 +566,38 @@ with tempfile.TemporaryDirectory() as tmp:
              / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
     check("thanh trạng thái tràn hết bề ngang",
           ".statusbar{position:fixed;left:0;right:0" in _cssb)
-    check("thanh bên chừa chỗ cho nó", "calc(10px + var(--status-h))" in _cssb)
+    check("thanh bên dừng ngay trên thanh trạng thái",
+          "bottom:var(--status-h);\n  width:var(--nav-w)" in _cssb)
+    # Cửa sổ app không có khung: traffic lights đè lên trang. Có thanh tiêu đề
+    # THẬT thì mọi trang tự được chừa — trước đây mỗi trang tự nhớ, và trang
+    # Home nhớ sai (chừa 16px trong khi cần 38px) nên ô nội dung chui lên đó.
+    for _pg4 in ("/", "/search", "/cv", "/track", "/profile", "/projects"):
+        _, _b4 = get(_pg4)
+        check(f"{_pg4} có thanh tiêu đề", "class=titlebar" in _b4)
+    check("thanh tiêu đề cao đúng --top", "z-index:40;height:var(--top)" in _cssb)
+    check("khung chính bắt đầu DƯỚI thanh tiêu đề",
+          "main{position:fixed;top:var(--top);left:var(--main-l)" in _cssb)
+    check("thanh bên cũng vậy",
+          ".side{position:fixed;top:var(--top);left:var(--gap)" in _cssb)
+    # HAI KHUNG, KHÔNG KẺ VẠCH. Thanh tiêu đề và thanh trạng thái không có nền
+    # riêng cũng không có viền — chúng LÀ mảng xám của body. Nổi trên mảng đó
+    # là HAI khung bo tròn cùng viền --rim: cột nút chuyển tab và vùng làm
+    # việc. Ngăn cách là khoảng --gap giữa hai khung, không phải vạch kẻ.
+    for _ten, _rule in (("cột nút chuyển tab", "\n.side{"), ("vùng làm việc", "\nmain{")):
+        _blk = _cssb[_cssb.index(_rule) + 1:]
+        _blk = _blk[:_blk.index("}")]
+        check(f"{_ten} là khung bo tròn có viền",
+              "border:1px solid var(--rim)" in _blk
+              and "border-radius:var(--round)" in _blk, _blk[:90])
+    # Xám VIỀN phải tách được khỏi xám KHUNG, không thì đường bo chìm mất.
+    _tach = _ls(_var["rim"]) - _ls(_var["side"])
+    check(f"xám viền sáng hơn xám khung ({_tach:+.1f} L*)", 6.0 <= _tach <= 15.0)
+    check("nền cửa sổ là mảng xám khung", "body{margin:0;background:var(--side)" in _cssb)
+    for _ten, _rule in (("thanh tiêu đề", ".titlebar{"), ("thanh trạng thái", ".statusbar{")):
+        _blk = _cssb[_cssb.index(_rule):]
+        _blk = _blk[:_blk.index("}")]
+        check(f"{_ten} không kẻ vạch ngăn", "border" not in _blk, _blk[:70])
+        check(f"{_ten} không có nền riêng", "background" not in _blk, _blk[:70])
     check("thanh đáy có ô trạng thái sống", "data-state" in _srch)
     check("và ô tin gần nhất", "data-lastmsg" in _srch)
     # Một trang chỉ được nói trạng thái chung MỘT lần. live.js ghi vào MỌI

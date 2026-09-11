@@ -65,15 +65,33 @@ def deck(stage: str, name: str, state: str, metrics: list,
     cùng nội dung ở mọi tab — mà thứ nó điều khiển ("Chạy ngay", "Bật tự quét")
     chỉ thuộc về Search. Thanh mang danh toàn app mà làm việc của một khúc.
 
-    `metrics` là [(số, nhãn)]. Chỉ nhận số nào trả lời được câu "giờ tôi nên
-    làm gì" — Home cũ chết vì đầy số đẹp mà không ai hành động theo.
+    `metrics` là [(số, nhãn, vai)]. Chỉ nhận số nào trả lời được câu "giờ tôi
+    nên làm gì" — Home cũ chết vì đầy số đẹp mà không ai hành động theo.
+
+    VAI quyết định MÀU, và màu ở đây mang nghĩa chứ không phải trang trí:
+
+        act    việc phải làm      -> xanh lá (màu hành động của cả app)
+        stock  kho đang giữ       -> xanh dương (tin nền, đọc để biết)
+        new    vừa về, cần xem    -> cam (thời sự)
+        view   chỉ là bộ lọc      -> xám (không phải dữ liệu)
+
+    Và một luật đè lên tất cả: SỐ 0 THÌ KHÔNG SÁNG. "0 mới" mà vẫn rực cam là
+    nói dối — thanh chỉ được sáng lên khi thật sự có chuyện.
 
     Nút ⚟ dùng lại tấm phủ của Cài đặt (`data-settings` nhận URL), nên không
     đẻ thêm trình nghe nào — mỗi đường mới là một nút có thể chết.
     """
+    def _rong(v) -> bool:
+        """Số 0 (hoặc rỗng) thì tắt màu — xem luật ở docstring."""
+        try:
+            return int(str(v).replace(",", "").strip() or 0) == 0
+        except ValueError:
+            return False
+
     nums = "".join(
-        f"<span class=metric><b>{esc(str(v))}</b>{esc(label)}</span>"
-        for v, label in metrics)
+        f"<span class='metric {esc(kind)}{' zero' if _rong(v) else ''}'>"
+        f"<b>{esc(str(v))}</b>{esc(label)}</span>"
+        for v, label, kind in metrics)
     knob = (f"<button class='mbtn knob' data-settings='{esc(adjust)}'"
             f" title='Điều chỉnh {esc(name)}'>⚟</button>" if adjust else "")
     # MỘT viên thuốc NẰM NGANG: được phép RỘNG, chỉ không được CAO. Tất cả
@@ -147,6 +165,13 @@ def page(title: str, body: str, active: str = "",
         f"<title>{esc(title)} · jobbot</title>"
         "<link rel=stylesheet href='/static/app.css'>"
         f"{early}</head><body>"
+        # THANH TIÊU ĐỀ — dải trên cùng cửa sổ. Cửa sổ app không có khung nên
+        # traffic lights của macOS nằm đè lên trang: chỗ đó phải LUÔN trống,
+        # cuộn nội dung lên tới đây là mất chữ. Có thanh thật thì mọi trang tự
+        # được chừa — không phải mỗi trang tự nhớ chừa bao nhiêu, mà quên một
+        # trang là trang đó hỏng (đúng như trang Home vừa rồi: chừa 16px
+        # trong khi cần 38px).
+        f"<header class=titlebar><b>{esc(title)}</b></header>"
         f"<aside class=side>"
         f"<div class=brandrow><div class=brand>{LOGO}jobbot</div>"
         f"<button class=navtoggle data-nav title='Gập thanh bên'>«</button></div>"

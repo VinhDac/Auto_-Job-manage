@@ -231,10 +231,11 @@ def render(*, jobs: list[dict], flt, counts: dict, sieve: dict,
         bar=deck(
             "search", "Search",
             info.get("state", "chưa quét lần nào"),
-            [(f"{counts.get('matched', 0):,}", "giữ"),
-             (f"{info.get('worth', 0):,}", "đáng nộp"),
-             (f"{info.get('fresh', 0):,}", "mới"),
-             (len(jobs), "đang hiện")],
+            # vai -> màu: xem luật ở layout.deck()
+            [(f"{counts.get('matched', 0):,}", "giữ", "stock"),
+             (f"{info.get('worth', 0):,}", "đáng nộp", "act"),
+             (f"{info.get('fresh', 0):,}", "mới", "new"),
+             (len(jobs), "đang hiện", "view")],
             adjust="/adjust/search"),
         # Lưới sàng đã chuyển vào ⚟ nên cột trái hết việc. Danh sách — thứ
         # Vin thật sự đọc — lấy cả bề ngang. Nhật ký về dải dẹt dưới đáy.
