@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from jobbot.core import db
+import os as _os
 from jobbot.profile import store
 from jobbot.profile.schema import INGEST_GATE, SECTIONS, all_questions, section_by_id
 from jobbot.dashboard.server import _form_to_answers
@@ -194,9 +195,39 @@ check("ô đã có sẵn thì không đề xuất đè", "job_titles" not in _p2
 # viễn, không còn đường nào sửa.
 _p3 = {x.field: x for x in _propose(_cv, {"cv_text": "CV CŨ", "full_name": "X"})}
 check("nhập CV mới THAY được bản cũ", "cv_text" in _p3)
+# LUẬT TỔNG QUÁT. store.save() lọc theo schema, nên MỌI ô mà máy nhập đề xuất
+# đều phải có trong schema — thiếu một cái là nó lặng lẽ không bao giờ được
+# lưu, mà màn hình duyệt vẫn tick xanh như thường.
+_lac = [f for f in _p if f not in all_questions()]
+check(f"mọi ô máy nhập đề xuất đều LƯU được {_lac or ''}", not _lac)
 check("và nói rõ là sẽ thay", "THAY bản CV đang lưu" in _p3["cv_text"].note)
 check("còn ô khác vẫn giữ luật không-đè", "full_name" not in _p3)
-check("ô dán CV đã bỏ khỏi form", "cv_text" not in all_questions())
+# cv_text KHÔNG vẽ ra form, nhưng PHẢI ở lại schema. store.save() lọc theo
+# schema — gỡ khỏi đó là nó lặng lẽ không lưu được nữa. Đã mất nguyên toàn văn
+# CV vì đúng chuyện này: nhập CV báo "13 fields" mà chỉ 12 câu vào DB.
+check("cv_text vẫn ở trong schema để LƯU được", "cv_text" in all_questions())
+check("nhưng không vẽ ra form", all_questions()["cv_text"].hidden)
+_tmpdb = tempfile.mkdtemp()
+_env_cu = _os.environ.get("JOBBOT_DATA_DIR")
+_os.environ["JOBBOT_DATA_DIR"] = _tmpdb
+try:
+    import importlib as _il2
+    from jobbot.core import paths as _p2
+    _il2.reload(_p2)
+    _c2 = db.connect(Path(_tmpdb) / "t.db")
+    db.migrate(_c2)
+    store.save(_c2, {"cv_text": "EXPERIENCE\nQuant Analyst — X Jan 2025 – Sep 2025\n"}, "t")
+    check("lưu cv_text rồi đọc lại được",
+          "Quant Analyst" in str(store.load(_c2).get("cv_text") or ""))
+    _c2.close()
+finally:
+    if _env_cu is None:
+        _os.environ.pop("JOBBOT_DATA_DIR", None)
+    else:
+        _os.environ["JOBBOT_DATA_DIR"] = _env_cu
+    import importlib as _il3
+    from jobbot.core import paths as _p3
+    _il3.reload(_p3)
 
 print("\n[học vấn & chứng chỉ — HÌNH DẠNG phải khớp ngữ pháp hệ thống đọc]")
 # cv/build.py làm `certs.splitlines()[0]` để lấy chứng chỉ mạnh nhất, score.py

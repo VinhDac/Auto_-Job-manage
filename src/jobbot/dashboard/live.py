@@ -426,9 +426,10 @@ def onboarding(conn: sqlite3.Connection) -> dict:
     phan = []
     da_tra_loi = tong = 0
     for s in SECTIONS:
-        co = [q for q in s.questions if store.has_answer(answers, q)]
+        hien = [q for q in s.questions if not q.hidden]
+        co = [q for q in hien if store.has_answer(answers, q)]
         da_tra_loi += len(co)
-        tong += len(s.questions)
+        tong += len(hien)
         phan.append({
             "id": s.id, "title": s.title, "why": s.why,
             "href": f"/profile/{s.id}",

@@ -63,6 +63,10 @@ class Question:
     tags: str = ""
     suggest: str = ""               # kho gợi ý: "titles" hay "skills"
     block_kind: str = ""            # với kind=BLOCKS: "experience" hay "project"
+    # Có trong schema nhưng KHÔNG vẽ ra form. store.save() lọc theo schema, nên
+    # gỡ một câu khỏi đây là làm nó KHÔNG LƯU ĐƯỢC NỮA — lặng lẽ. Đã mất
+    # nguyên toàn văn CV vì đúng chuyện đó: nhập CV báo "13 fields", lưu 12.
+    hidden: bool = False
 
 
 @dataclass(frozen=True)
@@ -326,12 +330,17 @@ SECTIONS: list[Section] = [
         title="What you have",
         why="Raw material for matching and for building CVs. Without it, scoring is guesswork.",
         questions=[
-            # Ô "dán CV vào đây" ĐÃ BỎ khỏi form. `cv_text` vẫn là nguồn sự
-            # thật quan trọng nhất của app (cv/blocks.py đọc nó ra khối kinh
-            # nghiệm, score.py chấm theo từng khối) — nhưng nó có ĐƯỜNG RIÊNG:
-            # Import CV đọc PDF/DOCX rồi đề xuất từng ô để duyệt, và tab CV
-            # sửa từng khối. Bày thêm một ô trắng khổng lồ trong form là đường
-            # thứ hai cho cùng một thứ, mà lại là đường không ai biết điền gì.
+            # `cv_text` KHÔNG vẽ ra form (đã có Import CV và tab CV lo việc
+            # sửa), nhưng PHẢI ở lại schema: store.save() lọc theo schema, gỡ
+            # khỏi đây là nó không lưu được nữa — và đó là nguồn sự thật nặng
+            # nhất app, cv/blocks.py đọc nó ra khối kinh nghiệm, score.py chấm
+            # theo từng khối.
+            Question(
+                id="cv_text",
+                text="Toàn văn CV",
+                kind=LONGTEXT,
+                hidden=True,
+            ),
             Question(
                 id="years_real",
                 text="How many years have you ACTUALLY worked?",

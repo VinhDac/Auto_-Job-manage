@@ -110,7 +110,9 @@ def render_section(section: Section, answers: Answers, done_ids: set[str],
                    next_label: str, gate_missing: list[str] | None = None,
                    kho: dict[str, list[str]] | None = None) -> str:
     optional = "<span class=opt-tag>optional</span>" if section.optional else ""
-    questions = "".join(_question(q, answers, kho) for q in section.questions)
+    # Câu ẩn có trong schema để LƯU được, nhưng không vẽ ra form.
+    questions = "".join(_question(q, answers, kho)
+                        for q in section.questions if not q.hidden)
 
     # Lưu xong mà còn thiếu câu bắt buộc thì người dùng bị đưa NGƯỢC về đây.
     # Bị quay lại mà không biết vì sao là lỗi, không phải chu trình — nên phải

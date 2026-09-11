@@ -91,14 +91,15 @@ def has_answer(answers: Answers, question) -> bool:
 def missing_in_section(answers: Answers, section: Section) -> list[str]:
     """Câu bắt buộc còn thiếu trong một phần."""
     return [q.id for q in section.questions
-            if q.required and not has_answer(answers, q)]
+            if q.required and not q.hidden and not has_answer(answers, q)]
 
 
 def is_section_done(answers: Answers, section: Section) -> bool:
     """Xong = không thiếu câu bắt buộc VÀ đã trả lời ít nhất một câu."""
     if missing_in_section(answers, section):
         return False
-    return any(has_answer(answers, q) for q in section.questions)
+    return any(has_answer(answers, q)
+               for q in section.questions if not q.hidden)
 
 
 def next_section(section_id: str) -> Section | None:
