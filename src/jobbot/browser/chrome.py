@@ -67,6 +67,34 @@ def _candidates() -> list[str]:
 CANDIDATES = _candidates()
 
 
+# Cờ cho CHẠY KHÔNG NGƯỜI TRÔNG. App này quét 24/7, phần lớn thời gian không
+# ai nhìn màn hình — nên thứ duy nhất được xuất hiện trên cửa sổ đó là trang
+# tuyển dụng. Mỗi cờ dưới đây chặn đúng MỘT thứ đã hoặc sẽ chen vào giữa:
+KHONG_NGUOI_TRONG = (
+    # Tắt máy đột ngột / mất điện -> lần mở sau Chrome hiện "Khôi phục trang?"
+    # phủ lên nội dung. Không ai bấm Đóng lúc 3 giờ sáng.
+    "--disable-session-crashed-bubble",
+    "--hide-crash-restore-bubble",
+    # Thanh "Dịch trang này?" — tin tiếng Pháp, Bồ Đào Nha về đều đặn, và
+    # thanh đó đẩy nội dung xuống, có lúc che mất dòng đầu.
+    "--disable-features=Translate,TranslateUI",
+    # Trang xin quyền gửi thông báo -> hộp thoại chặn ngang, chờ người bấm.
+    "--disable-notifications",
+    # Cửa sổ không được focus (đúng định nghĩa "không người trông") thì Chrome
+    # bóp hẹn giờ và đóng băng renderer để tiết kiệm pin. Hậu quả: script trên
+    # trang không chạy xong, grab() trả về rỗng, và lần quét ấy báo "0 tin" —
+    # một kiểu hỏng trông y hệt "hôm nay không có việc nào".
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    # Chrome tự cập nhật thành phần giữa lúc quét thì trang đang mở khựng lại.
+    "--disable-component-update",
+    # Trần cache. Không có trần thì profile phình vô hạn — đo được 134 MB sau
+    # một ngày. 50 MB đủ cho việc mở đi mở lại vài nghìn trang tuyển dụng.
+    "--disk-cache-size=52428800",
+)
+
+
 class ChromeError(RuntimeError):
     pass
 
@@ -117,6 +145,7 @@ def launch(headless: bool = True, port: int = PORT,
         "--no-first-run", "--no-default-browser-check",
         "--disable-background-networking", "--disable-sync",
         "--mute-audio", "--window-size=1440,900",
+        *KHONG_NGUOI_TRONG,
     ]
     if headless:
         args.append("--headless=new")
@@ -177,3 +206,14 @@ def shutdown(port: int = PORT, wait: float = 6.0) -> bool:
             return True
         time.sleep(0.3)
     return not alive(port)
+
+
+def shutdown_all(wait: float = 6.0) -> int:
+    """Đóng MỌI Chrome của app. Trả về số cửa sổ thật sự đóng được.
+
+    Thoát app mà chỉ đóng cổng mặc định thì cửa sổ NỘP (9335) nằm lại: nó CỐ Ý
+    được để mở trong lúc chạy, để Vin bấm cú cuối, nên không có ai khác đóng
+    nó. Một cửa sổ mồ côi giữ khoá thư mục profile, và lần sau mở app lên
+    Chrome không mở lại được profile đó — hỏng mà không hiểu vì sao.
+    """
+    return sum(1 for port in PROFILE if alive(port) and shutdown(port, wait))

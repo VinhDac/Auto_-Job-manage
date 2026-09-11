@@ -63,6 +63,12 @@ class Health:
     # failed vẫn là 0, record_run thấy 0/193 hỏng và ghi ok=1 — màn hình
     # Settings hiện huy hiệu xanh cho một lần quét bị cắt ngang từ tin thứ ba.
     blocked: bool = False
+    # ĐỨT khác BỊ CHẶN. Bị chặn là cổng từ chối mình; đứt là mất kết nối giữa
+    # chừng — máy ngủ dậy, Chrome chết, mạng rớt. Hai thứ này cần cách xử lý
+    # khác nhau (chặn thì đi nhẹ hơn, đứt thì chạy lại là được), nên nhật ký
+    # phải gọi đúng tên. Nhưng cả hai đều là "lần đọc này KHÔNG trọn vẹn", nên
+    # cả hai cùng làm ok = False.
+    cut: str = ""
     samples: list[str] = field(default_factory=list)
 
     def note(self, message: str) -> None:
@@ -75,15 +81,20 @@ class Health:
         self.failed += max(0, unread)
         self.note(message)
 
+    def broke(self, message: str) -> None:
+        """Đứt giữa chừng (không phải bị chặn). Ghi lý do, và đánh dấu KHÔNG lành."""
+        self.cut = message
+        self.note(message)
+
     @property
     def ok(self) -> bool:
-        return not self.blocked
+        return not (self.blocked or self.cut)
 
     @property
     def summary(self) -> str:
-        if not (self.failed or self.blocked):
+        if not (self.failed or self.blocked or self.cut):
             return ""
-        head = "BỊ CHẶN · " if self.blocked else ""
+        head = "BỊ CHẶN · " if self.blocked else "ĐỨT · " if self.cut else ""
         return (f"{head}{self.failed}/{self.attempted} hỏng · "
                 + " · ".join(self.samples[:2]))
 

@@ -176,5 +176,56 @@ with tempfile.TemporaryDirectory() as tmp:
     check("và vẫn còn cần tính lại", stale_count(conn) == 2)
     conn.close()
 
+print("\n[NGƯỜI giữ lại tin máy đã loại — quyết định phải SỐNG SÓT]")
+# Cái bẫy: `kept` là cột SUY RA. Sửa thẳng kept=1 bằng tay thì derive() ghi đè
+# ở lần tính lại sau — mà đổi một chữ trong hồ sơ là mọi tin thành cũ, tức là
+# quyết định của người bốc hơi lặng lẽ, và điểm vừa chấm bị xoá theo.
+with tempfile.TemporaryDirectory() as tmp:
+    conn = fresh(tmp)
+    derive(conn)
+    bo = conn.execute("SELECT id, kept, drop_reason FROM posting"
+                      " WHERE title = 'Product Manager'").fetchone()
+    check("máy loại tin không khớp chức danh", bo["kept"] == 0 and bo["drop_reason"])
+
+    conn.execute("UPDATE posting SET user_keep=1, judged_rules='' WHERE id=?",
+                 (bo["id"],))
+    conn.commit()
+    derive(conn)
+    sau = conn.execute("SELECT kept, drop_reason, score, scored_rules FROM posting"
+                       " WHERE id=?", (bo["id"],)).fetchone()
+    check("người giữ -> tin vào danh sách giữ", sau["kept"] == 1)
+    # Giữ nguyên bất biến cũ: drop_reason rỗng <=> đang được giữ. Nhét thêm
+    # nghĩa vào cột đó thì mọi chỗ đọc nó phải học luật mới.
+    check("và drop_reason được dọn sạch", sau["drop_reason"] == "")
+    # Vào danh sách giữ thì phải được CHẤM luôn trong cùng lượt — bắt chờ lần
+    # quét sau thì bấm Giữ xong màn hình vẫn trống trơn, trông như nút hỏng.
+    check("được chấm điểm ngay trong cùng lượt",
+          sau["scored_rules"] == versions.SCORE_RULES)
+
+    # ĐÂY MỚI LÀ BÀI TEST THẬT: đổi hồ sơ -> mọi tin thành cũ -> derive() phán
+    # lại tất cả. Nếu quyết định của người nằm trong `kept` thì đúng chỗ này
+    # nó bị xoá, im lặng.
+    store.save(conn, {"job_titles": "Quantitative Analyst"}, "đổi hồ sơ")
+    derive(conn)
+    check("ĐỔI HỒ SƠ vẫn giữ — quyết định của người không bị ghi đè",
+          conn.execute("SELECT kept FROM posting WHERE id=?",
+                       (bo["id"],)).fetchone()["kept"] == 1)
+
+    # rebuild() dựng lại TOÀN BỘ phán quyết từ raw — đường tàn phá nhất.
+    rebuild(conn)
+    check("rebuild() cũng không xoá mất quyết định của người",
+          conn.execute("SELECT kept FROM posting WHERE id=?",
+                       (bo["id"],)).fetchone()["kept"] == 1)
+
+    conn.execute("UPDATE posting SET user_keep=0, judged_rules='' WHERE id=?",
+                 (bo["id"],))
+    conn.commit()
+    derive(conn)
+    lai = conn.execute("SELECT kept, drop_reason, score FROM posting WHERE id=?",
+                       (bo["id"],)).fetchone()
+    check("bỏ giữ -> trả về cho máy phán lại", lai["kept"] == 0 and lai["drop_reason"])
+    check("và điểm cũ bị dọn theo", lai["score"] is None)
+    conn.close()
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

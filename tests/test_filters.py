@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from jobbot.core import db, postings
 from jobbot.dashboard import live
-from jobbot.dashboard.filters import PER_PAGE, JobFilter
+from jobbot.dashboard.filters import BAND, PER_PAGE, JobFilter
 from jobbot.dedup import group
 from jobbot.ingest.base import Posting, to_ts
 
@@ -83,12 +83,71 @@ with tempfile.TemporaryDirectory() as tmp:
     check("sắp theo công ty", live.jobs(conn, Q(sort="company"))[0]["company"] == "Man Group")
     check("mặc định sắp theo điểm", Q().sort == "score")
     check("lọc theo ngưỡng điểm sinh SQL đúng", "score >= ?" in Q(band="75").where()[0])
-    check("band=none tìm tin không chấm được", "score IS NULL" in Q(band="none").where()[0])
+    # "Not scorable" ĐÃ BỎ khỏi hàng điểm. Nó và "Can't tell" bên hàng cơ hội
+    # là CÙNG một chồng tin — đo trên kho thật: 185 tin thiếu cả hai, 0 tin
+    # chỉ thiếu một. Hai nút ở hai hàng cho cùng một thứ là hai lần hỏi.
+    check("hàng điểm không còn 'not scorable'",
+          "none" not in {v for v, _ in BAND})
+    check("gộp thành MỘT nút: raw=1 tìm tin máy chưa đọc được",
+          "score IS NULL" in Q(raw="1").where()[0]
+          and "unknown" in Q(raw="1").where()[0])
+
+    # THANG = SÀN, không phải bằng-đúng. Chọn "Có thể" mà giấu mất "Đáng nộp"
+    # là giấu đúng những tin tốt nhất — không ai muốn thế.
+    _sql = Q(chance="possible").where()[0]
+    check("thang cơ hội sinh SQL kiểu >= , không phải =",
+          ">= ?" in _sql and "realism = ?" not in _sql)
+    check("sàn 'có thể' là hạng 2", Q(chance="possible").where()[1] == [2])
+    check("sàn 'đáng nộp' là hạng 3", Q(chance="likely").where()[1] == [3])
+    check("Tất cả thì không thêm điều kiện cơ hội nào",
+          "realism" not in Q(chance="").where()[0])
+
+    # TAG NGUỒN — lọc theo CÁCH TÌM.
+    check("chrome = chỉ LinkedIn", "source = 'linkedin'" in Q(found="chrome").where()[0])
+    check("api = mọi thứ trừ LinkedIn", "source <> 'linkedin'" in Q(found="api").where()[0])
+    check("mọi nguồn thì không lọc gì", "source" not in Q(found="").where()[0])
+    check("nguồn lạ bị vứt", Q(found="bịa").found == "")
 
     counts = live.job_counts(conn, Q())
     check("đếm đúng cho từng tab", (counts["matched"], counts["dropped"], counts["all"]) == (2, 1, 3))
     check("facets lấy nguồn thật", live.facets(conn)["sources"] == ["greenhouse"])
     check("trang 2 rỗng khi chỉ có 2 tin", len(live.jobs(conn, Q(page="2"))) == 0)
+    conn.close()
+
+
+print("\n[bộ lọc chọn HIỆN TIN NÀO, không đổi TIN TRÔNG RA SAO]")
+# LỖI THẬT: badge nguồn, "+N nơi" và điểm được tính trên phần ĐÃ LỌC. Nên bấm
+# tag "chrome" một cái là tin Man Group rụng badge api, mất "+1 nơi", và mất
+# luôn điểm 100 — vì dòng LinkedIn của nó chưa đọc kỹ nên chưa có điểm. Cùng
+# một việc, hai bộ lọc, hai bộ mặt.
+with tempfile.TemporaryDirectory() as tmp:
+    conn = db.connect(Path(tmp) / "m.db")
+    JD = ("Requirements:\n· Python and pandas\n· SQL\n" + "detail " * 80)
+    # Cùng MỘT việc, hai nơi đăng: board có mô tả (chấm được), LinkedIn thì
+    # chưa đọc kỹ nên rỗng — đúng hình dạng trên máy thật.
+    postings.save_batch(conn, "greenhouse:mangroup", [
+        Posting(source_id="g1", title="Quant Researcher", company="Man Group",
+                location="London", url="https://g/1", description=JD)])
+    postings.save_batch(conn, "linkedin", [
+        Posting(source_id="l1", title="Quant Researcher", company="Man Group",
+                location="London", url="https://l/1", description="")])
+    conn.execute("UPDATE posting SET kept = 1")
+    conn.execute("UPDATE posting SET score = 100 WHERE source LIKE 'greenhouse%'")
+    conn.commit()
+    group.regroup(conn)
+
+    het = live.jobs(conn, Q())[0]
+    chr_ = live.jobs(conn, Q(found="chrome"))[0]
+    api = live.jobs(conn, Q(found="api"))[0]
+    check("không lọc: thấy cả hai nguồn", het["found_by"] == ["api", "chrome"])
+    check("lọc chrome: VẪN thấy cả hai nguồn", chr_["found_by"] == ["api", "chrome"])
+    check("lọc api: VẪN thấy cả hai nguồn", api["found_by"] == ["api", "chrome"])
+    check("số '+N nơi' không đổi theo bộ lọc",
+          het["merged"] == chr_["merged"] == api["merged"] == 2)
+    check("điểm không đổi theo bộ lọc",
+          het["score"] == chr_["score"] == api["score"] == 100)
+    check("nhưng bộ lọc VẪN chọn đúng tin",
+          len(live.jobs(conn, Q(found="chrome"))) == 1)
     conn.close()
 
 print("\n[phân trang phải LỢP KÍN số đếm — không thiếu, không lặp]")

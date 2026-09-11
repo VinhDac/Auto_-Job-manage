@@ -23,7 +23,7 @@ import threading
 import objc
 from AppKit import (NSApplication, NSApplicationActivationPolicyRegular,
                     NSBackingStoreBuffered, NSColor, NSMenu, NSMenuItem,
-                    NSModalResponseOK, NSOpenPanel, NSStatusBar,
+                    NSModalResponseOK, NSOpenPanel, NSStatusBar, NSWorkspace,
                     NSVariableStatusItemLength, NSViewHeightSizable, NSViewWidthSizable,
                     NSWindow, NSWindowStyleMaskClosable, NSWindowStyleMaskFullSizeContentView,
                     NSWindowStyleMaskMiniaturizable, NSWindowStyleMaskResizable,
@@ -91,6 +91,37 @@ class Delegate(NSObject):
         signature=b"v@:@@@@?",
     )
 
+    # --- đường ra ngoài ---------------------------------------------------
+    # Tin tuyển dụng nằm ở linkedin.com, greenhouse.io… — tức là NGOÀI app.
+    # WKWebView không tự mở cửa sổ mới: thiếu hàm này thì <a target=_blank>
+    # bấm vào KHÔNG có gì xảy ra, không lỗi, không log — đúng lớp lỗi mà ô
+    # chọn tệp ở trên đã mắc một lần rồi.
+    #
+    # Và cũng đừng để nó mở NGAY TRONG cửa sổ app: cửa sổ này không có thanh
+    # địa chỉ, không có nút Back. Đi sang LinkedIn là mất luôn dashboard, chỉ
+    # còn cách tắt app mở lại.
+    #
+    # Nên: đẩy sang trình duyệt mặc định, rồi trả None để WKWebView khỏi dựng
+    # webview mới.
+    def _mo_ra_trinh_duyet(self, _webview, _config, action, _features):
+        url = action.request().URL()
+        if url is not None:
+            NSWorkspace.sharedWorkspace().openURL_(url)
+        return None                    # None = đừng dựng webview mới
+
+    # Chữ ký khai TAY, y như lý do ở hộp chọn tệp. Để PyObjC tự suy thì nó
+    # nhìn `return None` và kết luận hàm trả về void ("v"), trong khi WKWebView
+    # gọi hàm này để LẤY VỀ một WKWebView* ("@"). Khai sai kiểu trả về thì nó
+    # đọc rác ở thanh ghi trả về — lúc chạy được lúc không, và loại lỗi đó
+    # không bao giờ hiện thành thông báo.
+    #   @ = trả về object · @: = self, cmd · @@@@ = bốn tham số object
+    webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_ = objc.selector(
+        _mo_ra_trinh_duyet,
+        selector=b"webView:createWebViewWithConfiguration:"
+                 b"forNavigationAction:windowFeatures:",
+        signature=b"@@:@@@@",
+    )
+
     # --- vòng đời app -----------------------------------------------------
     def applicationShouldTerminateAfterLastWindowClosed_(self, _app) -> bool:
         return False                       # đóng cửa sổ != thoát app
@@ -122,9 +153,10 @@ class Delegate(NSObject):
     def doQuit_(self, _sender) -> None:
         self.scheduler.stop()
         # Chrome chạy bằng profile riêng của app — thoát app mà bỏ nó lại thì
-        # nó thành cửa sổ mồ côi, không ai đóng.
+        # nó thành cửa sổ mồ côi, không ai đóng. MỌI cổng, không riêng cổng
+        # quét: cửa sổ Nộp cố ý được để mở, nên chỉ có chỗ này đóng nó.
         from .browser import chrome
-        chrome.shutdown()
+        chrome.shutdown_all()
         AppHelper.stopEventLoop()
 
     # --- nhãn trên thanh menu ---------------------------------------------

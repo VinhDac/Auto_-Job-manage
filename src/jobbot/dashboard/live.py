@@ -97,16 +97,37 @@ def jobs(conn: sqlite3.Connection, flt) -> list[dict]:
     where, args = flt.where()
     per, offset = flt.limit()
     rows = conn.execute(
-        "SELECT * FROM ("
+        # `ca_nhom` đếm CẢ nhóm, trên bảng CHƯA lọc. Badge "◆ api ⌕ chrome" và
+        # số "+1 nơi" nói về CÁI TIN, không nói về bộ lọc đang bật — tính
+        # chúng từ phần đã lọc thì bấm tag "chrome" một cái là tin Man Group
+        # rụng mất badge api và tụt từ "+1 nơi" xuống không còn gì, tức là màn
+        # hình khai man về chính cái tin nó đang hiện.
+        # LUẬT: bộ lọc chọn HIỆN TIN NÀO, không bao giờ đổi TIN TRÔNG RA SAO.
+        #
+        # Nên mọi thứ mô tả cái tin — badge nguồn, "+1 nơi", điểm, chức danh —
+        # đều tính trên CẢ nhóm, trên bảng chưa lọc. Trước đây chúng tính trên
+        # phần đã lọc, nên bấm tag "chrome" một cái là tin Man Group rụng mất
+        # badge api, mất "+1 nơi", và mất luôn cả điểm 100 (vì dòng LinkedIn
+        # của nó chưa được đọc kỹ nên chưa có điểm). Cùng một việc, hai bộ lọc,
+        # hai bộ mặt — màn hình khai man về chính cái tin nó đang hiện.
+        #
+        # `hop` chỉ còn một việc: nhóm nào có ÍT NHẤT MỘT dòng lọt lưới.
+        "WITH ca_nhom AS ("
+        "  SELECT COALESCE(group_id, CAST(id AS TEXT)) AS grp,"
+        "         COUNT(*) AS n, GROUP_CONCAT(source) AS srcs"
+        "    FROM posting GROUP BY 1),"
+        "hop AS ("
+        f"  SELECT DISTINCT COALESCE(group_id, CAST(id AS TEXT)) AS grp"
+        f"    FROM posting{where})"
+        "SELECT day.*, ca_nhom.n AS merged, ca_nhom.srcs AS all_sources FROM ("
         "  SELECT *,"
-        "         COUNT(*) OVER (PARTITION BY grp) AS merged,"
-        "         GROUP_CONCAT(source) OVER (PARTITION BY grp) AS all_sources,"
         # Đại diện nhóm = tin chấm cao nhất, không phải tin gặp trước.
         "         ROW_NUMBER() OVER (PARTITION BY grp"
         "                            ORDER BY score DESC NULLS LAST, id ASC) AS rn"
-        f"    FROM (SELECT *, COALESCE(group_id, CAST(id AS TEXT)) AS grp"
-        f"            FROM posting{where})"
-        f") WHERE rn = 1 ORDER BY {flt.order()} LIMIT ? OFFSET ?",
+        "    FROM (SELECT *, COALESCE(group_id, CAST(id AS TEXT)) AS grp"
+        "            FROM posting)"
+        ") AS day JOIN ca_nhom USING (grp) JOIN hop USING (grp)"
+        f" WHERE rn = 1 ORDER BY {flt.order()} LIMIT ? OFFSET ?",
         [*args, per, offset]).fetchall()
 
     out = []
@@ -130,6 +151,7 @@ def jobs(conn: sqlite3.Connection, flt) -> list[dict]:
             "found_by": found_by,
             "merged": row["merged"],
             "state": "new" if row["kept"] else "dropped",
+            "user_keep": bool(row["user_keep"]),
             "via_agency": bool(row["via_agency"]),
             "realism": row["realism"], "realism_why": row["realism_why"],
             "deadline": row["deadline"],
@@ -179,12 +201,43 @@ def job_detail(conn: sqlite3.Connection, job_id: str) -> dict | None:
         "posted": _ago(row["posted_at"]) if row["posted_at"] else "",
         "sources": sorted({r["source"] for r in same}),
         "merged": len(same), "url": row["url"],
+        "links": _links(same, row["url"]),
         "jd": row["description"] or "(no description from this source)",
         "requirements": _reqs(row),
         "explain": json.loads(row["score_json"]) if row["score_json"] else None,
         "score_json": row["score_json"],
         "project": None,                        # bước 4
     }
+
+
+def _links(same, url_minh: str) -> list[dict]:
+    """Đường tới TIN GỐC. Một việc đăng ở hai nơi thì trả về cả hai.
+
+    Cho tới giờ `job_detail` lấy về đủ (nguồn, url) rồi VỨT phần url đi, chỉ
+    giữ lại tên nguồn và con số "+1 nơi". Nên màn hình chi tiết đọc được cả
+    bản mô tả mà không có lấy một đường nào để sang xem tin thật — muốn kiểm
+    chứng thì phải tự đi tìm bằng tay.
+
+    BOARD CÔNG TY ĐỨNG TRƯỚC. LinkedIn chỉ là bảng tin: nộp qua đó là qua tay
+    thứ ba, còn board của chính công ty mới là chỗ đơn đi thẳng tới nơi tuyển.
+    """
+    thay: dict[str, dict] = {}
+    for r in same:
+        url = (r["source"], r["url"]) if not isinstance(r, tuple) else r
+        nguon, dia_chi = url
+        if not dia_chi or dia_chi in thay:
+            continue
+        chrome = nguon == "linkedin"
+        thay[dia_chi] = {
+            "url": dia_chi,
+            "kind": "chrome" if chrome else "api",
+            "name": "LinkedIn" if chrome else nguon.split(":")[0],
+            # Tên miền để người xem BIẾT TRƯỚC mình sắp đi đâu. Một nút ghi
+            # "Mở tin gốc" mà không nói dẫn tới đâu thì phải bấm mới biết.
+            "host": dia_chi.split("/")[2] if "//" in dia_chi else dia_chi[:40],
+            "minh": dia_chi == url_minh,
+        }
+    return sorted(thay.values(), key=lambda x: x["kind"] != "api")
 
 
 def _reqs(row) -> list[dict]:
@@ -462,6 +515,12 @@ def search_stage(conn: sqlite3.Connection) -> dict:
     from ..core.scheduler import current as sched_now
 
     one = lambda q: conn.execute(q).fetchone()[0]          # noqa: E731
+    # Số của KHO, không phải số của khung nhìn. Thanh khúc trả lời "dây chuyền
+    # đang có gì", còn chip trên danh sách trả lời "đang hiện gì" — trộn hai
+    # thứ thì gõ tìm "quant" xong thanh báo 64 giữ mà 91 đáng nộp, trong khi
+    # đáng nộp là tập con của giữ. Số vô lý ngay trên màn hình.
+    kept = one("SELECT COUNT(DISTINCT COALESCE(group_id, CAST(id AS TEXT)))"
+               " FROM posting WHERE kept = 1 AND via_agency = 0")
     worth = one("SELECT COUNT(*) FROM posting WHERE kept = 1"
                 " AND realism IN ('likely','possible')")
     last = conn.execute(
@@ -485,7 +544,30 @@ def search_stage(conn: sqlite3.Connection) -> dict:
     else:
         auto = "tự động: BẬT" if not runner.paused else "tự động: TẮT"
         state = f"{auto} · quét lần cuối {when}" if when else f"{auto} · chưa quét lần nào"
-    return {"worth": worth, "fresh": fresh, "state": state}
+
+    # NÚT phải nói đúng việc nó sắp làm. "Chạy" là chữ rỗng: người mới mở app
+    # lần đầu không biết chạy cái gì, còn người vừa bấm Dừng giữa chừng thì
+    # đọc ra là "chạy lại từ đầu" — trong khi máy sẽ đi tiếp chỗ dở.
+    #
+    # Ba tình huống, đọc thẳng từ DB chứ không giữ cờ trạng thái nào: cờ thì
+    # có ngày lệch với sự thật, còn đếm thì luôn đúng.
+    from ..core.postings import HAVE_DESC
+    tong = one("SELECT COUNT(*) FROM posting")
+    con_do = conn.execute(
+        "SELECT COUNT(*) FROM posting WHERE source = 'linkedin'"
+        " AND length(COALESCE(description,'')) < ?", (HAVE_DESC,)).fetchone()[0]
+    # Chữ ở đây là chữ lúc RẢNH. Lúc đang chạy thì live.js đổi thành
+    # "Đang quét…" rồi khoá nút — để một chỗ lo một trạng thái, máy chủ không
+    # phải đoán xem trình duyệt đang thấy gì.
+    if not tong:
+        nhan, vi_sao = "Bắt đầu", "chưa có tin nào trong kho — quét lần đầu"
+    elif con_do:
+        nhan, vi_sao = "Tiếp tục", f"còn {con_do:,} tin chưa đọc kỹ — quét tiếp chỗ dở"
+    else:
+        nhan, vi_sao = "Cập nhật", "kho đã đầy đủ — lấy tin mới từ lần quét trước"
+
+    return {"kept": kept, "worth": worth, "fresh": fresh, "state": state,
+            "run_label": nhan, "run_note": vi_sao}
 
 
 def cv_pdf_plan(conn: sqlite3.Connection) -> list[dict]:

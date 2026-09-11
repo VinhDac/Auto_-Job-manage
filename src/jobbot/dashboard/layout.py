@@ -58,7 +58,7 @@ LOGO = (
 
 
 def deck(stage: str, name: str, state: str, metrics: list,
-         adjust: str = "", run: str = "Chạy") -> str:
+         adjust: str = "", run: str = "Chạy", run_note: str = "") -> str:
     """Thanh của MỘT khúc: tên + trạng thái · số liệu · chạy/dừng · điều chỉnh.
 
     MỘT khối cho mọi chức năng. Trước đây thanh trên cùng là của cả app —
@@ -80,6 +80,13 @@ def deck(stage: str, name: str, state: str, metrics: list,
 
     Nút ⚟ dùng lại tấm phủ của Cài đặt (`data-settings` nhận URL), nên không
     đẻ thêm trình nghe nào — mỗi đường mới là một nút có thể chết.
+
+    `run` là CHỮ TRÊN NÚT, và nó đổi theo tình huống: Bắt đầu / Tiếp tục /
+    Cập nhật / Đang quét…. Một nút ghi "Chạy" ở mọi hoàn cảnh là nút không
+    nói gì — người mới mở app không biết chạy cái gì, người vừa bấm Dừng
+    tưởng bấm vào là mất hết việc đã làm. Chữ do khúc tự tính (xem
+    live.search_stage), chỗ này chỉ vẽ. `data-run` giữ lại chữ gốc để
+    live.js trả về sau khi hiện "Đang quét…".
     """
     def _rong(v) -> bool:
         """Số 0 (hoặc rỗng) thì tắt màu — xem luật ở docstring."""
@@ -107,7 +114,8 @@ def deck(stage: str, name: str, state: str, metrics: list,
         f"<span class=metrics>{nums}</span>"
         f"<span class=deckbtns>"
         f"<button class='mbtn go' data-post='/api/stage/start'"
-        f" data-arg='{esc(stage)}'>{esc(run)}</button>"
+        f" data-arg='{esc(stage)}' data-run='{esc(run)}'"
+        f" title='{esc(run_note)}'>{esc(run)}</button>"
         f"<button class=mbtn data-post='/api/stage/stop'"
         f" data-arg='{esc(stage)}'>Dừng</button>"
         f"{knob}</span>"

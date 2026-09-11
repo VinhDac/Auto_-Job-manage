@@ -591,7 +591,11 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     label = "Save and review profile"
                 from ..profile import titles as tvocab
-                kho = {"titles": tvocab.cached(conn)}
+                kho = {"titles": tvocab.cached(conn),
+                       # Khối nào trong CV là do máy chèn — để mục Personal
+                       # project đánh dấu, đừng để lẫn với project tự viết.
+                       "may_de": [r[0] for r in conn.execute(
+                           "SELECT cv_title FROM project WHERE cv_title <> ''")]}
                 return self._html(profile.render_section(
                     section, answers, done, label, thieu, kho))
 
@@ -742,6 +746,37 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             self._start_apply(dict(row), pdf)
             return self._json({"ok": True, "note": "đang mở form…"})
+
+        if path == "/api/keep":
+            # GIỮ LẠI một tin máy đã loại — hoặc bỏ giữ. Một nút, hai chiều.
+            #
+            # KHÔNG sửa thẳng `kept`: đó là cột suy ra, derive() sẽ ghi đè lần
+            # sau. Ở đây chỉ ghi Ý MUỐN vào cột riêng rồi đánh dấu tin là cũ,
+            # và để derive() — chỗ DUY NHẤT được quyền phán — tự tính lại.
+            # Nhờ vậy tin vừa giữ cũng được CHẤM ĐIỂM ngay trong cùng lượt đó,
+            # không phải chờ lần quét sau.
+            job = form.get("arg", [""])[0].strip()
+            if not job.isdigit():
+                return self._json({"ok": False}, status=400)
+            conn = db.connect()
+            try:
+                row = conn.execute("SELECT user_keep FROM posting WHERE id=?",
+                                   (int(job),)).fetchone()
+                if row is None:
+                    return self._404()
+                moi_gia = 0 if row["user_keep"] else 1
+                conn.execute(
+                    "UPDATE posting SET user_keep=?, judged_rules='' WHERE id=?",
+                    (moi_gia, int(job)))
+                conn.commit()
+                from ..core.derive import derive
+                derive(conn)
+            finally:
+                conn.close()
+            journal.log.emit(journal.SEARCH,
+                             f"tin #{job}: " + ("bạn GIỮ LẠI dù máy đã loại"
+                                                if moi_gia else "bạn bỏ giữ"))
+            return self._json({"ok": True, "reload": True})
 
         if path == "/api/track/state":
             pid, _, stage = form.get("arg", [""])[0].partition(":")
@@ -1041,6 +1076,12 @@ class Handler(BaseHTTPRequestHandler):
                     block = head + "\n" + "\n".join(body)
                     store.save(conn, {"cv_text": self._add_project(text, block)},
                                note=f"project #{pid} vào CV")
+                    # GHI LẠI TÊN KHỐI. Chèn xong thì trong cv_text nó không
+                    # khác gì project người dùng tự viết; không ghi lại thì
+                    # sau này không cách nào chỉ ra "cái này máy đẻ ra".
+                    conn.execute("UPDATE project SET cv_title = ? WHERE id = ?",
+                                 (head.split(" — ")[0].strip(), pid))
+                    conn.commit()
                     live._CV_CACHE.clear(); live._BLOCK_CACHE.clear()
                     journal.log.ok(journal.PROJECT,
                                    f"project #{pid}: đã thêm vào CV gốc")

@@ -36,6 +36,10 @@ GUEST = ("https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search
 GUEST_JOB = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{jid}"
 VIEW = "https://www.linkedin.com/jobs/view/{jid}/"
 PER_PAGE = 10
+# Cứ bấy nhiêu tin đọc kỹ thì nói một câu vào nhật ký. Không ghi từng tin:
+# 2.297 dòng cho một lần quét thì nhật ký không đọc được nữa. Không ghi gì
+# thì im lặng 27 phút — đã đo trên lượt quét 19:22. 25 tin ≈ 2 phút một câu.
+NHIP_BAO = 25
 
 # f_E: 1=internship 2=entry 3=associate 4=mid-senior
 EXPERIENCE = {"intern": "1", "grad": "2", "grad_scheme": "2", "junior": "2,3",
@@ -187,6 +191,7 @@ def fetch(tab, queries: list[str], location: str = "United Kingdom",
     exp = ",".join(sorted({e for lv in (levels or ["grad", "junior"])
                            for e in EXPERIENCE.get(lv, "2").split(",")}))
     found: dict[str, Posting] = {}
+    dut = ""                  # lý do đứt giữa chừng; rỗng = chạy trọn
 
     # Ghép sẵn từng cặp (chức danh, nơi) rồi chạy MỘT vòng — lồng hai vòng
     # vào nhau thì thân vòng thụt thêm một tầng và lệch cả file.
@@ -197,25 +202,61 @@ def fetch(tab, queries: list[str], location: str = "United Kingdom",
         if stop and stop():
             jlog.warn(SEARCH, f"dừng theo yêu cầu — mới xong {step - 1}/{len(pairs)} lượt tìm")
             break
-        jlog.progress(SEARCH, f"tìm LinkedIn — {query}"
-                              + (f" · {place}" if len(places) > 1 else ""),
+        # `place` rỗng nghĩa là LinkedIn tìm toàn cầu. Để nguyên thì màn hình
+        # hiện "Operations Analyst · " — một dấu chấm giữa treo lơ lửng, người
+        # đọc tưởng chữ bị cắt mất.
+        o_dau = place or "toàn cầu"
+        jlog.progress(SEARCH, f"tìm LinkedIn · {query} · {o_dau}",
                       step, len(pairs))
-        for page in range(pages):
-            url = GUEST.format(q=urllib.parse.quote(query),
-                               loc=urllib.parse.quote(place),
-                               exp=urllib.parse.quote(exp), start=page * PER_PAGE)
-            open_page(tab, url, timeout=30)          # Blocked -> ném lên trên, không cãi
-            rows = grab(tab, LIST_JS)
-            if not rows:
-                break
-            for row in rows:
-                item = _from_row(row)
-                if item:
-                    found.setdefault(item.source_id, item)
-            _pause()
+        truoc, so_trang = len(found), 0
+        try:
+            for page in range(pages):
+                url = GUEST.format(q=urllib.parse.quote(query),
+                                   loc=urllib.parse.quote(place),
+                                   exp=urllib.parse.quote(exp), start=page * PER_PAGE)
+                open_page(tab, url, timeout=30)
+                rows = grab(tab, LIST_JS)
+                if not rows:
+                    break
+                so_trang += 1
+                for row in rows:
+                    item = _from_row(row)
+                    if item:
+                        found.setdefault(item.source_id, item)
+                _pause()
+        except Exception as exc:                     # noqa: BLE001
+            # ĐỨT GIỮA CHỪNG THÌ GIỮ LẠI THỨ ĐÃ TÌM ĐƯỢC, không ném lên trên.
+            #
+            # Trước đây lỗi ở đây bay thẳng ra ngoài fetch(), nên `items` không
+            # bao giờ trả về và save_batch() không bao giờ chạy: cả kho tin đã
+            # tìm được đổ đi sạch. Xảy ra thật lúc 17:18 — 48/76 lượt tìm xong,
+            # một ConnectionResetError, fetched=0.
+            #
+            # Máy ngủ dậy là đúng cái lỗi này: socket CDP chết, mà app chạy
+            # 24/7 nên chuyện đó là chuyện thường ngày, không phải tai nạn.
+            dut = f"{type(exc).__name__}: {str(exc)[:50]}"
+            jlog.warn(SEARCH, f"đứt ở lượt {step}/{len(pairs)} ({dut})"
+                              f" — giữ lại {len(found)} tin đã tìm được")
+            break
+        # MỘT DÒNG CHO MỖI LƯỢT TÌM. Trước đây cả vòng này im lặng: đo trên
+        # lượt quét 19:22 là 31 phút chạy mà nhật ký để lại đúng một dòng ở
+        # đầu. Người dùng ngồi nhìn một thanh tiến độ nhích, không biết máy
+        # đang gõ chức danh nào, ở đâu, được gì.
+        con = jlog.remaining(SEARCH)
+        jlog.emit(SEARCH,
+                  f"tìm · {query} · {o_dau} — {len(found) - truoc} tin mới"
+                  f" / {so_trang} trang · kho {len(found)}"
+                  f"{f' · còn {con}' if con else ''}")
 
-    if not deep:
-        return list(found.values()), Health(0, 0)
+    if not deep or dut:
+        # Đứt rồi thì đừng đọc kỹ nữa: cổng vừa từ chối mình xong, mở tiếp
+        # 2.000 trang chỉ để nhận 2.000 lỗi. Trả tin về cho save_batch ghi
+        # xuống, lần quét sau đọc kỹ tiếp — save_batch vá mô tả vào đúng dòng
+        # cũ, nên chỗ dở không thành lỗ hổng.
+        suc = Health(0, 0)
+        if dut:
+            suc.broke(f"đứt khi đang tìm: {dut}")
+        return list(found.values()), suc
 
     items = list(found.values())
     fresh = [i for i in items if i.source_id not in skip]
@@ -232,7 +273,16 @@ def fetch(tab, queries: list[str], location: str = "United Kingdom",
             break
         # Chỗ vòng quét đứng lâu nhất — mỗi tin nghỉ 2.5-5 giây. Không báo
         # tiến độ ở đây thì màn hình im lặng suốt.
-        jlog.progress(SEARCH, "đọc kỹ LinkedIn", index + 1, len(fresh))
+        #
+        # Viết TÊN TIN đang đọc vào thanh, không chỉ "đọc kỹ LinkedIn": người
+        # dùng phải thấy máy đang mở cái gì, mới biết nó còn sống.
+        jlog.progress(SEARCH, f"đọc kỹ · {item.title[:44]} — {item.company[:22]}",
+                      index + 1, len(fresh))
+        if index and index % NHIP_BAO == 0:
+            con = jlog.remaining(SEARCH)
+            jlog.emit(SEARCH, f"đọc kỹ {index}/{len(fresh)} tin"
+                              f"{f' · còn {con}' if con else ''}"
+                              f" · đang đọc: {item.title[:40]}")
         try:
             open_page(tab, GUEST_JOB.format(jid=item.source_id), timeout=30)
             detail = grab(tab, DETAIL_JS)

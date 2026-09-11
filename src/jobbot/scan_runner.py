@@ -10,7 +10,7 @@ import tomllib
 from typing import Callable
 
 from .core import db, halt, postings
-from .core.journal import SEARCH, log as jlog
+from .core.journal import INFO, OK, SEARCH, log as jlog
 from .core.paths import PROJECT_ROOT
 
 STAGE = "search"      # tên khúc, dùng chung với cờ dừng và nút trên thanh
@@ -58,10 +58,13 @@ def _run_source(conn, name: str, fn, *args, log: Log) -> tuple[int, int]:
         return 0, 0
     seen, new = postings.save_batch(conn, name, items)
     postings.record_run(conn, name, ok=True, fetched=seen, new_rows=new)
-    # Chỉ ghi khi CÓ tin mới. 62 board chạy mỗi giờ, ghi cả 62 dòng "0 tin mới"
-    # thì nhật ký thành rác và người đọc bỏ qua luôn cả dòng thật.
-    if new:
-        jlog.emit(SEARCH, f"{name}: {seen} tin, {new} mới")
+    # GHI CẢ dòng "không có gì mới". Luật cũ là chỉ ghi khi có tin mới, vì sợ
+    # 62 board mỗi giờ biến nhật ký thành rác — nhưng hậu quả đo được ở lượt
+    # quét 19:22: 21 board chạy, nhật ký để lại đúng 3 dòng. Người dùng không
+    # có cách nào biết 18 board kia đã chạy xong hay đã chết giữa chừng.
+    # Im lặng không phải là gọn. Im lặng là mù.
+    jlog.emit(SEARCH, f"{name}: {seen} tin về, {new} mới",
+              level=OK if new else INFO)
     log(f"  {name:26} {seen:5} tin, {new:5} mới")
     return seen, new
 
@@ -97,62 +100,69 @@ def _chrome_pass(conn, answers: dict, log: Log, deep: bool,
         log(f"  chrome                     FAILED  {exc}")
         return 0, 0
 
-    # eFinancialCareers đã BỎ: 67% tin của nó là môi giới (LinkedIn 24%), mà chỉ
-    # cho 5 tin đạt 75+ so với 20 của LinkedIn. Bẩn gấp ba, ít hơn bốn lần.
-    # titles[:5] ĐÃ BỎ: nó cắt 7/12 chức danh của hồ sơ mà không báo gì, và
-    # nó tồn tại chỉ vì vòng đọc kỹ chạy quá lâu. Sửa gốc rồi thì không cần
-    # cắt nữa — trần bây giờ nằm ở li.MAX_QUERIES và có ghi nhật ký khi chạm.
-    places = li.places_for(answers.get("markets") or [])
-    seen = postings.already_read(conn, li.NAME)
-    jlog.emit(SEARCH, f"linkedin: {len(titles)} chức danh × {len(places)} nơi"
-                      f" · bỏ qua {len(seen)} tin đã đọc")
-    sources = [
-        (li.NAME, lambda tab: li.fetch(tab, titles, location=places,
-                                       levels=levels, pages=4, deep=deep,
-                                       skip=frozenset(seen),
-                                       stop=lambda: halt.wanted(STAGE))),
-    ]
+    # Từ đây tới hết hàm, Chrome ĐANG MỞ. Nên mọi lối ra đều phải đi qua
+    # finally: đóng Chrome khi xong việc, và ĐẶC BIỆT là khi hỏng.
+    #
+    # Trước đây lệnh đóng nằm ở cuối hàm, ngoài mọi try. Chỉ cần một lỗi ở
+    # giữa — DB bị khoá lúc đọc `already_read`, máy ngủ dậy socket chết — là
+    # cửa sổ Chrome nằm lại trên màn hình cho tới khi tắt app. Mà app này
+    # chạy 24/7: "tới khi tắt app" nghĩa là mãi mãi.
+    try:
+        # eFinancialCareers đã BỎ: 67% tin của nó là môi giới (LinkedIn 24%), mà chỉ
+        # cho 5 tin đạt 75+ so với 20 của LinkedIn. Bẩn gấp ba, ít hơn bốn lần.
+        # titles[:5] ĐÃ BỎ: nó cắt 7/12 chức danh của hồ sơ mà không báo gì, và
+        # nó tồn tại chỉ vì vòng đọc kỹ chạy quá lâu. Sửa gốc rồi thì không cần
+        # cắt nữa — trần bây giờ nằm ở li.MAX_QUERIES và có ghi nhật ký khi chạm.
+        places = li.places_for(answers.get("markets") or [])
+        seen = postings.already_read(conn, li.NAME)
+        jlog.emit(SEARCH, f"linkedin: {len(titles)} chức danh × {len(places)} nơi"
+                          f" · bỏ qua {len(seen)} tin đã đọc")
+        sources = [
+            (li.NAME, lambda tab: li.fetch(tab, titles, location=places,
+                                           levels=levels, pages=4, deep=deep,
+                                           skip=frozenset(seen),
+                                           stop=lambda: halt.wanted(STAGE))),
+        ]
 
-    total_seen = total_new = 0
-    for name, run in sources:
-        tab = None
-        try:
-            tab = cdp.open_tab()
-            items, health = run(tab)
-            seen, new = postings.save_batch(conn, name, items)
-            # health.ok chứ không phải True cứng: nguồn bị chặn giữa chừng vẫn
-            # trả về tin (những tin đọc kịp), nhưng lần quét đó KHÔNG lành.
-            postings.record_run(conn, name, ok=health.ok, fetched=seen, new_rows=new,
-                                error="" if health.ok else f"blocked: {health.summary}",
-                                attempted=health.attempted, failed=health.failed)
-            bad = f"  ⚠ {health.summary}" if health.failed else ""
-            (jlog.ok if health.ok else jlog.warn)(
-                SEARCH, f"{name}: {seen} tin, {new} mới"
-                        + (f" · {health.summary}" if health.summary else ""))
-            log(f"  {name:26} {seen:5} tin, {new:5} mới{bad}")
-            total_seen += seen; total_new += new
-        except Blocked as exc:
-            # Trang từ chối truy cập tự động. Ghi nhận rồi thôi — không cãi lại.
-            postings.record_run(conn, name, ok=False, error=f"blocked: {exc}")
-            postings.log(conn, "source_blocked", f"{name}: {exc}")
-            jlog.warn(SEARCH, f"{name}: BỊ CHẶN — {str(exc)[:60]}")
-            log(f"  {name:26} BLOCKED {str(exc)[:44]}")
-        except Exception as exc:                # noqa: BLE001
-            postings.record_run(conn, name, ok=False,
-                                error=f"{type(exc).__name__}: {exc}")
-            jlog.error(SEARCH, f"{name}: {type(exc).__name__} — {str(exc)[:60]}")
-            log(f"  {name:26} FAILED  {type(exc).__name__}: {str(exc)[:40]}")
-        finally:
-            if tab is not None:
-                tab.close()
+        total_seen = total_new = 0
+        for name, run in sources:
+            tab = None
+            try:
+                tab = cdp.open_tab()
+                items, health = run(tab)
+                seen, new = postings.save_batch(conn, name, items)
+                # health.ok chứ không phải True cứng: nguồn bị chặn giữa chừng vẫn
+                # trả về tin (những tin đọc kịp), nhưng lần quét đó KHÔNG lành.
+                postings.record_run(conn, name, ok=health.ok, fetched=seen, new_rows=new,
+                                    error="" if health.ok else f"blocked: {health.summary}",
+                                    attempted=health.attempted, failed=health.failed)
+                bad = f"  ⚠ {health.summary}" if health.failed else ""
+                (jlog.ok if health.ok else jlog.warn)(
+                    SEARCH, f"{name}: {seen} tin, {new} mới"
+                            + (f" · {health.summary}" if health.summary else ""))
+                log(f"  {name:26} {seen:5} tin, {new:5} mới{bad}")
+                total_seen += seen; total_new += new
+            except Blocked as exc:
+                # Trang từ chối truy cập tự động. Ghi nhận rồi thôi — không cãi lại.
+                postings.record_run(conn, name, ok=False, error=f"blocked: {exc}")
+                postings.log(conn, "source_blocked", f"{name}: {exc}")
+                jlog.warn(SEARCH, f"{name}: BỊ CHẶN — {str(exc)[:60]}")
+                log(f"  {name:26} BLOCKED {str(exc)[:44]}")
+            except Exception as exc:                # noqa: BLE001
+                postings.record_run(conn, name, ok=False,
+                                    error=f"{type(exc).__name__}: {exc}")
+                jlog.error(SEARCH, f"{name}: {type(exc).__name__} — {str(exc)[:60]}")
+                log(f"  {name:26} FAILED  {type(exc).__name__}: {str(exc)[:40]}")
+            finally:
+                if tab is not None:
+                    tab.close()
 
-    # Đóng Chrome khi xong việc. Không đóng thì nó nằm trên màn hình cho tới
-    # lần quét sau — mà lần quét sau là MỘT TIẾNG nữa. Chrome chỉ tồn tại để
-    # phục vụ vòng quét, hết vòng là hết việc.
-    # Mở lại tốn ~2 giây, không đáng để đánh đổi một cửa sổ nằm lì cả tiếng.
-    if not chrome.shutdown():
-        jlog.warn(SEARCH, "không đóng được Chrome — nó vẫn đang mở")
-    return total_seen, total_new
+        return total_seen, total_new
+    finally:
+        # Mở lại tốn ~2 giây, không đáng để đánh đổi một cửa sổ nằm lì cả tiếng.
+        if not chrome.shutdown():
+            jlog.warn(SEARCH, "không đóng được Chrome — nó vẫn đang mở")
+
 
 
 def run_scan(log: Log | None = None, chrome_sources: bool = True,

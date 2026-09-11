@@ -609,6 +609,9 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
   white-space:nowrap}
 .phead span{color:var(--dim);flex:none;font-variant-numeric:tabular-nums}
 .ptrack{height:5px;border-radius:3px;background:var(--line);overflow:hidden}
+/* Còn bao lâu nữa xong. Chữ nhỏ, màu mờ: nó là ƯỚC LƯỢNG, không được to
+   ngang con số thật ở trên. */
+.peta{font-size:11px;color:var(--mute);font-variant-numeric:tabular-nums}
 .ptrack i{display:block;height:100%;background:var(--acc);border-radius:3px;
   transition:width .25s ease}
 /* Không biết tổng thì chạy sọc thay vì đứng ở 100% giả vờ xong. */
@@ -722,7 +725,20 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
    ================================================================ */
 
 /* ---------------- nút XEM (bấm là đổi, không qua Áp dụng) ---------------- */
-.vbar{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px}
+/* Ô TÌM trong kho. Đứng riêng một hàng trên cùng, không chen vào hàng chip:
+   nó là việc khác — chip lọc theo LOẠI, ô này lọc theo CHỮ. */
+.jfind{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.jfind .search{min-width:0}
+.jfindx{flex:none;width:30px;height:30px;display:grid;place-items:center;
+  border:1px solid var(--line-2);border-radius:8px;color:var(--mute);
+  text-decoration:none;font-size:15px;line-height:1}
+.jfindx:hover{color:var(--bad);border-color:var(--bad)}
+/* Hàng nút: hai NHÓM, một đẩy sát trái một đẩy sát phải. Ô "Việc tìm được"
+   rộng gần 2000px mà mọi thứ nép hết vào mép trái thì nửa màn hình bỏ không,
+   và mắt phải quét một cột hẹp dài bốn tầng. */
+.vbar{display:flex;flex-wrap:wrap;justify-content:space-between;
+  align-items:center;gap:5px 18px;margin-bottom:7px}
+.vgrp{display:flex;flex-wrap:wrap;align-items:center;gap:5px 12px}
 .vbar:last-of-type{margin-bottom:11px}
 .vchip{font-size:11.5px;color:var(--dim);text-decoration:none;padding:3px 9px;
   border-radius:20px;border:1px solid var(--line);background:var(--bg);
@@ -730,6 +746,32 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
 .vchip:hover{border-color:var(--line-2);color:var(--ink)}
 .vchip.on{background:var(--acc);border-color:var(--acc);color:var(--acc-ink);
   font-weight:600}
+
+/* THANG MỨC ĐỘ — mấy nấc LIỀN NHAU trong một khung, tô đầy tới nấc đang chọn.
+   Khác pill rời ở đúng một điểm, và đó là điểm quan trọng nhất: liền nhau thì
+   nhìn ra ngay là chúng có THỨ TỰ. Bốn pill rời thì phải đọc hết mới đoán.
+
+   Nấc đã qua tô mờ, nấc đang chọn tô đậm — đọc như cái núm trên thanh trượt,
+   nên "chọn một nấc = từ đây trở lên" không phải giải thích. */
+.lvl{display:inline-flex;align-items:center;gap:7px}
+.lvlname{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--mute);font-weight:650}
+.lvltrack{display:inline-flex;border:1px solid var(--line);border-radius:20px;
+  background:var(--bg);overflow:hidden}
+.lvlstep{font-size:11.5px;color:var(--dim);text-decoration:none;padding:3px 11px;
+  white-space:nowrap;border-left:1px solid var(--line)}
+.lvlstep:first-child{border-left:0}
+.lvlstep:hover{color:var(--ink)}
+/* Nấc ĐÃ QUA: xanh đậm, đặc — không dùng alpha. rgba(...,.16) trên nền đen
+   ra đúng L* 5, tức là gần như không nhìn thấy: đã thử và thanh trông y hệt
+   mấy pill rời, mất sạch ý nghĩa "thanh mức độ". #1E3A2C là L* ~21, nổi rõ
+   khỏi nền (L* 3.6) mà vẫn thua xa nấc đang chọn (--acc). */
+.lvlstep.on{background:#1E3A2C;color:#C9E5D5}
+.lvlstep.now{background:var(--acc);color:var(--acc-ink);font-weight:600}
+/* Nhãn của hàng XẾP THEO. Xếp không lọc gì cả — để chung hàng với bộ lọc thì
+   người dùng tưởng nó cũng cắt bớt danh sách. */
+.vlabel{font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--mute);font-weight:650;align-self:center;margin-right:2px}
 
 /* ---------------- một dòng việc ---------------- */
 .jlist{display:flex;flex-direction:column;gap:1px}
@@ -751,6 +793,10 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
   background:var(--line);color:var(--dim);white-space:nowrap}
 .chance.ok{background:var(--acc-bg);color:var(--acc)}
 .chance.warn{background:var(--warn-bg);color:var(--warn)}
+/* "bạn giữ" — tin này nằm đây vì NGƯỜI bảo thế, không phải vì máy chấm đạt.
+   Màu tím: không dùng lại xanh/vàng/đỏ của thang cơ hội, vì nó không nói về
+   cơ hội — nó nói về việc AI quyết định. */
+.chance.keep{background:rgba(167,139,250,.16);color:#A78BFA}
 
 /* badge nguồn — nhìn dòng nào cũng biết cách nào tìm ra nó */
 .src{display:inline-flex;align-items:center;gap:4px;font-style:normal;
@@ -760,6 +806,17 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
 .src.chrome{color:#8FA9C9;border-color:rgba(143,169,201,.3)}
 .src.api{color:var(--acc);border-color:rgba(85,201,141,.3)}
 .src.agency{color:var(--warn);border-color:rgba(216,161,94,.3)}
+
+/* Đường sang TIN GỐC ở trang chi tiết. Mỗi nơi đăng một nút; nút nói rõ tên
+   miền, để biết trước mình sắp đi đâu chứ không phải bấm rồi mới biết. */
+.jlinks{display:flex;flex-wrap:wrap;gap:8px}
+.jlink{display:inline-flex;align-items:center;gap:9px;text-decoration:none;
+  padding:8px 12px;border:1px solid var(--line-2);border-radius:var(--round);
+  background:var(--panel-2);color:var(--ink);font-size:12.5px}
+.jlink:hover{border-color:var(--acc)}
+.jlinkhost{color:var(--mute);font-family:ui-monospace,Menlo,monospace;font-size:11px}
+.jlinkgo{color:var(--mute)}
+.jlink:hover .jlinkgo{color:var(--acc)}
 .merged{font-size:10.5px;color:var(--mute)}
 .jwhen{font-size:10.5px;color:var(--mute);white-space:nowrap}
 
@@ -1265,6 +1322,13 @@ body[data-run=running] .deckpill{border-color:var(--acc-2);
   padding:14px;border:1px solid var(--line);border-radius:var(--round);
   background:var(--bg)}
 .edufield.bbody{grid-column:1 / -1}
+/* Khối do máy chèn vào CV. Dấu để Ở ĐÂY, KHÔNG để trong cv_text — bản CV đó
+   gửi cho nhà tuyển dụng, không mang chú thích nội bộ nào. */
+.blockrow.machine{border-color:var(--warn);position:relative}
+.maybadge{position:absolute;top:-9px;left:13px;font-size:10px;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--warn);
+  background:var(--bg);border:1px solid var(--warn);border-radius:20px;
+  padding:1px 8px;cursor:help}
 .edufield.bbody .txt{min-height:88px;line-height:1.55;resize:vertical}
 @media (max-width:900px){.blockrow{grid-template-columns:1fr 30px}
   .edufield.bmeta{grid-column:1 / -2}}

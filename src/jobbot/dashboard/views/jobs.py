@@ -68,6 +68,43 @@ def _breakdown(job: dict) -> str:
     return card(f"<div class=bd>{rows}</div>{tail}", "bdcard")
 
 
+# Huy hiệu nguồn — DÙNG CHUNG lớp CSS với danh sách bên tab Search, để cùng
+# một tin nhìn ở hai chỗ ra cùng một ký hiệu.
+NGUON_DAU = {"api": "◆", "chrome": "⌕"}
+
+
+def _mo_tin_goc(job: dict) -> str:
+    """Đường sang TIN THẬT. Thiếu nó thì cả trang này là lời kể lại.
+
+    Trang chi tiết cho tới giờ hiện điểm, hiện từng yêu cầu, hiện cả bản mô tả
+    — mà không có lấy một đường nào sang xem tin gốc. Người đọc muốn kiểm
+    chứng phải tự đi tìm bằng tay, mà kiểm chứng là việc PHẢI làm trước khi
+    nộp: mô tả trong kho là bản chụp lúc quét, tin thật có thể đã sửa hoặc đã
+    đóng.
+
+    Một việc đăng ở hai nơi thì hiện CẢ HAI. Chúng không thay thế nhau: board
+    công ty là chỗ nộp thẳng, còn LinkedIn có phần "ai đã ứng tuyển", số người
+    nộp, và tên người đăng tin.
+    """
+    links = job.get("links") or []
+    if not links:
+        return empty("Tin này không có đường dẫn nào — nguồn cũ không lưu lại "
+                     "URL. Quét lại là có.")
+    nut = "".join(
+        # target=_blank: trong trình duyệt thì mở tab mới; trong cửa sổ app thì
+        # Delegate bắt lại và đẩy sang trình duyệt mặc định. Không có nó, bấm
+        # một đường ngoài là CẢ CỬA SỔ APP đi mất, không có nút Back nào.
+        # rel=noopener: trang đích không được cầm tay vào cửa sổ này.
+        f"<a class='jlink {esc(l['kind'])}' href='{esc(l['url'])}'"
+        f" target='_blank' rel='noopener noreferrer'>"
+        f"<i class='src {esc(l['kind'])}'>{NGUON_DAU.get(l['kind'], '◆')}"
+        f"<b>{esc(l['name'])}</b></i>"
+        f"<span class=jlinkhost>{esc(l['host'])}</span>"
+        f"<span class=jlinkgo>↗</span></a>"
+        for l in links)
+    return card(f"<div class=jlinks>{nut}</div>", "jlinkcard")
+
+
 def render_detail(job: dict) -> str:
     reqs = "".join(
         f"<li class='{'met' if r['met'] else ('unk' if r['met'] is None else 'miss')}'>"
@@ -82,6 +119,8 @@ def render_detail(job: dict) -> str:
         + h1(job["title"], f"{job['company']} · {job['location']} · {job['salary']}")
         + f"<div class=jmeta>{_score(job)}"
           f"<span class=spacer></span><span class=muted>{esc(job['posted'])}</span></div>"
+        + "<h2>Mở tin gốc</h2>"
+        + _mo_tin_goc(job)
         + "<h2>Why this score</h2>"
         + _breakdown(job)
         + (card(f"<ul class=reqs>{reqs}</ul>") if reqs
@@ -99,8 +138,19 @@ def render_detail(job: dict) -> str:
                "Uses the lines the CV builder cut out — that is where they belong.</div>")
         + "<h2>The posting</h2>"
         + card(f"<pre class=jd>{esc(job['jd'])}</pre>")
-        + "<div class=actbar><button class=primary>Queue for approval</button>"
-          "<button class=ghostbtn>Reject…</button>"
-          "<span class=muted>Nothing is sent until you approve it in the queue.</span></div>",
+        # NÚT THẬT, nối vào đúng đường mà nút Nộp bên danh sách đang dùng.
+        #
+        # Chỗ này trước đây là hai nút VẼ: "Queue for approval" và "Reject…" —
+        # không mang data-* nào, mà mọi trình nghe trong live.js đều bắt theo
+        # data-*, nên bấm vào không có gì xảy ra. Chúng là tàn dư của bản thiết
+        # kế cũ, hồi trang chi tiết định làm cổng duyệt. Cổng duyệt thật bây
+        # giờ là tab Quản lí.
+        #
+        # Xoá hẳn thì trang này đọc xong không làm gì được, phải quay ra danh
+        # sách mới bấm Nộp được — nên thay bằng nút thật, không phải bỏ trống.
+        + f"<div class=actbar><button class='mbtn go' data-post='/api/apply'"
+          f" data-arg='{esc(job['id'])}'>Nộp tin này</button>"
+          "<span class=muted>Mở form nộp trong Chrome và thêm một dòng vào "
+          "Quản lí. Chưa gửi gì cả — nút Gửi nằm bên Quản lí.</span></div>",
         active="/jobs",
     )

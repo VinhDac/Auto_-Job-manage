@@ -181,6 +181,23 @@ if sys.platform == "darwin":
         _src = (Path(__file__).resolve().parent.parent
                 / "src/jobbot/app.py").read_text(encoding="utf-8")
         check("và delegate được gắn vào webview", "setUIDelegate_(delegate)" in _src)
+
+        # Đường RA NGOÀI. Tin tuyển dụng nằm ở linkedin.com, greenhouse.io —
+        # không có hàm này thì <a target=_blank> bấm vào KHÔNG có gì xảy ra:
+        # không lỗi, không log, đúng lớp lỗi hộp chọn tệp đã mắc một lần.
+        _sel2 = (b"webView:createWebViewWithConfiguration:"
+                 b"forNavigationAction:windowFeatures:")
+        _m2 = Delegate.webView_createWebViewWithConfiguration_forNavigationAction_windowFeatures_
+        check("Delegate có hàm mở đường ra ngoài", _m2.selector == _sel2)
+        # Để PyObjC tự suy thì nó nhìn `return None` và kết luận trả về VOID,
+        # trong khi WKWebView gọi hàm này để lấy về một WKWebView* — sai kiểu
+        # trả về thì runtime đọc rác ở thanh ghi, lúc chạy được lúc không.
+        check("kiểu TRẢ VỀ khai là object, không phải void",
+              _m2.signature.decode().startswith("@@:"), _m2.signature.decode())
+        # Mở ngay trong cửa sổ app là mất luôn dashboard: cửa sổ đó không có
+        # thanh địa chỉ, không có nút Back.
+        check("đẩy sang trình duyệt mặc định của máy",
+              "NSWorkspace.sharedWorkspace().openURL_" in _src)
     except ImportError:
         check("bỏ qua — máy này không có PyObjC", True)
 else:

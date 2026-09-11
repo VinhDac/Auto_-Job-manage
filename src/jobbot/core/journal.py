@@ -56,9 +56,29 @@ class Event:
         return asdict(self)
 
 
+def remain_text(seconds: int) -> str:
+    """Giây -> câu người đọc được. MỘT chỗ định dạng cho cả app.
+
+    Dòng nhật ký viết bằng Python, thanh tiến độ vẽ bằng JavaScript. Để mỗi
+    bên tự định dạng thì cùng một con số hiện ra hai kiểu chữ khác nhau trên
+    cùng một màn hình — nên chỗ này tính sẵn thành chữ rồi đẩy xuống.
+
+    Luôn kèm dấu ~: đây là ước lượng theo nhịp hiện tại, không phải lời hứa.
+    """
+    if seconds <= 0:
+        return ""
+    if seconds < 90:
+        return f"~{seconds} giây"
+    phut = round(seconds / 60)
+    if phut < 60:
+        return f"~{phut} phút"
+    gio, le = divmod(phut, 60)
+    return f"~{gio} giờ {le} phút" if le else f"~{gio} giờ"
+
+
 @dataclass
 class Progress:
-    """Đang làm gì, tới đâu. Không có tổng thì để total=0 và chỉ hiện chữ."""
+    """Đang làm gì, tới đâu, còn bao lâu nữa xong."""
     what: str
     done: int = 0
     total: int = 0
@@ -68,9 +88,29 @@ class Progress:
     def percent(self) -> int:
         return int(self.done * 100 / self.total) if self.total else 0
 
+    @property
+    def eta(self) -> int:
+        """Còn bao nhiêu GIÂY nữa xong. Chưa đoán được thì 0.
+
+        Đo bằng nhịp THẬT của vòng đang chạy, không dùng hằng số đoán sẵn:
+        vòng đọc kỹ LinkedIn nhanh chậm theo mạng, theo nhịp nghỉ, và theo
+        số tin đã đọc từ trước — một con số cứng trong mã nguồn sai ngay
+        hôm sau.
+
+        Chờ đủ 3 nhịp mới dám nói. Nhịp đầu còn lẫn thời gian mở Chrome và
+        mở trang; chia ra thì phút đầu báo "còn 9 tiếng" rồi tụt dần, mà một
+        con số nhảy loạn còn tệ hơn không có con số nào.
+        """
+        if not self.total or self.done < 3 or not self.started:
+            return 0
+        troi = _monotonic() - self.started
+        return max(0, int(troi / self.done * (self.total - self.done)))
+
     def as_dict(self) -> dict:
         out = asdict(self)
         out["percent"] = self.percent
+        out["eta"] = self.eta
+        out["eta_text"] = remain_text(self.eta)
         return out
 
 
@@ -179,7 +219,12 @@ class Journal:
         """Đang làm tới đâu. KHÔNG ghi đĩa — gọi bao nhiêu lần cũng được."""
         with self._lock:
             found = self._progress.get(stream)
-            if found is None or found.what != what:
+            # Mốc thời gian đặt lại khi sang VIỆC KHÁC — nhận ra bằng TỔNG đổi
+            # hoặc số đếm tụt về, KHÔNG bằng dòng chữ đổi. Vòng tìm LinkedIn
+            # viết tên chức danh đang tìm vào `what`, nên mỗi nhịp là một chữ
+            # khác nhau; lấy chữ làm mốc thì đồng hồ reset mỗi nhịp và câu
+            # "còn bao lâu" không bao giờ tính ra được.
+            if found is None or found.total != total or done < found.done:
                 found = Progress(what=what, started=_monotonic())
                 self._progress[stream] = found
             found.what, found.done, found.total = what, done, total
@@ -203,6 +248,16 @@ class Journal:
     def running(self) -> dict[str, dict]:
         with self._lock:
             return {k: v.as_dict() for k, v in self._progress.items()}
+
+    def remaining(self, stream: str) -> str:
+        """Còn bao lâu nữa xong, đã thành chữ. Không đoán được thì rỗng.
+
+        Để dòng NHẬT KÝ nói đúng cùng con số với THANH TIẾN ĐỘ. Hai chỗ tự
+        tính là hai con số, và có ngày chúng lệch nhau ngay trên một màn hình.
+        """
+        with self._lock:
+            found = self._progress.get(stream)
+        return remain_text(found.eta) if found else ""
 
     def busy(self) -> bool:
         with self._lock:

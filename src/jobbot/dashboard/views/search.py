@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from html import escape as esc
 
-from ..filters import BAND, CHANCE, SHOW, SORT, VIA
+from ..filters import BAND, CHANCE, FOUND, SHOW, SORT, VIA
 from ..layout import deck, score_bar
 from . import runtime
 
@@ -68,6 +68,26 @@ def _row(job: dict) -> str:
 
     merged = (f"<span class=merged>+{job['merged'] - 1} nơi</span>"
               if job["merged"] > 1 else "")
+    # Tin nằm trong danh sách vì NGƯỜI bảo thế, không phải vì máy chấm đạt.
+    # Phải nói ra: nếu không, một tin chức danh chẳng khớp gì nằm giữa danh
+    # sách trông như bộ lọc bị hỏng.
+    tay = ("<span class='chance keep' title='máy đã loại tin này,"
+           " bạn giữ lại bằng tay'>bạn giữ</span>" if job.get("user_keep") else "")
+
+    # MỘT nút, hai chiều. Bộ lọc là luật máy móc — riêng "chức danh không khớp"
+    # đã loại 2.595 tin, mà luật đó chỉ là so chuỗi con với 19 chức danh khai
+    # trong hồ sơ. Người liếc qua đống bị loại chắc chắn nhặt được tin thật.
+    if job.get("user_keep"):
+        giu = (f"<button class='mbtn tiny' data-post='/api/keep'"
+               f" data-arg='{esc(job['id'])}'"
+               f" title='Trả tin này về cho máy phán lại'>Bỏ giữ</button>")
+    elif job["state"] == "dropped":
+        giu = (f"<button class='mbtn tiny' data-post='/api/keep'"
+               f" data-arg='{esc(job['id'])}'"
+               f" title='Đưa tin này vào danh sách giữ và chấm điểm ngay'>"
+               f"Giữ lại</button>")
+    else:
+        giu = ""
     money = f" · {esc(job['salary'])}" if job["salary"] != "not stated" else ""
     score = (score_bar(job["score"]) if job["score"] is not None
              else "<span class=noscore>—</span>")
@@ -79,7 +99,7 @@ def _row(job: dict) -> str:
         f"<div class=jmain><div class=jtitle>{esc(job['title'])}</div>"
         f"<div class=jsub><b>{esc(job['company'])}</b> · {esc(job['location'])}"
         f"{money}</div>{why}</div>"
-        f"<div class=jtags>{chance}{marks}{merged}"
+        f"<div class=jtags>{tay}{chance}{marks}{merged}"
         f"<span class=jwhen>{esc(job['posted'])}</span>"
         # Nút Nộp: mở trang nộp bằng trình duyệt mặc định và ghi một dòng vào
         # bảng Quản lí.
@@ -88,24 +108,100 @@ def _row(job: dict) -> str:
         # `document`, nên chặn lan truyền là giết luôn sự kiện trước khi nó tới
         # nơi — nút bấm không làm gì cả, mà cũng không báo lỗi. Bản thân trình
         # nghe đã gọi preventDefault(), đủ để thẻ <a> bao ngoài không nhảy trang.
+        f"{giu}"
         f"<button class='mbtn tiny' data-post='/api/apply'"
         f" data-arg='{esc(job['id'])}'>Nộp</button>"
         f"</div></a>")
 
 
+def _tim(flt) -> str:
+    """Ô TÌM trong kho đã quét. Khác hẳn nút Chạy: nút Chạy đi lấy tin mới về,
+    ô này lọc đống tin đã có.
+
+    Backend nhận `q` từ đầu — lọc theo chức danh hoặc tên công ty, có ràng
+    buộc tham số đàng hoàng — mà chưa bao giờ có chỗ để gõ vào. Cả một bộ lọc
+    nằm đó không ai dùng được.
+
+    FORM GET, không JavaScript: trạng thái lọc nằm hết trên URL (xem
+    filters.py), nên gõ xong bấm Enter là ra một địa chỉ lưu lại được, Back
+    được, gửi cho người khác được.
+
+    Các bộ lọc đang bật đi theo dưới dạng ô ẩn. Thiếu chúng thì gõ tìm một
+    phát là mọi chip đang chọn bay sạch về mặc định.
+    """
+    an = "".join(f"<input type=hidden name='{esc(k)}' value='{esc(v)}'>"
+                 for k, v in flt.pairs(q="", page=""))
+    # Nút xoá chỉ hiện khi ĐANG tìm. Hiện sẵn lúc ô trống là một nút không làm
+    # gì — thứ người dùng bấm một lần rồi thôi tin vào cả hàng nút.
+    xoa = (f"<a class=jfindx href='{esc(flt.url(q=''))}'"
+           f" title='Bỏ tìm, xem lại tất cả'>×</a>" if flt.q else "")
+    return (f"<form class=jfind method=get action='/search'>{an}"
+            f"<input class=search type=search name=q value='{esc(flt.q)}'"
+            f" autocomplete=off spellcheck=false"
+            f" placeholder='tìm trong kho — chức danh hoặc công ty'>"
+            f"{xoa}</form>")
+
+
+def _thang(key: str, ten: str, options, current: str, flt) -> str:
+    """THANG MỨC ĐỘ — mấy nấc liền nhau, tô đầy tới nấc đang chọn.
+
+    Vì sao không để mấy nút rời như cũ: "Đáng nộp / Có thể / Khó" CÓ THỨ TỰ,
+    mà bốn pill xám giống hệt nhau thì không nói ra được thứ tự đó — người
+    dùng phải đọc hết cả bốn rồi tự suy ra. Vẽ liền thành một thanh thì nhìn
+    phát biết ngay, và biết luôn chọn một nấc nghĩa là "từ đây trở lên".
+
+    Vẫn là mấy thẻ <a>, vẫn không JavaScript: trạng thái nằm trên URL như mọi
+    bộ lọc khác. Đổi CÁCH VẼ, không đổi cơ chế.
+    """
+    muc = [v for v, _ in options]
+    tai = muc.index(current) if current in muc else 0
+    nac = "".join(
+        f"<a class='lvlstep{' on' if i <= tai else ''}{' now' if i == tai else ''}'"
+        f" href='{esc(flt.url(**{key: value, 'raw': ''}))}'>{esc(label)}</a>"
+        for i, (value, label) in enumerate(options))
+    return (f"<span class=lvl><span class=lvlname>{esc(ten)}</span>"
+            f"<span class=lvltrack>{nac}</span></span>")
+
+
 def _list(jobs: list[dict], flt, counts: dict) -> str:
-    head = ("<div class=vbar>"
-            + _chips("show", [(v, f"{l} {counts.get(v, 0):,}") for v, l in SHOW],
-                     flt.show, flt)
-            + "</div><div class=vbar>"
-            + _chips("chance", CHANCE, flt.chance, flt)
-            + _chips("via", VIA, flt.via, flt)
-            + "</div><div class=vbar>"
-            + _chips("band", BAND, flt.band, flt)
-            + _chips("sort", SORT, flt.sort, flt)
-            + "</div>")
+    # MỘT nút thay cho hai. "Can't tell" nằm hàng cơ hội, "Not scorable" nằm
+    # hàng điểm — mà đo trên kho thật thì chúng là cùng một chồng tin (185 tin
+    # thiếu cả hai, 0 tin chỉ thiếu một). Cùng một nguyên nhân: vòng đọc kỹ
+    # chưa mở tới tin đó nên chưa có mô tả để mà đọc.
+    #
+    # Bấm vào là thả hai thang về "Tất cả": hai thang đòi máy phải đọc được,
+    # nút này đòi ngược lại — để cả hai cùng bật thì danh sách luôn rỗng.
+    chua = (f"<a class='vchip{' on' if flt.raw else ''}'"
+            f" href='{esc(flt.url(raw='' if flt.raw else '1', chance='', band=''))}'"
+            f" title='Tin chưa có mô tả nên máy chưa chấm được —"
+            f" chạy tiếp vòng đọc kỹ là có'>Máy chưa đọc</a>")
+    # BA HÀNG, MỖI HÀNG HAI ĐẦU. Trước đây bốn hàng đều nép sát trái, mỗi hàng
+    # dùng 25-50% bề ngang rồi bỏ trống hết phần phải — ô này rộng gần 2000px.
+    #
+    # Ghép theo NGHĨA, không phải ghép cho vừa chỗ:
+    #   hàng 1  chồng nào  ←→  xếp thế nào   (hai câu hỏi bao trùm cả danh sách)
+    #   hàng 2  hai thang  ←→  nút đòi điều NGƯỢC LẠI với hai thang
+    #   hàng 3  tìm bằng cách nào  ←→  ai đăng tin
+    hang = lambda trai, phai: (f"<div class=vbar><span class=vgrp>{trai}</span>"
+                               f"<span class=vgrp>{phai}</span></div>")
+    head = (_tim(flt)
+            + hang(_chips("show",
+                          [(v, f"{l} {counts.get(v, 0):,}") for v, l in SHOW],
+                          flt.show, flt),
+                   "<span class=vlabel>Xếp theo</span>"
+                   + _chips("sort", SORT, flt.sort, flt))
+            + hang(_thang("chance", "Cơ hội", CHANCE, flt.chance, flt)
+                   + _thang("band", "Điểm", BAND, flt.band, flt),
+                   chua)
+            + hang(_chips("found", FOUND, flt.found, flt),
+                   _chips("via", VIA, flt.via, flt)))
     if not jobs:
-        return head + "<div class=empty-box>không có tin nào khớp</div>"
+        # Nói rõ không ra CÁI GÌ, và cho đường quay lại. "không có tin nào
+        # khớp" khi đang gõ dở một chữ đọc ra như kho rỗng.
+        trong = (f"không có tin nào chứa “{esc(flt.q)}” — "
+                 f"<a href='{esc(flt.url(q=''))}'>bỏ tìm</a>" if flt.q
+                 else "không có tin nào khớp")
+        return head + f"<div class=empty-box>{trong}</div>"
     return (head + "<div class=jlist>" + "".join(_row(j) for j in jobs)
             + "</div>" + _pager(flt, counts.get(flt.show, 0)))
 
@@ -232,11 +328,16 @@ def render(*, jobs: list[dict], flt, counts: dict, sieve: dict,
             "search", "Search",
             info.get("state", "chưa quét lần nào"),
             # vai -> màu: xem luật ở layout.deck()
-            [(f"{counts.get('matched', 0):,}", "giữ", "stock"),
+            # "giữ" đọc từ stage chứ KHÔNG từ counts: counts đi theo ô tìm và
+            # các chip, mà thanh này nói về KHO chứ không về khung nhìn. Số
+            # của khung nhìn đã có rồi — đó là "đang hiện" ở cuối hàng.
+            [(f"{info.get('kept', 0):,}", "giữ", "stock"),
              (f"{info.get('worth', 0):,}", "đáng nộp", "act"),
              (f"{info.get('fresh', 0):,}", "mới", "new"),
              (len(jobs), "đang hiện", "view")],
-            adjust="/adjust/search"),
+            adjust="/adjust/search",
+            run=info.get("run_label", "Chạy"),
+            run_note=info.get("run_note", "")),
         # Lưới sàng đã chuyển vào ⚟ nên cột trái hết việc. Danh sách — thứ
         # Vin thật sự đọc — lấy cả bề ngang. Nhật ký về dải dẹt dưới đáy.
         cols=1, journal="bottom",

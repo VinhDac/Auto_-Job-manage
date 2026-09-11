@@ -60,7 +60,7 @@ def _field(question: Question, answers: Answers,
             )
 
     elif question.kind == BLOCKS:
-        parts.append(_o_khoi(question, answers))
+        parts.append(_o_khoi(question, answers, kho))
 
     elif question.kind == ROWS:
         parts.append(_o_hoc_van(question, answers))
@@ -243,7 +243,8 @@ def _o_hoc_van(question: Question, answers: Answers) -> str:
             f"<button type=button class='mbtn tiny' data-rowadd>+ thêm bằng</button>")
 
 
-def _o_khoi(question: Question, answers: Answers) -> str:
+def _o_khoi(question: Question, answers: Answers,
+            kho: dict | None = None) -> str:
     """Kinh nghiệm / project: mỗi thứ một KHỐI, mỗi khối một hàng.
 
     Đây là thông tin cá nhân, nên chỗ sửa là hồ sơ. Chỗ LƯU vẫn là khối trong
@@ -256,13 +257,15 @@ def _o_khoi(question: Question, answers: Answers) -> str:
     from ...cv.blocks import parse as parse_cv
     loai = question.block_kind
     co = [b for b in parse_cv(str(answers.get("cv_text") or "")) if b.kind == loai]
-    hang = "".join(_hang_khoi(question, b) for b in co) or _hang_khoi(question)
+    may = {t.strip().lower() for t in (kho or {}).get("may_de", []) if t.strip()}
+    hang = "".join(_hang_khoi(question, b, b.title.strip().lower() in may)
+                   for b in co) or _hang_khoi(question)
     ten = "việc" if loai == "experience" else "project"
     return (f"<div class=blockrows data-rows>{hang}</div>"
             f"<button type=button class='mbtn tiny' data-rowadd>+ thêm {ten}</button>")
 
 
-def _hang_khoi(question: Question, b=None) -> str:
+def _hang_khoi(question: Question, b=None, may_de: bool = False) -> str:
     key = question.id
     title = getattr(b, "title", "")
     meta = getattr(b, "meta", "")
@@ -270,8 +273,11 @@ def _hang_khoi(question: Question, b=None) -> str:
     nhan_meta = ("Nơi làm · thời gian" if question.block_kind == "experience"
                  else "Ghi chú · thời gian")
     return (
-        f"<div class=blockrow>"
-        f"<label class='edufield btitle'><span>Tên</span>"
+        f"<div class='blockrow{' machine' if may_de else ''}'>"
+        + ("<span class=maybadge title='Khối này do jobbot đẻ ra rồi chèn vào "
+           "CV, không phải bạn viết. Bấm × để gỡ.'>jobbot đẻ</span>"
+           if may_de else "")
+        + f"<label class='edufield btitle'><span>Tên</span>"
         f"<input class=txt type=text name='{esc(key)}__title' value='{esc(title)}'"
         f" placeholder='Quantitative Analyst — Schonfeld' autocomplete=off></label>"
         f"<label class='edufield bmeta'><span>{esc(nhan_meta)}</span>"

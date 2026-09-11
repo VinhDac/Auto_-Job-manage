@@ -264,6 +264,31 @@ MIGRATIONS: list[str] = [
     ALTER TABLE application ADD COLUMN cv_file TEXT NOT NULL DEFAULT '';
     ALTER TABLE application ADD COLUMN note    TEXT NOT NULL DEFAULT '';
     """,
+    # 16 — TÊN KHỐI mà máy đã chèn vào CV. Chèn xong thì trong cv_text nó
+    # không khác gì project người dùng tự viết — không có cột này thì sau đó
+    # không cách nào chỉ ra "cái này máy đẻ ra". Đã xảy ra thật: khối "Alpha
+    # Research" nằm trong CV suốt và phải so hai phiên bản liền nhau mới truy
+    # ra được.
+    #
+    # Dấu để Ở ĐÂY chứ KHÔNG để trong cv_text: bản CV đó gửi cho nhà tuyển
+    # dụng, không được mang chú thích nội bộ nào.
+    """
+    ALTER TABLE project ADD COLUMN cv_title TEXT NOT NULL DEFAULT '';
+    """,
+    # 17 — NGƯỜI giữ lại một tin máy đã loại.
+    #
+    # `kept` là cột SUY RA: derive() tính lại nó từ luật + hồ sơ, và tính lại
+    # MỖI LẦN hồ sơ đổi phiên bản. Nên sửa thẳng kept=1 bằng tay là một quyết
+    # định có hạn sử dụng: lần sau Vin chỉnh một chữ trong hồ sơ là nó bị ghi
+    # đè, im lặng, không báo gì — và điểm vừa chấm cũng bị xoá theo.
+    #
+    # Quyết định của NGƯỜI phải nằm ở cột RIÊNG, và derive() đọc nó. Đây đúng
+    # là luật "máy đề xuất, người duyệt" của cả app, chỉ là lần này người
+    # duyệt ngược lại máy.
+    """
+    ALTER TABLE posting ADD COLUMN user_keep INTEGER NOT NULL DEFAULT 0;
+    CREATE INDEX posting_user_keep ON posting(user_keep);
+    """,
 ]
 
 

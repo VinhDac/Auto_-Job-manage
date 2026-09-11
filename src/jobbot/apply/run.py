@@ -562,6 +562,50 @@ def _one(tab, item, key, want: Ans, report: Report, label: str,
         report.filled.append((label, got))
 
 
+def login_wall(tab) -> str:
+    """Trang đang đòi đăng nhập? Trả về địa chỉ đó, không thì rỗng.
+
+    Gặp tường đăng nhập mà im lặng là kiểu hỏng tệ nhất: máy báo "không thấy
+    form" trên một trang thật ra chỉ đang hỏi mật khẩu, và Vin ngồi đoán.
+    """
+    try:
+        here = tab.eval("location.href") or ""
+    except cdp.CDPError:
+        return ""
+    return here if LOGIN_WALL.search(here) else ""
+
+
+def _blocked(tab) -> "Report | None":
+    """Trang có đang CHẶN không cho điền không. Có thì trả Report nói rõ.
+
+    Ba chỗ trong open_and_fill() gọi hàm này, nhưng nó CHƯA BAO GIỜ được viết
+    — commit f669e66 đổi sang hình dạng `stuck = _blocked(tab)` mà chỉ sửa
+    chỗ gọi, không viết hàm, và xoá luôn hai hàm cũ nó thay thế. Kết quả: mọi
+    lần nộp đơn đều chết bằng NameError trước khi chạm tới ô nào.
+    """
+    wall = login_wall(tab)
+    return Report(url=wall, needs_login=wall) if wall else None
+
+
+def _await(tab, wait: float) -> list[dict]:
+    """Chờ Ô hiện ra. Chờ Ô chứ không chờ thẻ <form>: boards.greenhouse.io
+    chuyển hướng sang job-boards.greenhouse.io, và <form> của trang CŨ khớp
+    điều kiện chờ trước khi DOM mới thay vào — đọc lúc đó ra rỗng, máy báo
+    "không thấy form" trên một trang có 26 ô.
+
+    HÀM NÀY TỪNG BỊ XOÁ NHẦM ở commit f669e66 trong khi HAI chỗ gọi vẫn còn,
+    nên mọi lần nộp đi tới nhánh "chưa thấy ô nào" đều chết bằng
+    `NameError: name '_await' is not defined`. Không test nào bắt được, vì
+    nhánh đó chỉ chạy khi có Chrome thật và một trang tuyển dụng thật.
+    """
+    found = F.read(tab)
+    deadline = time.time() + wait
+    while not found and time.time() < deadline:
+        time.sleep(0.6)
+        found = F.read(tab)
+    return found
+
+
 def open_and_fill(url: str, book: dict[str, Ans], resume: Path | None,
                   job: int | None = None) -> tuple[Report, object]:
     """Mở trang, tìm đến form, điền, TRẢ TAB CÒN MỞ.

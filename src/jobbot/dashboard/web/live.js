@@ -58,19 +58,25 @@
     if (!rows.length) { box.innerHTML = '<div class=pidle>không có việc đang chạy</div>'; return; }
 
     box.innerHTML = rows.map(([stream, p]) => {
-      const count = p.total ? p.done + '/' + p.total : '';
       const width = p.total ? p.percent : 100;
+      // Dòng "còn bao lâu" chỉ dựng khi CÓ số. Dựng sẵn rồi để rỗng thì nó
+      // vẫn chiếm chỗ và thanh nhảy lên nhảy xuống mỗi lần máy đổi việc.
       return '<div class="prow' + (p.total ? '' : ' spin') + '">' +
              '<div class=phead><b></b><span></span></div>' +
-             '<div class=ptrack><i style="width:' + width + '%"></i></div></div>';
+             '<div class=ptrack><i style="width:' + width + '%"></i></div>' +
+             (p.eta_text ? '<div class=peta></div>' : '') + '</div>';
     }).join('');
 
-    // Chữ đặt bằng textContent, KHÔNG nối vào chuỗi HTML: tên nguồn là dữ
-    // liệu cào về, nối thẳng vào innerHTML là mở cửa cho thẻ lạ.
+    // Chữ đặt bằng textContent, KHÔNG nối vào chuỗi HTML: tên nguồn và tên
+    // tin là dữ liệu cào về, nối thẳng vào innerHTML là mở cửa cho thẻ lạ.
     box.querySelectorAll('.prow').forEach((el, i) => {
       const [stream, p] = rows[i];
       el.querySelector('b').textContent = want ? p.what : stream + ' — ' + p.what;
       el.querySelector('span').textContent = p.total ? p.done + '/' + p.total : '';
+      const eta = el.querySelector('.peta');
+      // Chữ do MÁY CHỦ tính (journal.remain_text) — dòng nhật ký và thanh này
+      // phải nói cùng một con số, nên chỉ có một chỗ định dạng.
+      if (eta) eta.textContent = 'còn ' + p.eta_text;
     });
   }
 
@@ -102,6 +108,16 @@
         : 'Ngưng quét theo lịch. Nút Chạy ngay vẫn dùng được.';
     });
     $('[data-act="run"]').forEach((b) => { b.disabled = state === 'running'; });
+
+    // Nút chạy của KHÚC (Search…). Chữ lúc rảnh do máy chủ tính theo tình
+    // huống — Bắt đầu / Tiếp tục / Cập nhật — và nằm sẵn ở data-run. Lúc
+    // đang chạy thì chỉ có một chữ đúng, và nó là trạng thái tạm nên để
+    // trình duyệt lo, máy chủ không phải đoán xem màn hình đang thấy gì.
+    $('[data-post="/api/stage/start"]').forEach((b) => {
+      const ranh = b.dataset.run || b.textContent;
+      b.disabled = state === 'running';
+      b.textContent = state === 'running' ? 'Đang quét…' : ranh;
+    });
   }
 
   // --------------------------------------------------------------- kết nối

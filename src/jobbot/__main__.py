@@ -59,7 +59,7 @@ def run_window(app_window: bool = False) -> int:
         if window is not None:
             window.terminate()
         from .browser import chrome
-        chrome.shutdown()                   # đừng bỏ lại cửa sổ cào mồ côi
+        chrome.shutdown_all()               # đừng bỏ lại cửa sổ cào mồ côi
     return 0
 
 

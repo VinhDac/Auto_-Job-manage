@@ -115,6 +115,54 @@ with tempfile.TemporaryDirectory() as tmp:
     check("chưa open() thì không mở kết nối nào", quiet._db() is None)
     check("nhưng vẫn ghi được vào bộ nhớ", len(quiet.tail(SEARCH, 9)) == 1)
 
+    print("\n[còn bao lâu nữa xong]")
+    from jobbot.core.journal import remain_text
+    check("dưới 90 giây thì nói giây", remain_text(45) == "~45 giây")
+    check("trên 90 giây thì đổi sang phút", remain_text(600) == "~10 phút")
+    check("trên một giờ thì nói giờ + phút", remain_text(11520) == "~3 giờ 12 phút")
+    check("tròn giờ thì không viết '0 phút'", remain_text(7200) == "~2 giờ")
+    check("không biết thì im, không đoán bừa", remain_text(0) == "")
+
+    eta = Journal()
+    eta.progress(SEARCH, "đọc kỹ · tin A", 1, 100)
+    check("một nhịp thì CHƯA dám đoán", eta.running()[SEARCH]["eta"] == 0)
+    eta.progress(SEARCH, "đọc kỹ · tin B", 2, 100)
+    check("hai nhịp vẫn chưa", eta.running()[SEARCH]["eta"] == 0)
+    time.sleep(0.05)
+    eta.progress(SEARCH, "đọc kỹ · tin C", 3, 100)
+    check("đủ ba nhịp mới nói", eta.running()[SEARCH]["eta"] > 0)
+    check("và nói thành chữ luôn", eta.running()[SEARCH]["eta_text"] != "")
+    check("cùng một con số với thanh tiến độ",
+          eta.remaining(SEARCH) == eta.running()[SEARCH]["eta_text"])
+
+    # Đây là cái bẫy thật: vòng tìm LinkedIn viết tên chức danh đang tìm vào
+    # `what`, nên MỖI NHỊP LÀ MỘT CHỮ KHÁC. Nếu mốc thời gian đặt lại theo
+    # chữ thì đồng hồ reset liên tục và không bao giờ đoán ra được gì.
+    moc = eta.running()[SEARCH]["started"]
+    eta.progress(SEARCH, "đọc kỹ · tin D — chữ hoàn toàn khác", 4, 100)
+    check("đổi CHỮ thì đồng hồ vẫn chạy tiếp",
+          eta.running()[SEARCH]["started"] == moc)
+    eta.progress(SEARCH, "sang việc khác", 1, 7)
+    check("đổi VIỆC (tổng khác) thì đồng hồ đặt lại",
+          eta.running()[SEARCH]["started"] != moc)
+    check("và lại im cho tới khi đủ nhịp", eta.running()[SEARCH]["eta"] == 0)
+
+    print("\n[quét: MỌI nguồn phải để lại dấu vết]")
+    # Lượt quét 19:22 chạy 21 board và để lại đúng 3 dòng nhật ký, vì luật cũ
+    # là "chỉ ghi khi có tin mới". Người dùng không có cách nào biết 18 board
+    # kia đã chạy xong hay đã chết. Im lặng không phải là gọn — im lặng là mù.
+    from jobbot.core.journal import log as chung
+    from jobbot import scan_runner as _sr
+    _c = db.connect()
+    _truoc = len(chung.tail(SEARCH, 999))
+    _sr._run_source(_c, "greenhouse:rong", lambda: [], log=lambda _m: None)
+    _sau = chung.tail(SEARCH, 999)
+    check("nguồn KHÔNG có tin mới vẫn ghi một dòng", len(_sau) == _truoc + 1)
+    check("và dòng đó nói rõ là 0 mới", "0 mới" in _sau[0].text, _sau[0].text)
+    check("mức 'info' chứ không phải 'ok' — không có gì để mừng",
+          _sau[0].level == "info")
+    _c.close()
+
     print("\n[nhật ký hỏng KHÔNG được giết việc đang chạy]")
     broken = Journal()
     broken.open()

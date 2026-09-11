@@ -76,6 +76,16 @@ def derive(conn: sqlite3.Connection, force: bool = False,
                 jlog.progress(SCORE, "lọc tin", index, len(rows))
             item = _row_to_posting(row)
             keep, reason = jobfilter.judge(item, answers)
+            # NGƯỜI ĐÈ LÊN MÁY. Đây là chỗ DUY NHẤT biết điều đó, nên quyết
+            # định của Vin sống sót qua mọi lần tính lại — kể cả khi đổi hồ sơ
+            # hay đổi luật lọc, tức là đúng lúc mà một cú sửa tay lẽ ra bị
+            # nuốt mất.
+            #
+            # Giữ nguyên bất biến cũ: drop_reason rỗng <=> tin đang được giữ.
+            # Vì sao tin này nằm trong danh sách thì badge "bạn giữ" nói, chứ
+            # không nhét thêm nghĩa vào drop_reason.
+            if row["user_keep"]:
+                keep, reason = True, ""
             is_agency, _ = judge_agency(row["company"], row["description"] or "")
             conn.execute(
                 "UPDATE posting SET kept=?, drop_reason=?, via_agency=?,"

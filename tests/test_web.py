@@ -223,6 +223,35 @@ with tempfile.TemporaryDirectory() as tmp:
               oct(Path(_kq["backup"]).stat().st_mode)[-3:] == "600")
         check("schema giữ nguyên, không phải dựng lại",
               _cr.execute("PRAGMA user_version").fetchone()[0] > 0)
+        # SẢN PHẨM CỦA MÁY phải đi hết: đề bài trong bảng project, và cả khối
+        # project mà máy đã chèn vào cv_text. Người dùng chỉ nhập CV vào lúc
+        # đầu — thứ máy đẻ ra sau đó không được sống sót qua "làm lại từ đầu".
+        _cr.execute("INSERT INTO project(question, state, made_at)"
+                    " VALUES('máy đẻ ra', 'xong', 't')")
+        from jobbot.profile import store as _st2
+        _st2.save(_cr, {"cv_text": "SELECTED PROJECTS\nMáy Đẻ Ra — x\n"}, "t")
+        _cr.commit()
+        _rs.run(_cr)
+        _dbr.migrate(_cr)
+        check("reset xoá sạch đề bài máy đẻ",
+              _cr.execute("SELECT COUNT(*) FROM project").fetchone()[0] == 0)
+        check("và xoá cả khối project máy chèn vào CV",
+              not str(_st2.load(_cr).get("cv_text") or "").strip())
+        # DẤU để phân biệt project máy đẻ. Không có nó thì khối nằm trong CV
+        # y hệt project tự viết — đã xảy ra thật, phải so hai phiên bản liền
+        # nhau mới truy ra được "Alpha Research" là của máy.
+        check("bảng project có chỗ ghi tên khối đã chèn vào CV",
+              "cv_title" in [r[1] for r in _cr.execute("PRAGMA table_info(project)")])
+        from jobbot.dashboard.views.profile import _o_khoi as _ok2
+        from jobbot.profile.schema import all_questions as _aq2
+        _cvp = "SELECTED PROJECTS\nMáy Đẻ Ra — x\nTự Viết — y\n"
+        _h2 = _ok2(_aq2()["project_blocks"], {"cv_text": _cvp},
+                   {"may_de": ["Máy Đẻ Ra"]})
+        check("khối máy đẻ được đánh dấu", _h2.count("maybadge") == 1)
+        check("khối tự viết thì KHÔNG", _h2.count("blockrow machine") == 1
+              and _h2.count("class=blockrow") == 1)
+        # Dấu KHÔNG được nằm trong CV — bản đó gửi cho nhà tuyển dụng.
+        check("dấu không dính vào cv_text", "jobbot" not in _cvp)
         _cr.close()
     finally:
         for _k, _v in (("HOME", _cu_home), ("JOBBOT_DATA_DIR", _cu_data)):
@@ -731,6 +760,222 @@ with tempfile.TemporaryDirectory() as tmp:
     check("số khác 0 thì giữ màu", "zero" not in _d9)
     check("dấu phẩy nghìn không làm hỏng luật",
           "zero" not in _deck("search", "S", "", [("1,204", "giữ", "stock")]))
+    # NÚT CHẠY PHẢI ĐỔI CHỮ THEO TÌNH HUỐNG. Một nút ghi "Chạy" ở mọi hoàn
+    # cảnh là nút không nói gì: người mới mở app không biết chạy cái gì, người
+    # vừa bấm Dừng giữa chừng tưởng bấm vào là làm lại từ đầu.
+    from jobbot.dashboard import live as _lv
+    from jobbot.core.postings import HAVE_DESC as _HD
+    _trong = db.connect(Path(tmp) / "nut-trong.db")
+    check("kho rỗng -> nút mời BẮT ĐẦU",
+          _lv.search_stage(_trong)["run_label"] == "Bắt đầu",
+          _lv.search_stage(_trong)["run_label"])
+    _trong.close()
+
+    _nut = seeded(Path(tmp) / "nut.db")
+    check("kho đầy đủ -> nút mời CẬP NHẬT",
+          _lv.search_stage(_nut)["run_label"] == "Cập nhật",
+          _lv.search_stage(_nut)["run_label"])
+    # Một tin LinkedIn chưa có mô tả = vòng đọc kỹ còn dở dang. Ghi bằng
+    # ĐƯỜNG THẬT của app (save_batch) chứ không INSERT tay: bảng posting có
+    # cột bắt buộc mà chỉ đường thật mới điền đủ, và test đi đường riêng thì
+    # nó kiểm một hình dạng dữ liệu không bao giờ tồn tại ngoài đời.
+    postings.save_batch(_nut, "linkedin", [
+        Posting(source_id="9", title="Quant", company="X", location="London",
+                url="https://x/9", description="")])
+    _st = _lv.search_stage(_nut)
+    check("còn tin chưa đọc kỹ -> nút mời TIẾP TỤC",
+          _st["run_label"] == "Tiếp tục", _st["run_label"])
+    check("và nói rõ còn bao nhiêu tin dở", "1 tin chưa đọc kỹ" in _st["run_note"])
+    # Đọc xong tin đó thì lời mời phải đổi lại — nếu không, nút đứng ở
+    # "Tiếp tục" vĩnh viễn và chữ trên nút thành lời nói dối.
+    _nut.execute("UPDATE posting SET description = ? WHERE source='linkedin'",
+                 ("x" * (_HD + 1),))
+    _nut.commit()
+    check("đọc kỹ xong thì quay về CẬP NHẬT",
+          _lv.search_stage(_nut)["run_label"] == "Cập nhật")
+    _nut.close()
+    # Chữ lúc rảnh phải đi kèm nút, để live.js trả về được sau khi hiện
+    # "Đang quét…". Không có nó thì quét xong nút kẹt ở chữ tạm.
+    check("nút mang theo chữ gốc để khôi phục",
+          "data-run='Cập nhật'" in _deck("search", "S", "", [], run="Cập nhật"))
+    check("và mang lời giải thích khi rê chuột",
+          "title='còn 3 tin dở'" in _deck("search", "S", "", [],
+                                          run="Tiếp tục", run_note="còn 3 tin dở"))
+
+    # Ô TÌM TRONG KHO. Backend nhận `q` từ ngày đầu — lọc theo chức danh hoặc
+    # tên công ty, ràng buộc tham số đàng hoàng — mà chưa bao giờ có chỗ gõ
+    # vào. Cả một bộ lọc nằm đó không ai dùng được.
+    import re as _re2
+    _, _s0 = get("/search")
+    check("danh sách có ô tìm", "class=jfind" in _s0)
+    check("ô tìm là form GET — gõ xong là ra URL lưu được",
+          "method=get action='/search'" in _s0)
+    check("chưa tìm thì KHÔNG hiện nút xoá", "jfindx" not in _s0)
+
+    _, _s1 = get("/search?q=quantitative")
+    check("tìm rồi thì ô giữ lại chữ vừa gõ", "name=q value='quantitative'" in _s1)
+    check("và hiện nút xoá để quay lại", "jfindx" in _s1)
+    check("danh sách co lại theo chữ tìm",
+          _s1.count("class='jrow") < _s0.count("class='jrow"),
+          f"{_s1.count(chr(39) + 'jrow')} vs {_s0.count(chr(39) + 'jrow')}")
+    check("tìm chữ không có thật -> nói rõ không ra CÁI GÌ",
+          "khongcochunaynhuvay" in get("/search?q=khongcochunaynhuvay")[1])
+
+    # GÕ TÌM KHÔNG ĐƯỢC LÀM MẤT BỘ LỌC ĐANG BẬT. Form GET chỉ gửi đúng những
+    # ô nó có, nên các chip phải đi theo dưới dạng <input hidden>.
+    _, _s2 = get("/search?q=quant&chance=likely&show=dropped")
+    check("bộ lọc đang bật đi theo form dưới dạng ô ẩn",
+          "name='chance' value='likely'" in _s2 and "name='show' value='dropped'" in _s2)
+    check("nhưng KHÔNG mang theo chính chữ tìm (ô nhập lo việc đó)",
+          "name='q' value=" not in _s2)
+    from jobbot.dashboard.filters import JobFilter as _JF
+    _f = _JF(q="abc", chance="likely", page=3)
+    check("pairs() bỏ được q và page khi dựng ô ẩn",
+          dict(_f.pairs(q="", page="")) == {"chance": "likely"},
+          str(_f.pairs(q="", page="")))
+    check("url() và pairs() dựng từ CÙNG một chỗ",
+          "chance=likely" in _f.url() and "q=abc" in _f.url())
+
+    # BỐN LOẠI NÚT, BỐN CÁCH VẼ. Trước đây cả bốn là pill xám giống hệt nhau
+    # trộn chung ba hàng — 20 nút, không nhìn ra nút nào liên quan nút nào.
+    _, _f0 = get("/search")
+    check("thứ CÓ THỨ TỰ vẽ thành THANH, không phải pill rời",
+          _f0.count("class=lvltrack") == 2, str(_f0.count("class=lvltrack")))
+    check("thanh có tên đứng đầu (Cơ hội / Điểm)",
+          "Cơ hội" in _f0 and "class=lvlname" in _f0)
+    # Xếp KHÔNG lọc gì cả, nên nó phải có nhãn riêng và đứng ở ĐẦU KIA của
+    # hàng — lẫn vào giữa đám chip lọc thì người dùng tưởng nó cũng cắt bớt
+    # danh sách.
+    check("Xếp theo có nhãn riêng", "Xếp theo" in _f0 and "class=vlabel" in _f0)
+    # Hàng nút chia hai NHÓM, một đẩy trái một đẩy phải: ô này rộng gần
+    # 2000px, nép hết vào mép trái thì nửa màn hình bỏ không.
+    check("mỗi hàng nút có hai đầu", _f0.count("class=vgrp") == 6,
+          str(_f0.count("class=vgrp")))
+    check("ba hàng nút, không phải bốn", _f0.count("class=vbar") == 3,
+          str(_f0.count("class=vbar")))
+
+    # TÔ ĐẦY TỚI NẤC ĐANG CHỌN — đó là thứ làm nó đọc ra một cái thang.
+    _, _f1 = get("/search?chance=possible")
+    _nac = _re2.findall(r"<a class='(lvlstep[^']*)'[^>]*>([^<]*)</a>", _f1)[:4]
+    check("nấc đã qua được tô", [c for c, _ in _nac] ==
+          ["lvlstep on", "lvlstep on", "lvlstep on now", "lvlstep"], str(_nac))
+    check("đúng một nấc là nấc đang chọn",
+          sum(1 for c, _ in _nac if "now" in c) == 1)
+
+    # THANG = SÀN. Chọn "Có thể" phải KÈM cả "Đáng nộp" — giấu mất những tin
+    # tốt nhất là hỏng đúng việc người dùng cần.
+    _n = lambda h: int(_re2.search(r">Giữ ([0-9,]+)<", h).group(1).replace(",", ""))
+    # Bất biến của một cái SÀN: nâng sàn lên thì tập kết quả chỉ co lại, không
+    # bao giờ phình ra. (Bao nhiêu tin ở mỗi mức là chuyện của DỮ LIỆU, nên
+    # không khẳng định co THẬT SỰ ở đây — test_filters.py kiểm phần SQL.)
+    _cao, _vua, _het = (_n(get("/search?chance=likely")[1]), _n(_f1), _n(_f0))
+    check("nâng sàn thì tập kết quả chỉ co lại",
+          _cao <= _vua <= _het, f"{_cao} <= {_vua} <= {_het}")
+
+    # TAG NGUỒN — Vin nhìn thấy badge api/chrome trên từng dòng rồi, nên lọc
+    # theo chính hai badge đó là thứ tiếp theo người ta thò tay tìm.
+    check("có tag lọc theo nguồn", ">api<" in _f0 and ">chrome<" in _f0)
+    _, _fc = get("/search?found=chrome")
+    check("lọc chrome thì mọi dòng đều mang badge chrome",
+          _fc.count("class='src chrome'") >= _fc.count("class='jrow"),
+          f"{_fc.count(chr(39)+'src chrome'+chr(39))} badge / "
+          f"{_fc.count(chr(39)+'jrow')} dòng")
+
+    # MỘT nút thay cho hai: "Can't tell" và "Not scorable" là cùng một chồng.
+    check("chỉ còn MỘT nút cho tin máy chưa đọc",
+          "Máy chưa đọc" in _f0 and "Not scorable" not in _f0
+          and "Can't tell" not in _f0)
+    # Hai thang đòi máy ĐỌC ĐƯỢC, nút này đòi ngược lại — cùng bật thì danh
+    # sách luôn rỗng, nên bấm nút phải thả hai thang về Tất cả.
+    check("bấm 'Máy chưa đọc' thì thả hai thang ra",
+          "raw=1" in _f1 and "chance" not in
+          _re2.search(r"href='([^']*raw=1[^']*)'", _f1).group(1))
+
+    # THANH KHÚC nói về KHO, chip nói về KHUNG NHÌN — đừng trộn. Trộn thì gõ
+    # tìm "quant" xong thanh báo "64 giữ · 91 đáng nộp", trong khi đáng nộp là
+    # tập con của giữ: 91 > 64 là con số không thể tồn tại.
+    _giu = lambda h: _re.search(r"class='metric stock[^']*'><b>([0-9,]+)</b>giữ", h)
+    import re as _re
+    check("thanh khúc giữ nguyên số KHO khi đang tìm",
+          _giu(_s1) and _giu(_s0) and _giu(_s1).group(1) == _giu(_s0).group(1),
+          f"{_giu(_s1) and _giu(_s1).group(1)} vs {_giu(_s0) and _giu(_s0).group(1)}")
+    check("còn 'đang hiện' thì ĐI THEO khung nhìn",
+          "class='metric view" in _s1)
+
+    # Con số trên chip phải ĐI THEO chữ tìm, không thì nó nói dối.
+    import re as _re
+    _dem = lambda h, n: int(_re.search(f">{n} ([0-9,]+)<", h).group(1).replace(",", ""))
+    check("đếm lại theo chữ tìm, không giữ số cũ",
+          _dem(_s1, "Giữ") < _dem(_s0, "Giữ"),
+          f"{_dem(_s1, 'Giữ')} vs {_dem(_s0, 'Giữ')}")
+    # Chữ người dùng gõ đi thẳng vào câu SQL. Phải là tham số ràng buộc.
+    _ma_nhay, _ = get("/search?q=%27%20OR%201%3D1%20--")
+    check("dấu nháy trong ô tìm không làm sập trang", _ma_nhay == 200, str(_ma_nhay))
+
+    # GIỮ LẠI tin máy đã loại. Bộ lọc là luật máy móc — riêng "chức danh không
+    # khớp" đã loại 2.595 tin trên kho thật, mà luật đó chỉ là so chuỗi con với
+    # 19 chức danh khai trong hồ sơ. Người liếc qua đống bị loại chắc chắn nhặt
+    # được tin thật, nên phải có đường nhặt.
+    _, _bo = get("/search?show=dropped")
+    check("dòng bị loại có nút Giữ lại", "Giữ lại" in _bo and "/api/keep" in _bo)
+    _, _giu = get("/search")
+    check("dòng đang giữ KHÔNG có nút đó — không có gì để giữ thêm",
+          "Giữ lại" not in _giu)
+
+    _bo_id = _re2.search(r"data-post='/api/keep' data-arg='(\d+)'", _bo).group(1)
+    gui = lambda i: post("/api/keep", f"arg={i}".encode())
+    check("bấm Giữ thì server nhận", gui(_bo_id) == 200)
+    _, _sau = get("/search")
+    check("tin đó chuyển sang danh sách giữ", f"/jobs/{_bo_id}" in _sau)
+    check("và nói rõ nó nằm đây vì NGƯỜI, không phải vì máy chấm đạt",
+          "bạn giữ" in _sau)
+    check("nút đổi chiều thành Bỏ giữ", "Bỏ giữ" in _sau)
+    check("không còn nằm bên danh sách bị loại",
+          f"/jobs/{_bo_id}" not in get("/search?show=dropped")[1])
+    check("bấm lần nữa thì trả về cho máy", gui(_bo_id) == 200
+          and f"/jobs/{_bo_id}" in get("/search?show=dropped")[1])
+    check("id bịa thì từ chối, không đổi gì", gui("khong-phai-so") == 400)
+
+    # MỖI TIN PHẢI CÓ ĐƯỜNG SANG TIN GỐC. Trang chi tiết hiện điểm, hiện từng
+    # yêu cầu, hiện cả bản mô tả — mà không có đường nào sang xem tin thật thì
+    # cả trang đó là lời kể lại: mô tả trong kho là bản chụp lúc quét, tin thật
+    # có thể đã sửa hoặc đã đóng.
+    _jid = str(job_id)
+    _ma, _ct = get(f"/jobs/{_jid}")       # get() trả (mã, thân), không phải chuỗi
+    check("trang chi tiết mở được", _ma == 200, str(_ma))
+    check("trang chi tiết có ô Mở tin gốc", "Mở tin gốc" in _ct)
+    # KHÔNG ĐƯỢC CÓ NÚT VẼ. Mọi trình nghe trong live.js đều bắt theo data-*,
+    # nên một <button> không mang data-* nào là nút bấm vào không có gì xảy ra
+    # — và không báo lỗi, nên người dùng tưởng app hỏng. Trang này từng có hai
+    # cái: "Queue for approval" và "Reject…".
+    import re as _re3
+    _chet = [b for b in _re3.findall(r"<button[^>]*>", _ct)
+             if "data-" not in b and "type=submit" not in b]
+    check("không còn nút nào không nối vào đâu", not _chet, str(_chet[:2]))
+    check("và có nút Nộp thật, dùng chung đường với danh sách",
+          "data-post='/api/apply'" in _ct)
+    check("và có đường THẬT, không phải đường nội bộ",
+          "class='jlink" in _ct and "href='https://" in _ct)
+    # Trong cửa sổ app không có thanh địa chỉ và không có nút Back: mở đường
+    # ngoài ngay trong đó là mất luôn dashboard.
+    check("đường ngoài mở ra ngoài, không nuốt mất cửa sổ app",
+          "target='_blank'" in _ct and "rel='noopener noreferrer'" in _ct)
+    # MỘT VIỆC ĐĂNG HAI NƠI THÌ GẮN CẢ HAI. Chúng không thay nhau: board công
+    # ty là chỗ nộp thẳng, LinkedIn có số người đã nộp và tên người đăng.
+    from jobbot.dashboard import live as _lv2
+    _hai = _lv2._links([("greenhouse:x", "https://boards.greenhouse.io/x/jobs/1"),
+                        ("linkedin", "https://www.linkedin.com/jobs/view/9/")],
+                       "https://www.linkedin.com/jobs/view/9/")
+    check("hai nguồn -> hai đường", len(_hai) == 2, str(_hai))
+    check("board công ty đứng TRƯỚC LinkedIn — đó là chỗ nộp thẳng",
+          [l["kind"] for l in _hai] == ["api", "chrome"])
+    check("nói rõ tên miền sắp đi tới",
+          _hai[1]["host"] == "www.linkedin.com", _hai[1]["host"])
+    check("trùng url thì không hiện hai lần",
+          len(_lv2._links([("a", "https://x/1"), ("b", "https://x/1")], "https://x/1")) == 1)
+    check("url rỗng thì bỏ, không đẻ ra nút chết",
+          _lv2._links([("a", "")], "") == [])
+
     # MỘT viên pill căn giữa, không phải dải kéo hết bề ngang: trên màn 1900px
     # dải đẩy tên khúc sang trái và nút sang phải cách nhau cả gang tay.
     check("có viên thuốc điều khiển", "class=deckpill" in _srch)

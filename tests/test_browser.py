@@ -138,6 +138,67 @@ try:
 finally:
     li.open_page, li._pause = real_open, real_pause
 
+print("\n[đứt giữa chừng: GIỮ LẠI thứ đã tìm được]")
+# Xảy ra thật lúc 17:18 ngày 11/09: 48/76 lượt tìm đã xong, một
+# ConnectionResetError ở vòng tìm bay thẳng ra ngoài fetch() — `items` không
+# bao giờ trả về, save_batch() không bao giờ chạy, source_run ghi fetched=0.
+# Cả kho tin đổ đi sạch.
+#
+# Máy ngủ dậy là ĐÚNG cái lỗi này (socket CDP chết), mà app chạy 24/7 nên đó
+# là chuyện thường ngày chứ không phải tai nạn hiếm.
+_dem = {"n": 0}
+def _dut_o_lan_3(tab, url, timeout=30):
+    _dem["n"] += 1
+    if _dem["n"] >= 3:
+        raise ConnectionResetError(54, "Connection reset by peer")
+li.open_page = _dut_o_lan_3
+li._pause = lambda: None
+try:
+    _tin, _suc = li.fetch(FakeTab(), ["Quant Analyst", "Data Scientist"],
+                          location=["United Kingdom", ""], pages=1, deep=True)
+    check("đứt rồi vẫn TRẢ VỀ tin đã tìm được", len(_tin) == 3, f"{len(_tin)} tin")
+    check("và đánh dấu lần quét này KHÔNG lành", _suc.ok is False)
+    check("nói rõ là ĐỨT, không phải BỊ CHẶN",
+          "ĐỨT" in _suc.summary and "BỊ CHẶN" not in _suc.summary, _suc.summary)
+    check("ghi cả tên lỗi để lần sau còn dò",
+          "ConnectionResetError" in _suc.summary, _suc.summary)
+    check("đứt thì KHÔNG đọc kỹ tiếp — mở tiếp chỉ nhận thêm lỗi",
+          _dem["n"] <= 4, f"gọi open_page {_dem['n']} lần")
+finally:
+    li.open_page, li._pause = real_open, real_pause
+
+print("\n[vòng quét phải NÓI nó đang làm gì]")
+# Đo trên lượt quét 19:22 ngày 11/09: vòng TÌM chạy 31 phút để lại đúng một
+# dòng, vòng ĐỌC KỸ chạy 27 phút để lại đúng một dòng. Thanh tiến độ nhích mà
+# nhật ký trống thì người dùng không biết máy đang gõ chức danh nào, mở tin
+# nào, hay đã treo từ lâu.
+from jobbot.core.journal import SEARCH as _S, log as _jl
+_nhip_that = li.NHIP_BAO
+li.open_page = lambda tab, url, timeout=30: None
+li._pause = lambda: None
+li.NHIP_BAO = 2                      # 3 tin thử là đủ chạm nhịp báo
+try:
+    _truoc = len(_jl.tail(_S, 999))
+    li.fetch(FakeTab(), ["Quant Analyst", "Data Scientist"],
+             location=["United Kingdom", ""], pages=1, deep=True)
+    _moi = [e.text for e in _jl.tail(_S, 999)[:len(_jl.tail(_S, 999)) - _truoc]]
+
+    _tim = [t for t in _moi if t.startswith("tìm · ")]
+    check("mỗi lượt tìm để lại một dòng (2 chức danh × 2 nơi)",
+          len(_tim) == 4, f"{len(_tim)} dòng: {_tim[:2]}")
+    check("dòng nói rõ đang gõ chức danh nào",
+          any("Quant Analyst" in t for t in _tim))
+    check("và đang tìm ở đâu", any("United Kingdom" in t for t in _tim))
+    check("nơi để trống thì gọi tên là 'toàn cầu', không bỏ lửng dấu chấm",
+          any("toàn cầu" in t for t in _tim) and not any(t.endswith(" · ") for t in _tim))
+    _doc = [t for t in _moi if t.startswith("đọc kỹ ")]
+    check("vòng đọc kỹ có nhịp báo giữa chừng", _doc, f"{_moi[:3]}")
+    check("nhịp báo nói rõ đang đọc tin nào",
+          any("đang đọc:" in t for t in _doc), f"{_doc[:2]}")
+finally:
+    li.NHIP_BAO = _nhip_that
+    li.open_page, li._pause = real_open, real_pause
+
 print("\n[địa điểm đọc từ hồ sơ, không phải chuỗi cứng]")
 check("uk_onsite + uk_remote -> United Kingdom (rộng hơn London)",
       li.places_for(["uk_onsite", "uk_remote"]) == ["United Kingdom"])
@@ -204,7 +265,38 @@ runner_src = Path("src/jobbot/scan_runner.py").read_text()
 app_src = Path("src/jobbot/app.py").read_text()
 check("quét xong thì đóng Chrome", "chrome.shutdown()" in runner_src)
 check("và báo ra nếu đóng không được", "không đóng được Chrome" in runner_src)
-check("thoát app cũng đóng Chrome", "chrome.shutdown()" in app_src)
+# ĐÓNG PHẢI NẰM TRONG `finally`. Trước đây lệnh đóng nằm ở cuối hàm, ngoài mọi
+# try: chỉ cần một lỗi ở giữa — DB khoá lúc đọc already_read, máy ngủ dậy
+# socket chết — là cửa sổ Chrome nằm lại tới khi tắt app. App chạy 24/7 nên
+# "tới khi tắt app" nghĩa là mãi mãi. Kiểm bằng cây cú pháp chứ không bằng
+# tìm chuỗi: chữ "finally" ở đâu đó trong file không chứng minh được gì.
+import ast as _ast
+def _trong_finally(nguon: str, ham: str, goi: str) -> bool:
+    for node in _ast.walk(_ast.parse(nguon)):
+        if isinstance(node, _ast.FunctionDef) and node.name == ham:
+            for con in _ast.walk(node):
+                if isinstance(con, _ast.Try):
+                    if goi in _ast.unparse(_ast.Module(body=con.finalbody, type_ignores=[])):
+                        return True
+    return False
+check("lệnh đóng Chrome nằm trong finally — hỏng giữa chừng vẫn đóng",
+      _trong_finally(runner_src, "_chrome_pass", "chrome.shutdown"))
+# MỌI cổng, không riêng cổng quét. Cửa sổ NỘP (9335) cố ý được để mở trong
+# lúc chạy để Vin bấm cú cuối, nên chỗ thoát app là chỗ DUY NHẤT đóng nó; chỉ
+# gọi shutdown() thì nó nằm lại giữ khoá profile, và lần mở app sau Chrome
+# không mở lại được profile đó.
+check("thoát app đóng MỌI cửa sổ Chrome của app", "chrome.shutdown_all()" in app_src)
+from jobbot.browser import chrome as _ch2
+check("shutdown_all quét đủ ba cổng (quét · in PDF · nộp)",
+      set(_ch2.PROFILE) == {_ch2.PORT, _ch2.PDF_PORT, _ch2.APPLY_PORT})
+# Gọi shutdown_all() thật ở đây là ĐÓNG Chrome thật của máy đang chạy test —
+# bài test không được có tác dụng phụ ra ngoài. Bịt alive() lại rồi mới gọi.
+_alive_that = _ch2.alive
+_ch2.alive = lambda port=_ch2.PORT: False
+try:
+    check("không cổng nào chạy thì trả 0, không báo hỏng", _ch2.shutdown_all() == 0)
+finally:
+    _ch2.alive = _alive_that
 
 print("\n[LinkedIn — ranh giới an toàn]")
 from jobbot.ingest.web import linkedin as li

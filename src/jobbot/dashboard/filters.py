@@ -16,20 +16,44 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
-SHOW = [("matched", "Matched"), ("dropped", "Filtered out"), ("all", "Everything")]
-LOC = [("", "Anywhere"), ("london", "London"), ("uk", "UK"),
-       ("remote", "Remote"), ("other", "Outside UK")]
-DAYS = [("", "Any time"), ("7", "Last 7 days"), ("30", "Last 30 days"), ("90", "Last 90 days")]
-SORT = [("score", "Best match"), ("new", "Newest first"), ("old", "Oldest first"),
-        ("company", "Company"), ("title", "Title")]
-BAND = [("", "Any score"), ("75", "75+"), ("60", "60+"), ("none", "Not scorable")]
+# BA LOẠI NÚT KHÁC NHAU, đừng vẽ giống nhau:
+#
+#   KHO     xem chồng nào          -> chip, loại trừ nhau
+#   THANG   có THỨ TỰ              -> THANH MỨC ĐỘ, chọn sàn
+#   TAG     loại, không thứ tự     -> chip
+#   XẾP     không lọc gì cả        -> chip, tách hẳn ra một hàng
+#
+# Trước đây cả bốn loại đều là pill xám giống hệt nhau, trộn chung ba hàng:
+# 20 nút, không nhìn ra nút nào liên quan nút nào. Nặng nhất là hai cái có
+# thứ tự — "Worth applying / Maybe / Long shot" là một THANG, mà vẽ thành ba
+# nút rời thì phải đọc hết cả ba mới đoán ra thứ tự.
+
+SHOW = [("matched", "Giữ"), ("dropped", "Đã loại"), ("all", "Tất cả")]
+LOC = [("", "Mọi nơi"), ("london", "London"), ("uk", "UK"),
+       ("remote", "Remote"), ("other", "Ngoài UK")]
+DAYS = [("", "Mọi lúc"), ("7", "7 ngày"), ("30", "30 ngày"), ("90", "90 ngày")]
+SORT = [("score", "Khớp nhất"), ("new", "Mới nhất"), ("old", "Cũ nhất"),
+        ("company", "Công ty"), ("title", "Chức danh")]
+
+# --- THANG: giá trị là SÀN, không phải một mức riêng lẻ -------------------
+# Chọn "Có thể" nghĩa là có thể TRỞ LÊN — tức là kèm cả "Đáng nộp".
+#
+# Trước đây là bằng-đúng: chọn "Maybe" thì giấu mất "Worth applying", đúng
+# những tin tốt nhất. Không ai muốn thế. Việc thật của người dùng là gạt bớt
+# phần dưới, nên sàn mới là phép đúng — và sàn thì vẽ được thành thanh.
+CHANCE = [("", "Tất cả"), ("unlikely", "Khó"), ("possible", "Có thể"),
+          ("likely", "Đáng nộp")]
+CHANCE_RANK = {"unlikely": 1, "possible": 2, "likely": 3}
+BAND = [("", "Tất cả"), ("60", "60+"), ("75", "75+")]
+
+# --- TAG ------------------------------------------------------------------
 # Dùng "all", KHÔNG dùng chuỗi rỗng: chuỗi rỗng bị coi là "chưa chọn" nên rơi
 # về mặc định, và người dùng không có cách nào bảo "cho tôi xem cả hai".
-VIA = [("direct", "Direct employers"), ("all", "Include agencies"),
-       ("agency", "Agencies only")]
-# "Khớp" và "có cửa" là hai câu hỏi khác nhau — lọc riêng
-CHANCE = [("", "Any"), ("likely", "Worth applying"), ("possible", "Maybe"),
-          ("unlikely", "Long shot"), ("unknown", "Can't tell")]
+VIA = [("direct", "Chủ trực tiếp"), ("all", "Cả môi giới"), ("agency", "Chỉ môi giới")]
+# Tìm bằng CÁCH NÀO. Hai cách tìm mù ở hai chỗ khác nhau, và chúng cho ra hai
+# loại tin khác hẳn: board công ty có mô tả đầy đủ, LinkedIn thì phải mở từng
+# tin mới có. Lọc được theo cách tìm là soi được ngay cách nào đang đẻ ra rác.
+FOUND = [("", "Mọi nguồn"), ("api", "api"), ("chrome", "chrome")]
 
 UK_LIKE = ("london", "united kingdom", "england", "scotland", "wales", "manchester",
            "edinburgh", "cambridge", "oxford", "bristol", "leeds", "birmingham")
@@ -50,6 +74,8 @@ class JobFilter:
     days: str = ""
     band: str = ""
     via: str = "direct"
+    found: str = ""            # tìm bằng cách nào: api / chrome
+    raw: str = ""              # "1" = CHỈ xem tin máy chưa đọc được
     chance: str = ""
     sort: str = "score"
     page: int = 1
@@ -78,6 +104,8 @@ class JobFilter:
             days=one("days"),
             band=one("band"),
             via=one("via", "direct"),
+            found=one("found"),
+            raw="1" if one("raw") else "",
             chance=one("chance"),
             sort=one("sort", "score"),
         )
@@ -92,6 +120,7 @@ class JobFilter:
         found.days = valid(found.days, DAYS)
         found.band = valid(found.band, BAND)
         found.via = found.via if found.via in {v for v, _ in VIA} else "direct"
+        found.found = valid(found.found, FOUND)
         found.chance = valid(found.chance, CHANCE)
         found.sort = valid(found.sort, SORT) or "score"
         return found
@@ -137,15 +166,33 @@ class JobFilter:
             clauses.append("via_agency = 1")
         # "all" -> không thêm điều kiện nào
 
-        if self.chance:
-            clauses.append("realism = ?")
-            args.append(self.chance)
+        # THANG = SÀN. "Có thể" nghĩa là có thể TRỞ LÊN, kèm cả "Đáng nộp".
+        # Tin máy chưa đọc được (realism rỗng hoặc 'unknown') xếp hạng 0, nên
+        # chọn bất cứ mức nào khác "Tất cả" là nó tự rụng — không cần thêm
+        # điều kiện nào, và đó cũng là điều người dùng chờ đợi.
+        if self.chance in CHANCE_RANK:
+            clauses.append(
+                "CASE realism WHEN 'likely' THEN 3 WHEN 'possible' THEN 2"
+                " WHEN 'unlikely' THEN 1 ELSE 0 END >= ?")
+            args.append(CHANCE_RANK[self.chance])
 
-        if self.band == "none":
-            clauses.append("score IS NULL")
-        elif self.band:
+        if self.band:
             clauses.append("score >= ?")
             args.append(int(self.band))
+
+        if self.found == "chrome":
+            clauses.append("source = 'linkedin'")
+        elif self.found == "api":
+            clauses.append("source <> 'linkedin'")
+
+        # MỘT nút thay cho hai. "Can't tell" (chưa đoán được cơ hội) và
+        # "Not scorable" (chưa chấm được điểm) nằm ở hai hàng khác nhau, mà
+        # đo trên kho thật thì chúng gần như cùng một chồng tin: 185 tin
+        # thiếu cả hai, 0 tin chỉ thiếu cơ hội. Cùng một nguyên nhân — vòng
+        # đọc kỹ chưa mở tới tin đó nên chưa có mô tả để mà đọc.
+        if self.raw:
+            clauses.append("(score IS NULL OR COALESCE(realism,'')"
+                           " IN ('', 'unknown'))")
 
         if self.days:
             clauses.append("posted_ts >= ?")
@@ -164,11 +211,18 @@ class JobFilter:
                 "title": "LOWER(title) ASC"}[self.sort]
 
     # --- dựng URL ---------------------------------------------------------
-    def url(self, **changes) -> str:
-        from urllib.parse import urlencode
+    def pairs(self, **changes) -> list[tuple[str, str]]:
+        """Trạng thái lọc dưới dạng cặp key/value. MỘT chỗ dựng, hai nơi dùng.
+
+        `url()` nối chúng thành query string cho các chip; ô TÌM đổ chúng ra
+        thành <input hidden> để một form GET không làm mất bộ lọc đang bật.
+        Hai chỗ tự liệt kê là hai danh sách, và thêm một bộ lọc mới thì có
+        ngày quên sửa một bên — lúc đó gõ tìm là mọi chip đang chọn bay sạch.
+        """
         state: dict = {"q": self.q, "show": self.show, "source": list(self.source),
                        "company": list(self.company), "loc": self.loc,
                        "days": self.days, "band": self.band, "via": self.via,
+                       "found": self.found, "raw": self.raw,
                        "chance": self.chance, "sort": self.sort, "page": self.page}
         # đổi bộ lọc thì về trang 1 — trừ khi chính nó đang đổi trang
         if "page" not in changes:
@@ -178,14 +232,19 @@ class JobFilter:
             state["page"] = ""
         default = {"show": "matched", "sort": "score", "via": "direct"}
 
-        pairs: list[tuple[str, str]] = []
+        out: list[tuple[str, str]] = []
         for key, value in state.items():
             if isinstance(value, list):
-                pairs += [(key, v) for v in value]
+                out += [(key, v) for v in value]
             elif value and default.get(key) != value:
-                pairs.append((key, str(value)))
+                out.append((key, str(value)))
+        return out
+
+    def url(self, **changes) -> str:
+        from urllib.parse import urlencode
+        got = self.pairs(**changes)
         # Danh sách việc nằm trong tab Search — tab Jobs đã bỏ.
-        return "/search" + (f"?{urlencode(pairs)}" if pairs else "")
+        return "/search" + (f"?{urlencode(got)}" if got else "")
 
     def toggle(self, key: str, value: str) -> str:
         """URL sau khi bật/tắt một ô tích."""
@@ -203,7 +262,6 @@ class JobFilter:
     def active(self) -> list[tuple[str, str]]:
         """Các bộ lọc đang bật, kèm URL để tắt từng cái."""
         out: list[tuple[str, str]] = []
-        label = dict
         if self.q:
             out.append((f'"{self.q}"', self.url(q="")))
         if self.show != "matched":
@@ -222,4 +280,8 @@ class JobFilter:
             out.append((dict(CHANCE)[self.chance], self.url(chance="")))
         if self.via != "direct":
             out.append((dict(VIA)[self.via], self.url(via="direct")))
+        if self.found:
+            out.append((dict(FOUND)[self.found], self.url(found="")))
+        if self.raw:
+            out.append(("chưa đọc được", self.url(raw="")))
         return out

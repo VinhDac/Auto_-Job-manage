@@ -121,5 +121,54 @@ check("và module đó có trong bảng", "jobbot.track.mail" in mods)
 check("account() thật sự nhận 0 tham số",
       mods.get("jobbot.track.mail", {}).get("account", (None,))[1] == 0)
 
+# --------------------------------------------------------------------------
+# GỌI MỘT HÀM KHÔNG TỒN TẠI. Lớp lỗi khác hẳn ở trên: trên kia là gọi SAI số
+# tham số, đây là gọi vào HƯ KHÔNG.
+#
+# LỖI THẬT: commit f669e66 xoá `def _await(...)` trong apply/run.py mà để lại
+# HAI chỗ gọi. Mọi lần nộp đơn đi tới nhánh "chưa thấy ô nào" đều chết bằng
+# NameError. 1.451 bài test vẫn xanh, vì nhánh đó chỉ chạy khi có Chrome thật
+# và một trang tuyển dụng thật — chỉ nhật ký lúc chạy mới lộ ra.
+#
+# Chỉ soi tên bắt đầu bằng "_": đó là hàm riêng của module, KHÔNG thể đến từ
+# `import *` hay từ builtins, nên không định nghĩa trong chính file đó thì
+# chắc chắn là gọi vào hư không — không có báo động giả.
+print("\n[gọi hàm riêng của module thì hàm đó phải TỒN TẠI]")
+treo = []
+for f in sorted(SRC.rglob("*.py")):
+    tree = ast.parse(f.read_text(), str(f))
+    co = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            co.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            co.add(node.id)
+        elif isinstance(node, ast.arg):
+            co.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                co.add((a.asname or a.name).split(".")[0])
+        elif isinstance(node, ast.Global):
+            co.update(node.names)
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id.startswith("_") and node.func.id not in co):
+            treo.append(f"{f.name}:{node.lineno} {node.func.id}()")
+
+check("không chỗ nào gọi vào hư không", not treo, " · ".join(treo[:4]))
+for line in treo:
+    print("     ", line)
+
+# Bộ kiểm phải TỰ CHỨNG MINH nó bắt được cái nó nói là bắt được.
+_gia = ast.parse("def _co(): pass\n_co()\n_khong_he_co()\n")
+_dinh = set()
+for _n in ast.walk(_gia):
+    if isinstance(_n, ast.FunctionDef):
+        _dinh.add(_n.name)
+_bat = [n.func.id for n in ast.walk(_gia)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and n.func.id.startswith("_") and n.func.id not in _dinh]
+check("và bộ kiểm tự chứng minh nó bắt được", _bat == ["_khong_he_co"], str(_bat))
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)
