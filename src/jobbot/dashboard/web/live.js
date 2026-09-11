@@ -326,6 +326,16 @@
           .then((r) => r.json())
           .then((s) => {
             if (s.reload) { location.reload(); return; }
+            // BỊ TỪ CHỐI thì lý do ra THANH TRẠNG THÁI, không nhét vào nhãn
+            // nút: câu lý do dài cả trăm ký tự, gán vào nút là vỡ viên thuốc.
+            // Nút trả về chữ cũ và bấm lại được — người dùng vừa đọc được vì
+            // sao, vừa còn nút để bấm sau khi sửa.
+            if (s.ok === false) {
+              setLastMessage(s.note || 'chưa được');
+              post.disabled = false;
+              post.textContent = was;
+              return;
+            }
             post.textContent = s.note || was;
           })
           .catch(() => { post.disabled = false; post.textContent = was; });

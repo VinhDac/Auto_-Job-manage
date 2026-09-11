@@ -144,6 +144,35 @@ with tempfile.TemporaryDirectory() as tmp:
         return post(path, body.encode())
     check("POST /profile/muc_tieu",
           post("/profile/muc_tieu", b"job_titles=Analyst&markets=uk_onsite") == 200)
+
+    print("\n[CHU TRÌNH dựng hồ sơ — Home phải dẫn đường, không chỉ báo cáo]")
+    # Đây là cửa vào app. Người dùng mới đáp xuống đây trước tiên; trước đây
+    # nó chỉ nói "Trang này đang trống".
+    _, _hm = get("/")
+    check("Home nói hồ sơ đang thiếu gì", "Chưa chạy được gì" in _hm)
+    check("và có nút đi thẳng tới chỗ điền", "href='/profile/muc_tieu'" in _hm)
+    check("có thanh tiến độ", "class=obar" in _hm)
+    check("liệt kê đủ 5 phần", _hm.count("class='blk ostep") == 5)
+    check("phần bắt buộc được đánh dấu", "BẮT BUỘC" in _hm)
+    # Home KHÔNG được tự nghĩ luật: nó phải đọc đúng cổng mà Search đang đọc.
+    from jobbot.dashboard import live as _live
+    from jobbot.core import db as _db
+    _c = _db.connect()
+    _ob = _live.onboarding(_c)
+    from jobbot.profile import store as _st
+    check("Home đọc CÙNG cổng với Search",
+          [q["id"] for q in _ob["gate_missing"]]
+          == _st.missing_for_ingest(_st.load(_c)))
+    # Điền đủ cổng -> Home phải ĐỔI GIỌNG, không còn chặn.
+    post("/profile/muc_tieu",
+         b"job_titles=Quantitative+Analyst&markets=uk_onsite&work_auth=visa_no_sponsor")
+    _, _hm2 = get("/")
+    _ob2 = _live.onboarding(_db.connect())
+    check("điền đủ 3 câu thì cổng mở", _ob2["gate_open"])
+    check("và Home đổi sang mời chạy", "Hồ sơ đủ để chạy" in _hm2)
+    check("danh sách thành menu thêm cho mạnh", "Thêm cho mạnh" in _hm2)
+    check("phần vừa xong được đánh dấu", "ostep done" in _hm2)
+    _c.close()
     check("POST /profile/import rỗng -> không sập",
           post("/profile/import", b"") in (200, 303))
 
@@ -697,10 +726,14 @@ with tempfile.TemporaryDirectory() as tmp:
           "width:340px" in _th and "min(" not in _th and "clamp(" not in _th)
     check("màn hẹp có luật riêng cho cột nhãn", ".sum th{width:40%}" in _bare)
 
-    print("\n[Home đang để trống, chờ thiết kế lại]")
+    print("\n[Home KHÔNG còn là trang trống]")
+    # Luật cũ ở đây là "Home phải nói mình đang trống". Home giờ là cửa vào và
+    # là chu trình dựng hồ sơ, nên luật đảo lại: nó KHÔNG được trống nữa.
     _, _blank = get("/")
     check("Home vẫn mở được", "Home" in _blank)
-    check("và nói rõ là đang trống", "đang trống" in _blank)
+    check("và không còn là trang trống", "đang trống" not in _blank)
+    check("Home luôn nêu bước tiếp theo",
+          "Bắt đầu" in _blank or "Tiếp tục" in _blank or "Hồ sơ đủ để chạy" in _blank)
     # Gỡ nội dung mà để lại đống code nuôi nó thì mới là bẩn.
     for _gone in ("class=funnel", "class=needs", "class=stats", "class=plot"):
         check(f"không còn {_gone}", _gone not in _blank)

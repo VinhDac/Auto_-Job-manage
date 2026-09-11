@@ -71,5 +71,33 @@ check("câu chọn-một cũng nhận ô tự do", b["work_auth"] == "Graduate v
 c = _form_to_answers({"job_titles": ["  Backend Engineer\nSWE  "]}, "muc_tieu")
 check("text được cắt khoảng trắng", c["job_titles"] == "Backend Engineer\nSWE")
 
+
+
+print("\n[cổng chặn phải NÓI RA, không lặng lẽ bỏ cuộc]")
+# Người dùng mới bấm Chạy khi hồ sơ trống: trước đây run_scan `return` lặng lẽ,
+# API vẫn đáp "đang chạy…", nhật ký trống, không tin nào về — ngồi chờ vô tận.
+import os as _os
+_tmp = tempfile.mkdtemp()
+_os.environ["JOBBOT_DB"] = str(Path(_tmp) / "trong.db")
+try:
+    from jobbot.core import journal as _journal
+    from jobbot import scan_runner as _sr
+    _conn = db.connect()
+    db.migrate(_conn)
+    _journal.log.open()
+    _noi = []
+    _kq = _sr.run_scan(log=_noi.append, chrome_sources=False, deep=False)
+    check("hồ sơ trống thì từ chối quét", _kq["ok"] is False)
+    check("và NÓI RA lý do", bool(_noi) and "hồ sơ chưa đủ" in _noi[0])
+    check("lý do nêu đúng tên câu còn thiếu",
+          bool(_noi) and all(all_questions()[q].text[:20] in _noi[0]
+                             for q in _kq["missing"]))
+    _dong = _conn.execute(
+        "SELECT COUNT(*) FROM audit WHERE level='warn' AND detail LIKE '%chưa quét được%'"
+    ).fetchone()[0]
+    check("và ghi vào nhật ký", _dong >= 1)
+finally:
+    _os.environ.pop("JOBBOT_DB", None)
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

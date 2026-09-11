@@ -398,6 +398,53 @@ def cv_versions(conn: sqlite3.Connection) -> dict:
     return value
 
 
+def onboarding(conn: sqlite3.Connection) -> dict:
+    """App đang ở đâu trên đường dựng hồ sơ — MỘT chỗ tính, mọi nơi đọc.
+
+    Trước đây mỗi tab tự đoán: Profile biết "còn thiếu 3 câu", Search không
+    biết gì nên vẫn mời bấm Chạy rồi im lặng bỏ cuộc, Home thì trống trơn.
+    Cùng một sự thật mà ba nơi trả lời khác nhau thì sớm muộn cũng lệch.
+
+    Không đẻ luật mới: cổng vẫn là `store.missing_for_ingest`, "phần nào xong"
+    vẫn là `store.is_section_done` — hàm này chỉ GOM lại thành một câu trả lời
+    cho màn hình.
+    """
+    from ..profile import store
+    from ..profile.schema import SECTIONS, all_questions
+
+    answers = store.load(conn)
+    hoi = all_questions()
+    thieu = store.missing_for_ingest(answers)
+    ke_tiep = store.first_unfinished_section(answers)
+
+    phan = []
+    da_tra_loi = tong = 0
+    for s in SECTIONS:
+        co = [q for q in s.questions if store._has_value(answers, q.id)]
+        da_tra_loi += len(co)
+        tong += len(s.questions)
+        phan.append({
+            "id": s.id, "title": s.title, "why": s.why,
+            "href": f"/profile/{s.id}",
+            "answered": len(co), "total": len(s.questions),
+            "done": store.is_section_done(answers, s),
+            "optional": s.optional,
+            # Phần nào chứa câu của cổng thì phần đó là BẮT BUỘC — suy ra từ
+            # cổng, không gõ tay, để đổi cổng là nhãn tự đổi theo.
+            "required": any(q.id in store.INGEST_GATE for q in s.questions),
+        })
+
+    return {
+        "answered": da_tra_loi, "total": tong,
+        "versions": len(store.history(conn)),
+        "gate_open": not thieu,
+        "gate_missing": [{"id": q, "text": hoi[q].text} for q in thieu if q in hoi],
+        "next": ({"id": ke_tiep.id, "title": ke_tiep.title,
+                  "href": f"/profile/{ke_tiep.id}"} if ke_tiep else None),
+        "sections": phan,
+    }
+
+
 def search_stage(conn: sqlite3.Connection) -> dict:
     """Số liệu + trạng thái của khúc SEARCH.
 

@@ -171,6 +171,28 @@ a:hover{text-decoration:underline}
 .empty-box{background:var(--panel);border:1px dashed var(--line-2);border-radius:11px;
   padding:30px;text-align:center;color:var(--mute);font-size:13px}
 
+/* ---------------- Home: chu trình dựng hồ sơ ---------------- */
+/* Thanh tiến độ: một con số người ta hiểu ngay, không cần đọc chú thích. */
+.obar{height:5px;border-radius:999px;background:var(--panel-2);overflow:hidden;
+  margin:0 0 6px}
+.obar span{display:block;height:100%;background:var(--acc);border-radius:999px;
+  transition:width .3s}
+.obarnum{font-size:12px;color:var(--mute);margin:0 0 14px}
+.obarnum b{color:var(--ink);font-weight:600}
+.mbtn.big{display:inline-block;padding:9px 20px;font-size:13.5px;margin:0 0 4px}
+.ohead{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--mute);margin:22px 0 4px}
+.ostep{padding:13px 3px}
+.ostep .blkhead b{font-size:13.5px}
+/* Phần đã xong lùi lại — việc còn lại mới là thứ cần nhìn. */
+.ostep.done .blkhead b{color:var(--acc)}
+.ostep.dim{opacity:.5}
+.ostep.dim:hover{opacity:1}
+.ocount{font-size:11.5px;color:var(--mute);font-variant-numeric:tabular-nums;
+  margin-left:auto;padding-left:10px;flex:none}
+.osub{display:block;font-size:12.5px;color:var(--mute);margin-top:3px}
+.blkkind.req{color:var(--warn);border-color:rgba(216,161,94,.4)}
+
 /* ---------------- huy hiệu, điểm ---------------- */
 .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;
   border:1px solid var(--line-2);color:var(--mute);white-space:nowrap}

@@ -16,6 +16,7 @@ from .core.paths import PROJECT_ROOT
 STAGE = "search"      # tên khúc, dùng chung với cờ dừng và nút trên thanh
 from .ingest import ashby, greenhouse, lever
 from .profile import store
+from .profile.schema import all_questions
 
 Log = Callable[[str], None]
 
@@ -161,8 +162,16 @@ def run_scan(log: Log | None = None, chrome_sources: bool = True,
     try:
         answers = store.load(conn)
         if not store.can_ingest(answers):
-            return {"ok": False, "summary": "hồ sơ chưa đủ",
-                    "missing": store.missing_for_ingest(answers)}
+            # PHẢI nói ra. Trước đây chỗ này `return` lặng lẽ: bấm Chạy thì
+            # API vẫn đáp "đang chạy…", nhật ký trống, không tin nào về, người
+            # dùng ngồi chờ vô tận. Một lần từ chối mà không ai biết lý do thì
+            # tệ hơn là không có nút.
+            thieu = store.missing_for_ingest(answers)
+            hoi = all_questions()
+            ten = " · ".join(hoi[q].text for q in thieu if q in hoi)
+            jlog.warn(SEARCH, f"chưa quét được — hồ sơ còn thiếu: {ten}")
+            say(f"hồ sơ chưa đủ: {ten}")
+            return {"ok": False, "summary": "hồ sơ chưa đủ", "missing": thieu}
 
         # Mốc thời gian, KHÔNG phải con số tổng: "việc mới" là việc lần quét
         # NÀY mang về, không phải hiệu của hai lần đếm. Lấy hiệu thì một lần

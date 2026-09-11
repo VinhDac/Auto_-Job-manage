@@ -17,7 +17,8 @@ from ..core import db
 from ..core import journal, scheduler as sched
 from ..core.paths import web_dir
 from ..profile import store
-from ..profile.schema import LONGTEXT, MULTI, SECTIONS, TEXT, section_by_id
+from ..profile.schema import (LONGTEXT, MULTI, SECTIONS, TEXT, all_questions,
+                             section_by_id)
 from . import layout, live
 from . import upload
 from .views import cv as cvview
@@ -281,15 +282,31 @@ class Handler(BaseHTTPRequestHandler):
 
         threading.Thread(target=_run, daemon=True, name="send").start()
 
-    def _start_stage(self, stage: str) -> bool:
+    def _start_stage(self, stage: str) -> str | None:
         """Khởi động một khúc. Thêm chức năng mới = thêm MỘT nhánh ở đây,
-        không phải thêm một route."""
+        không phải thêm một route.
+
+        Trả None nếu đã chạy, hoặc CÂU LÝ DO nếu không chạy được. Không đáp
+        "đang chạy…" cho một việc vừa bị cổng chặn — đó là nói dối người dùng.
+        """
         if stage == "search":
+            conn = db.connect()
+            try:
+                answers = store.load(conn)
+                thieu = store.missing_for_ingest(answers)
+            finally:
+                conn.close()
+            if thieu:
+                # Cùng một cổng mà tab Profile đang dùng — hỏi một chỗ, không
+                # chép luật sang đây.
+                hoi = all_questions()
+                ten = " · ".join(hoi[q].text for q in thieu if q in hoi)
+                return f"hồ sơ còn thiếu: {ten}"
             runner = sched.current()
             threading.Thread(target=runner.scan_once, daemon=True,
                              name="scan-manual").start()
-            return True
-        return False
+            return None
+        return f"{STAGES.get(stage, stage)} chưa nối nút Chạy"
 
     def _resume_build(self, skill: str) -> None:
         """Chạy bảy chặng cho một kỹ năng, ở NỀN.
@@ -339,7 +356,7 @@ class Handler(BaseHTTPRequestHandler):
             conn = db.connect()
             try:
                 if path == "/":
-                    return self._html(home.render())
+                    return self._html(home.render(live.onboarding(conn)))
                 parts = _segments(path)
                 found = live.job_detail(conn, parts[1])
                 if not found:
@@ -615,10 +632,9 @@ class Handler(BaseHTTPRequestHandler):
                                  f"điểm ngắt gần nhất")
                 return self._json({"ok": True, "note": "đang dừng…"})
             halt.clear(stage)
-            if not self._start_stage(stage):
-                return self._json({"ok": False,
-                                   "note": f"{STAGES[stage]} chưa nối nút Chạy"},
-                                  status=400)
+            ly_do = self._start_stage(stage)
+            if ly_do:
+                return self._json({"ok": False, "note": ly_do}, status=400)
             return self._json({"ok": True, "note": "đang chạy…"})
 
         if path == "/api/apply":

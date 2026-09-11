@@ -70,16 +70,28 @@ files = tracked()
 check("đọc được danh sách tệp git theo dõi", bool(files), f"{len(files)} tệp")
 
 marks = secrets()
-check("lấy được dữ liệu để dò", bool(marks), str(list(marks)))
 
-for what, needle in marks.items():
-    hits = []
+# Hồ sơ TRỐNG là trạng thái hợp lệ (người dùng mới, hoặc vừa xoá làm lại) —
+# lúc đó không có gì để rò, nên không được coi là hỏng. Nhưng cũng KHÔNG được
+# pass rỗng: máy dò phải tự chứng minh nó chạy được bằng một chuỗi mồi chắc
+# chắn có thật trong tệp git theo dõi. Thiếu dòng này thì một hôm hàm đọc tệp
+# hỏng, bài test quét 0 tệp và vẫn xanh.
+def _dinh(needle: str) -> list[str]:
+    got = []
     for path in files:
         try:
             if needle in path.read_text(encoding="utf-8", errors="ignore"):
-                hits.append(str(path.relative_to(ROOT)))
+                got.append(str(path.relative_to(ROOT)))
         except OSError:
             pass
+    return got
+
+check("máy dò chạy được (tìm ra chuỗi mồi)", bool(_dinh("jobbot")))
+check("đếm được dữ liệu cần dò", True, f"{len(marks)} mục" +
+      (" — hồ sơ đang trống, chưa có gì để rò" if not marks else ""))
+
+for what, needle in marks.items():
+    hits = _dinh(needle)
     # KHÔNG in giá trị — chỉ in tên tệp dính.
     check(f"{what} không nằm trong tệp nào", not hits, " · ".join(hits))
 
