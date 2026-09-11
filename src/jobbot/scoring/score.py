@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from ..ingest.base import norm
 from . import extract
-from .vocab import (ALIASES, DEGREE_WORDS, QUANT_FIELD, SKILLS, YEARS,
+from .vocab import (DEGREE_WORDS, QUANT_FIELD, SKILLS, YEARS,
                     alias_hits)
 
 YEARS_BAND = {"0-1": 0.5, "1-3": 2, "3-5": 4, "5-8": 6.5, "8+": 10}

@@ -53,9 +53,22 @@ def human_window() -> tuple[int, int]:
 
 
 def in_human_window(now: datetime | None = None) -> bool:
+    """Giờ này có nằm trong khung được phép quét không.
+
+    Khung QUA ĐÊM là khung hợp lệ: 22:00–08:00 nghĩa là quét ban đêm, đúng lúc
+    máy rảnh. Công thức cũ `low <= hour < high` cho ra RỖNG với khung đó — vòng
+    quét im lặng không chạy giờ nào, và không có cảnh báo nào cả.
+
+    low == high thì coi là CẢ NGÀY: người đặt hai đầu bằng nhau có ý "lúc nào
+    cũng được", không phải "không bao giờ".
+    """
     hour = (now or datetime.now()).hour
     low, high = human_window()
-    return low <= hour < high
+    if low == high:
+        return True
+    if low < high:
+        return low <= hour < high
+    return hour >= low or hour < high
 
 
 class Scheduler:
@@ -66,7 +79,9 @@ class Scheduler:
         self.stop_flag = threading.Event()
         self.last_scan: float = 0.0
         self.last_result: str = "chưa chạy lần nào"
-        self.running = False
+        # `running` KHÔNG lưu riêng — nó là khoá đang bị giữ hay không. Giữ
+        # cả cờ lẫn khoá là hai nguồn sự thật, và chúng sẽ lệch nhau.
+        self._gate = threading.Lock()
         # Mặc định DỪNG. Mở app lên mà nó tự đi quét trong lúc người dùng còn
         # đang cấu hình là sai — cấu hình chưa xong thì quét về cũng là rác.
         # Đọc lại lựa chọn lần trước, chưa có thì tắt.
@@ -153,14 +168,20 @@ class Scheduler:
                 self.scan_once()
             self.stop_flag.wait(30)
 
+    @property
+    def running(self) -> bool:
+        """Đang quét dở? Suy từ khoá, không lưu riêng."""
+        return self._gate.locked()
+
     def scan_once(self) -> str:
         """Một lần quét. Nuốt mọi lỗi — một nguồn chết không được giết app."""
-        if self.running:
-            # Bấm RUN trong lúc đang chạy thì KHÔNG chạy chồng lên nhau: hai
-            # vòng quét cùng ghi một DB, và cùng mở Chrome, là hỏng thật.
+        # Khoá, KHÔNG phải kiểm-rồi-gán. `if self.running: ... self.running =
+        # True` là hai bước: bấm RUN đúng lúc lịch trình cũng kích hoạt thì cả
+        # hai luồng đều thấy False và cùng đặt True — hai vòng quét cùng ghi
+        # một DB và cùng mở Chrome.
+        if not self._gate.acquire(blocking=False):
             jlog.warn(SYSTEM, "đang quét dở — bỏ qua yêu cầu chạy chồng")
             return self.last_result
-        self.running = True
         self.last_scan = time.time()
         try:
             from ..scan_runner import run_scan          # nạp muộn, tránh vòng import
@@ -177,7 +198,7 @@ class Scheduler:
             except Exception:                           # noqa: BLE001
                 pass
         finally:
-            self.running = False
+            self._gate.release()
             jlog.done(SEARCH)
             jlog.done(SYSTEM)
         return self.last_result

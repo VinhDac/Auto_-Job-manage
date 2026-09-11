@@ -23,7 +23,7 @@ from __future__ import annotations
 from html import escape as esc
 
 from ..filters import BAND, CHANCE, SHOW, SORT, VIA
-from ..layout import score_bar
+from ..layout import deck, score_bar
 from . import runtime
 
 # Badge nguồn: hai cách tìm mù ở hai chỗ khác nhau, nên nhìn dòng nào cũng
@@ -207,25 +207,39 @@ def _sieve(sieve: dict) -> str:
         "</form>")
 
 
+def adjust(sieve: dict) -> str:
+    """Mảnh cho tấm phủ ⚟ — LƯỚI SÀNG.
+
+    Vì sao lưới sàng vào đây mà BỘ LỌC thì không: lọc (hiện/cơ hội/dải/sắp
+    xếp) bấm vài giây một lần khi lướt danh sách, giấu vào menu là lướt chậm
+    hẳn. Lưới sàng đổi vài tháng một lần, và mỗi lần đổi là phán lại toàn bộ
+    tin trong kho. Khác nhau: LỌC thứ đang nhìn ≠ ĐỔI thứ máy đi thu về.
+    """
+    return f"<div class=sheethead>Điều chỉnh · Search</div>{_sieve(sieve)}"
+
+
 # ---------------------------------------------------------------- trang
 
-def render(*, jobs: list[dict], flt, counts: dict, sieve: dict) -> str:
+def render(*, jobs: list[dict], flt, counts: dict, sieve: dict,
+           stage: dict | None = None) -> str:
+    info = stage or {}
     return runtime.render(
-        title="Search", active="/search", stream="search", journal="corner",
-        note=f"Bước 1 — {counts.get('matched', 0):,} việc đang giữ · "
-             f"hiện {len(jobs)} · hai cách tìm bù chỗ mù cho nhau.",
-        # Cột trái RỘNG hơn chia đều: ô lưới có ô thẻ, hai nhóm ô tích và một
-        # nút — chật quá thì thẻ xuống dòng lung tung và ô tích vỡ hàng.
-        # Cột phải là kết quả, nên nó lấy phần lớn.
-        # 1fr : 1.75fr — cột lưới rộng hơn hẳn kiểu chia đều ba cột (366px),
-        # vì ô thẻ và hai nhóm ô tích cần chỗ để không vỡ hàng.
-        cols=2, columns="minmax(360px, 1fr) 1.75fr",
-        rows_tpl="1fr 150px",
-        journal_at=(1, 2),          # góc dưới trái, dưới ô lưới lọc
+        title="Search", active="/search", stream="search",
+        # Thanh của KHÚC này: số liệu + nút chạy/dừng của chính nó. Hai nút
+        # "Chạy ngay"/"Bật tự quét" trước đây nằm trên thanh toàn app nhưng
+        # chỉ điều khiển đúng khúc này.
+        bar=deck(
+            "search", "Search",
+            info.get("state", "chưa quét lần nào"),
+            [(f"{counts.get('matched', 0):,}", "giữ"),
+             (f"{info.get('worth', 0):,}", "đáng nộp"),
+             (f"{info.get('fresh', 0):,}", "mới"),
+             (len(jobs), "đang hiện")],
+            adjust="/adjust/search"),
+        # Lưới sàng đã chuyển vào ⚟ nên cột trái hết việc. Danh sách — thứ
+        # Vin thật sự đọc — lấy cả bề ngang. Nhật ký về dải dẹt dưới đáy.
+        cols=1, journal="bottom",
         panels=[
-            runtime.panel("Lưới lọc", _sieve(sieve), at=(1, 1)),
-            # Danh sách kéo suốt hai hàng — chạm đáy màn hình.
-            runtime.panel("Việc tìm được", _list(jobs, flt, counts),
-                          rows=2, at=(2, 1)),
+            runtime.panel("Việc tìm được", _list(jobs, flt, counts), span=1),
         ],
     )

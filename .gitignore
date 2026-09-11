@@ -32,3 +32,4 @@ venv/
 
 # Gói chuyển máy — sinh lại được
 jobbot-handover.zip
+config/profile.seed.json

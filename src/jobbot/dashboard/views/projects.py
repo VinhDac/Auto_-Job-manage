@@ -94,7 +94,7 @@ def _project_row(row: dict) -> str:
         act = (f"<button class='mbtn tiny apply'"
                f" data-settings='/cv/draft?id={row['id']}'>Vào CV</button>")
 
-    return (f"<div class='prow {esc(row['state'])}'>"
+    return (f"<div class='plrow {esc(row['state'])}'>"
             f"<div class=pstate>{esc(STATE_LABEL.get(row['state'], '?'))}</div>"
             f"<div class=pmain><div class=pq>{esc(row['question'])}</div>"
             f"<div class=ptags>{skills}{inds}</div></div>"
@@ -169,4 +169,4 @@ def render_page(job: dict, doc, gaps: list) -> str:
         + f"<h4 class=cvsec>Code</h4><ul class=cvlist>{links}</ul></div>"
         + "<h4 class=cvsec>What this posting asks for</h4>"
         + f"<div class=chiprow>{chips}</div>" + warn,
-        active="/projects", status="Running")
+        active="/projects")

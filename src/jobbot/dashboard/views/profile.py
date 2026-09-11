@@ -99,7 +99,7 @@ def render_section(section: Section, answers: Answers, done_ids: set[str],
         + f"<form method=post>{questions}"
         + f"<div class=actions><button class=primary type=submit>{esc(next_label)}</button>"
         + "<a class=skip href='/profile'>Review profile</a></div></form>",
-        active="/profile", status="Running",
+        active="/profile",
     )
 
 
@@ -150,5 +150,5 @@ def render_summary(answers: Answers, versions: int, missing_gate: list[str]) -> 
         f"<p class=lead>{versions} version(s) saved. Every edit writes a new version rather than "
         "overwriting — this profile is living data, not a form you fill in once.</p>"
         f"{gate}{''.join(blocks)}",
-        active="/profile", status="Running",
+        active="/profile",
     )

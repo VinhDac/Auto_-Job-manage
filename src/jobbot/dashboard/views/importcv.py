@@ -31,7 +31,7 @@ def render_form(error: str = "") -> str:
                "contact, education, certifications and skills, then shows each one for "
                "you to approve. Fields you have already filled in are never overwritten."
                "</div>", "notice"),
-        active="/profile", status="Running")
+        active="/profile")
 
 
 def render_review(proposals: list[Proposal], text: str) -> str:
@@ -39,7 +39,7 @@ def render_review(proposals: list[Proposal], text: str) -> str:
         return page("Import CV",
                     h1("Nothing new found")
                     + empty("Everything this CV mentions is already on your profile."),
-                    active="/profile", status="Running")
+                    active="/profile")
 
     rows = "".join(
         f"<label class=\'qrow safe\'>"
@@ -60,4 +60,4 @@ def render_review(proposals: list[Proposal], text: str) -> str:
         + f"<div class=qlist>{rows}</div>"
         + "<div class=actbar><button class=primary type=submit>Save selected</button>"
           "<a class=skip href=\'/profile\'>Cancel</a></div></form>",
-        active="/profile", status="Running")
+        active="/profile")

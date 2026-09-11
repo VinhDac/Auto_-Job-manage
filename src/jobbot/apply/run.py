@@ -230,7 +230,9 @@ def match(want: Ans, options: list[str]) -> str:
     for level in ("exact", "prefix", "inside"):
         for cand in tries:
             c = cand.lower().strip()
-            if not c or (level == "inside" and len(c) <= SHORT):
+            # Chốt tên ngắn áp cho CẢ mức prefix, không riêng mức "nằm trong":
+            # "UK".startswith-khớp "Ukraine" y như "UK" nằm trong "Ukraine".
+            if not c or (level != "exact" and len(c) <= SHORT):
                 continue
             hits = [i for i, o in enumerate(low) if o and (
                 o == c if level == "exact" else
@@ -345,7 +347,39 @@ def pick(tab, key: int, want: Ans) -> tuple[str, str]:
     shown = _js(tab, CHOSEN_JS, KEY=key) or ""
     if not shown:
         return "", "bấm rồi mà ô vẫn trống"
+    # "Có chữ trong ô" CHƯA phải bằng chứng. Ô có thể đã sẵn một giá trị mặc
+    # định từ trước, hoặc widget chọn nhầm dòng đang được tô sáng. Phải so với
+    # ĐÚNG dòng vừa bấm.
+    lean = lambda t: re.sub(r"[^a-z0-9]+", "", (t or "").lower())   # noqa: E731
+    if lean(chosen) not in lean(shown) and lean(shown) not in lean(chosen):
+        return "", f"bấm '{chosen[:28]}' mà ô hiện '{shown[:28]}'"
     return shown, ""
+
+
+KEEP_DAYS = 7            # bản dàn để đính kèm sống bao lâu trước khi dọn
+
+
+def _prune(root: Path, days: int = KEEP_DAYS) -> int:
+    """Dọn bản dàn cũ. Một thư mục cho một lần nộp, không ai xoá thì nó phình
+    mãi — mỗi bản ~200 KB, một năm tìm việc là vài trăm MB trùng lặp. Dọn ngay
+    trong lúc dựng bản mới, khỏi cần một việc dọn dẹp riêng để rồi quên chạy."""
+    if not root.exists():
+        return 0
+    cutoff = time.time() - days * 86400
+    gone = 0
+    for child in root.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            if child.stat().st_mtime >= cutoff:
+                continue
+            for f in child.iterdir():
+                f.unlink()
+            child.rmdir()
+            gone += 1
+        except OSError:
+            pass                                     # đang mở thì để yên
+    return gone
 
 
 def sendable(resume: Path, book: dict[str, Ans], job: int | None) -> Path:
@@ -362,7 +396,9 @@ def sendable(resume: Path, book: dict[str, Ans], job: int | None) -> Path:
     """
     who = (book.get("full_name") or Ans("")).value or "CV"
     name = re.sub(r"[^A-Za-z0-9]+", "-", who).strip("-") + "-CV.pdf"
-    stage = resume.parent / "send" / str(job if job is not None else "one")
+    root = resume.parent / "send"
+    _prune(root)
+    stage = root / str(job if job is not None else "one")
     stage.mkdir(parents=True, exist_ok=True)
     out = stage / name
     try:
@@ -386,6 +422,37 @@ def attach(tab, key: int, path: Path) -> str:
         return ""
     except Exception as exc:                          # noqa: BLE001
         return type(exc).__name__
+
+
+# <select> thật: `value` của nó là GIÁ TRỊ của option, không phải chữ hiện ra.
+# `<option value="GB">United Kingdom</option>` — gán "United Kingdom" vào
+# `.value` thì không chọn được gì. Phải tìm option theo CHỮ rồi đặt
+# selectedIndex.
+CHOOSE_JS = r"""
+(() => {
+  const el = document.querySelector('[data-jb="%KEY%"]');
+  if (!el || !el.options) return 'mất ô';
+  const want = %TEXT%;
+  const flat = t => (t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const target = flat(want);
+  for (let i = 0; i < el.options.length; i++) {
+    if (flat(el.options[i].text) === target) {
+      el.selectedIndex = i;
+      el.dispatchEvent(new Event('input',  {bubbles: true}));
+      el.dispatchEvent(new Event('change', {bubbles: true}));
+      return flat(el.options[el.selectedIndex].text) === target ? '' : 'không nhận';
+    }
+  }
+  return 'không thấy dòng đó';
+})()
+"""
+
+
+def _choose(tab, key: int, text: str) -> str:
+    try:
+        return _js(tab, CHOOSE_JS, KEY=key, TEXT=json.dumps(text)) or ""
+    except cdp.CDPError as exc:
+        return str(exc)[:40]
 
 
 def _set(tab, key: int, value: str) -> str:
@@ -451,99 +518,113 @@ def fill(tab, book: dict[str, Ans], resume: Path | None,
             report.missing.append(key)
             continue
 
-        if item["kind"] == "combo":
-            got, bad = pick(tab, item["k"], want)
-        elif item["kind"] == "select":
-            got = match(want, item["options"])
-            bad = _set(tab, item["k"], got) if got else "không dòng nào khớp"
-        else:
-            got, bad = want.value, _set(tab, item["k"], want.value)
-            if bad:
-                # Ô chữ mà không nhận chữ thì nó là danh sách gợi ý đội lốt ô
-                # chữ — Lever dựng ô địa điểm bằng Google Places, không một
-                # thuộc tính ARIA nào để nhận ra. Thử đúng đường người dùng đi.
-                # Không có dòng nào bung ra thì Escape, thành việc của Vin.
-                got, bad = pick(tab, item["k"], want)
-
-        if bad:
-            report.asks.append((label, bad, must))
-        else:
-            used.add(key)
-            report.filled.append((label, got))
+        try:
+            _one(tab, item, key, want, report, label, must, used)
+        except cdp.CDPError as exc:
+            # Một ô hỏng KHÔNG được giết cả lượt điền: mất báo cáo là mất luôn
+            # 10 ô đã điền trước đó, và Vin không biết form đang ở trạng thái nào.
+            report.failed.append((label, f"ô này hỏng: {str(exc)[:40]}"))
+        continue
 
     return report
 
 
-def login_wall(tab) -> str:
-    """Trang đang đòi đăng nhập? Trả về địa chỉ đó, không thì rỗng."""
-    try:
-        here = tab.eval("location.href") or ""
-    except cdp.CDPError:
-        return ""
-    return here if LOGIN_WALL.search(here) else ""
+def _one(tab, item, key, want: Ans, report: Report, label: str,
+         must: bool, used: set) -> None:
+    """Điền MỘT ô. Tách hàm riêng để một ô hỏng chỉ mất một ô, không mất lượt."""
+    if item["kind"] in ("checkbox", "radio"):
+        # KHÔNG bao giờ gọi _set() cho ô đánh dấu. `value` của nó không phải
+        # chữ hiện ra mà là MÃ form sẽ gửi đi; gán vào là viết lại mã đó mà
+        # không tick gì cả, và `el.value === v` vẫn đúng nên máy báo thành
+        # công. Đo trong Chrome thật: form gửi "London" thay vì
+        # "london_office".
+        report.asks.append((label, "ô đánh dấu — bạn tự chọn", must))
+        return
 
+    if item["kind"] == "combo":
+        got, bad = pick(tab, item["k"], want)
+    elif item["kind"] == "select":
+        got = match(want, item["options"])
+        bad = _choose(tab, item["k"], got) if got else "không dòng nào khớp"
+    else:
+        got, bad = want.value, _set(tab, item["k"], want.value)
+        if bad:
+            # Ô chữ mà không nhận chữ thì nó là danh sách gợi ý đội lốt ô chữ —
+            # Lever dựng ô địa điểm bằng Google Places, không một thuộc tính
+            # ARIA nào để nhận ra. Thử đúng đường người dùng đi; không có dòng
+            # nào bung ra thì Escape, thành việc của Vin.
+            got, bad = pick(tab, item["k"], want)
 
-def _await(tab, wait: float) -> list[dict]:
-    """Chờ ô hiện ra. Chờ Ô chứ không chờ thẻ <form>: boards.greenhouse.io
-    chuyển hướng sang job-boards.greenhouse.io, và <form> của trang CŨ khớp
-    điều kiện chờ trước khi DOM mới thay vào — đọc lúc đó ra rỗng, máy báo
-    "không thấy form" trên một trang có 26 ô."""
-    found = F.read(tab)
-    deadline = time.time() + wait
-    while not found and time.time() < deadline:
-        time.sleep(0.6)
-        found = F.read(tab)
-    return found
+    if bad:
+        report.asks.append((label, bad, must))
+    else:
+        used.add(key)
+        report.filled.append((label, got))
 
 
 def open_and_fill(url: str, book: dict[str, Ans], resume: Path | None,
                   job: int | None = None) -> tuple[Report, object]:
     """Mở trang, tìm đến form, điền, TRẢ TAB CÒN MỞ.
 
-    Đóng dấu số hiệu tin lên trang (`data-jbjob`) để nút Gửi ở tab Quản lí tìm
-    lại đúng tab này — không giữ tay cầm trong bộ nhớ máy chủ.
+    Ba chặng, chặng nào cũng có thể dừng sớm:
+
+        1. tin LinkedIn  -> moi đường nộp thật ra (cần đăng nhập)
+        2. chưa thấy ô   -> hoặc trang đòi đăng nhập, hoặc form ở trang riêng
+        3. điền
+
+    Mọi lối ra đều đi qua `done()`, nên trang LUÔN được đóng dấu số hiệu tin
+    (`data-jbjob`) — đó là thứ nút Gửi ở tab Quản lí dùng để tìm lại đúng tab
+    này, thay vì giữ tay cầm trong bộ nhớ máy chủ.
     """
+    from .send import mark
+
     chrome.launch(headless=False, port=PORT)
     tab = cdp.open_tab("about:blank", port=PORT)
     tab.go(url, timeout=45)
 
-    # Tin LinkedIn chỉ là bảng tin; đường nộp thật nằm sau nút Apply và chỉ
-    # hiện khi đã đăng nhập. Moi ra rồi đi tiếp như mọi tin khác — không có
-    # nhánh riêng cho LinkedIn ở phần điền.
+    def done(report: Report):
+        if job is not None:
+            mark(tab, job)
+        return report, tab
+
     hop = ""
+
+    # 1. Tin LinkedIn chỉ là bảng tin; đường nộp thật nằm sau nút Apply và chỉ
+    #    hiện khi đã đăng nhập. Moi ra rồi đi tiếp như mọi tin khác — phần điền
+    #    không có nhánh riêng nào cho LinkedIn.
     if lk.JOBS.search(url):
-        wall = login_wall(tab)
-        if wall:
-            return Report(url=wall, needs_login=wall), tab
+        stuck = _blocked(tab)
+        if stuck:
+            return done(stuck)
         time.sleep(2.0)
         real = lk.apply_url(tab)
         if not real:
-            return Report(url=url,
-                          note="tin LinkedIn này không lộ đường nộp — thường là "
-                               "môi giới, nộp qua LinkedIn hoặc qua người tuyển"), tab
+            return done(Report(
+                url=url,
+                note="tin LinkedIn này không lộ đường nộp — thường là môi "
+                     "giới, nộp qua LinkedIn hoặc qua người tuyển"))
         tab.go(real, timeout=45)
         hop = real
 
+    # 2. Chưa thấy ô nào. Hai khả năng, và phải phân biệt: trang đòi đăng nhập
+    #    thì nói thẳng, còn form nằm ở trang riêng thì đi theo link Apply của
+    #    chính trang đó.
     if not _await(tab, 8):
-        wall = login_wall(tab)
-        if wall:
-            report = Report(url=wall, needs_login=wall)
-            if job is not None:
-                from .send import mark
-                mark(tab, job)
-            return report, tab
-        hop = tab.eval(APPLY_LINK_JS) or ""
-        if hop:
-            tab.go(hop, timeout=45)
-            if not _await(tab, 10) and login_wall(tab):
-                report = Report(url=login_wall(tab), needs_login=login_wall(tab))
-                return report, tab
+        stuck = _blocked(tab)
+        if stuck:
+            return done(stuck)
+        link = tab.eval(APPLY_LINK_JS) or ""
+        if link:
+            tab.go(link, timeout=45)
+            hop = link                      # GIỮ, không ghi đè bước 1 bằng rỗng
+            _await(tab, 10)
+            stuck = _blocked(tab)
+            if stuck:
+                return done(stuck)
 
+    # 3. Điền.
     report = fill(tab, book, resume, wait=4, job=job)
-    if job is not None:
-        from .send import mark
-        mark(tab, job)
     report.url = tab.eval("location.href") or url
     if hop:
         report.note = f"form ở trang riêng — {hop}"
-    return report, tab
+    return done(report)

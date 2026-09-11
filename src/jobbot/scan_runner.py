@@ -9,15 +9,13 @@ from __future__ import annotations
 import tomllib
 from typing import Callable
 
-from .core import db, postings
+from .core import db, halt, postings
 from .core.journal import SEARCH, log as jlog
 from .core.paths import PROJECT_ROOT
-from .dedup import group
+
+STAGE = "search"      # tên khúc, dùng chung với cờ dừng và nút trên thanh
 from .ingest import ashby, greenhouse, lever
-from .ingest import filter as jobfilter
-from .ingest.base import Posting
 from .profile import store
-from .scoring.run import score_all
 
 Log = Callable[[str], None]
 
@@ -110,7 +108,8 @@ def _chrome_pass(conn, answers: dict, log: Log, deep: bool,
     sources = [
         (li.NAME, lambda tab: li.fetch(tab, titles, location=places,
                                        levels=levels, pages=4, deep=deep,
-                                       skip=frozenset(seen))),
+                                       skip=frozenset(seen),
+                                       stop=lambda: halt.wanted(STAGE))),
     ]
 
     total_seen = total_new = 0
@@ -189,14 +188,25 @@ def run_scan(log: Log | None = None, chrome_sources: bool = True,
                           + (" + LinkedIn qua Chrome" if chrome_sources else ""))
 
         total_seen = total_new = 0
+        stopped = False
         for index, (name, fn, args) in enumerate(todo, 1):
+            # Điểm ngắt: GIỮA hai nguồn, không phải giữa một giao dịch. Nửa
+            # giao dịch ghi vào DB còn tệ hơn chạy nốt nguồn đang dở.
+            if halt.wanted(STAGE):
+                stopped = True
+                break
             jlog.progress(SEARCH, f"nguồn API — {name}", index, len(todo))
             s, n = _run_source(conn, name, fn, *args, log=say)
             total_seen += s; total_new += n
 
-        if chrome_sources:
+        if chrome_sources and not stopped and not halt.wanted(STAGE):
             s, n = _chrome_pass(conn, answers, say, deep, manual)
             total_seen += s; total_new += n
+        elif chrome_sources:
+            jlog.warn(SEARCH, "bỏ qua LinkedIn — đã xin dừng")
+
+        if halt.wanted(STAGE):
+            stopped = True
 
         # --- tầng suy diễn: lọc + gộp + chấm, MỘT giao dịch ---
         from .core.derive import derive

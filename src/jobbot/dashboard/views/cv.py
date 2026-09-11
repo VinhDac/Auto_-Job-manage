@@ -6,7 +6,7 @@ from html import escape as esc
 
 from ...cv.build import TailoredCV
 from ...cv.render import audit, paper
-from ..layout import card, h1, page
+from ..layout import h1, page
 
 
 def render(job: dict, cv: TailoredCV) -> str:
@@ -18,5 +18,5 @@ def render(job: dict, cv: TailoredCV) -> str:
              f"from your own profile: the system selects and orders, it never writes.")
         + paper(cv)
         + audit(cv),
-        active="/jobs", status="Running",
+        active="/jobs",
     )

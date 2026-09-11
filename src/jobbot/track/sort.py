@@ -129,11 +129,32 @@ def match(conn, msg: dict) -> int | None:
     if not guess:
         return None
     tight = guess.replace(" ", "")
-    for row in conn.execute("SELECT id, company_key FROM application"):
+    hits = []
+    for row in conn.execute("SELECT id, company_key, role FROM application"):
         key = (row["company_key"] or "").strip()
         if not key:
             continue
         flat = key.replace(" ", "")
-        if key in guess or guess in key or flat in tight or tight in flat:
-            return int(row["id"])
-    return None
+        # Tên NGẮN nằm trong tên dài: "imc" nằm trong "imctradinggroup",
+        # "man" nằm trong "freshman". Đòi tên ngắn phải đủ dài mới cho khớp
+        # kiểu nằm-trong; ngắn hơn thì phải trùng khít.
+        short = min(len(flat), len(tight))
+        loose = short >= 5
+        same = flat == tight
+        inside = loose and (key in guess or guess in key
+                            or flat in tight or tight in flat)
+        if same or inside:
+            hits.append(row)
+    if not hits:
+        return None
+    if len(hits) == 1:
+        return int(hits[0]["id"])
+
+    # MỘT công ty, NHIỀU lần nộp. Đẩy bừa dòng đầu là chuyển trạng thái của
+    # đơn khác: thư từ chối vai trò A hạ luôn vai trò B đang chờ phỏng vấn.
+    # Xét thêm vai trò; không tách được thì trả None để Vin tự chỉ, vì "không
+    # biết" thà hơn "biết sai".
+    blob = norm(f"{msg.get('subject', '')} {msg.get('snippet', '')}")
+    named = [r for r in hits if (r["role"] or "").strip()
+             and norm(r["role"]) in blob]
+    return int(named[0]["id"]) if len(named) == 1 else None

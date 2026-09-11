@@ -34,11 +34,15 @@ def _ask(items: list[dict]) -> str:
     rows = ""
     for p in items:
         who = p["company"] or p["company_guess"] or "?"
+        # Vin nộp ba vai trò ở Point72; thư từ chối đến, máy đề xuất hạ MỘT
+        # dòng. Không hiện vai trò thì Vin bấm Nhận mà không biết vừa hạ cái
+        # nào.
+        job = f" · {p['role'][:38]}" if p.get("role") else ""
         now = STAGE_LABEL.get(p["stage"], "—") if p["stage"] else "chưa có dòng"
         to = STAGE_LABEL.get(p["kind"], p["kind"])
         rows += (
             f"<div class=askrow><div class=askmain>"
-            f"<div class=askwho><b>{esc(who)}</b>"
+            f"<div class=askwho><b>{esc(who)}</b><i>{esc(job)}</i>"
             f"<span class=askmove>{esc(now)} → <b>{esc(to)}</b></span></div>"
             f"<div class=asksub>{esc(p['subject'][:88])}</div>"
             f"<div class=asksnip>{esc((p['snippet'] or '')[:130])}</div></div>"
@@ -105,12 +109,15 @@ def _mailbox(ready: bool, address: str) -> str:
     config.toml (chmod 600, đã gitignore).
     """
     if ready:
+        # "đã lưu", KHÔNG phải "đã nối": trang chỉ biết config CÓ chuỗi, không
+        # biết chuỗi đó còn đăng nhập được không. App password bị thu hồi bên
+        # Google thì dòng này vẫn xanh, và Vin tin là hộp thư đang chạy.
         return (f"<div class=boxrow><span class=boxok>hộp thư "
-                f"<b>{esc(address)}</b> đã nối</span>"
+                f"<b>{esc(address)}</b> đã lưu — bấm Quét để kiểm</span>"
                 f"<button class='mbtn apply' data-post='/api/track/mail/scan'>"
                 f"Quét thư 30 ngày</button>"
-                f"<button class='mbtn tiny' data-post='/api/mail/forget'>"
-                f"xoá mật khẩu</button></div>")
+                f"<button class='mbtn tiny' data-post='/api/mail/forget'"
+                f" data-arg='xoa'>xoá mật khẩu</button></div>")
     return (
         "<form class=boxform data-post='/api/mail/setup'>"
         "<div class=boxhead>Nối hộp thư việc làm — thư về là thứ tự cập nhật "

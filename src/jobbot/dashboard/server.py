@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import queue
 import socket
-import sqlite3
 import threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +27,11 @@ from .views import (cvlist, home, jobs, profile, projects, search,
                     settings, track)
 
 HOST = "127.0.0.1"          # chỉ máy này truy cập được. Không mở ra mạng.
+
+# Các KHÚC của dây chuyền. Tên khúc là tham số của /api/stage/*, nên thêm một
+# chức năng mới thì không đẻ thêm route. Khúc nào chưa nối nút Chạy thì route
+# nói thẳng, không im lặng.
+STAGES = {"search": "Search", "cv": "CV", "track": "Quản lí"}
 DEFAULT_PORT = 8765
 
 
@@ -197,6 +201,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not pdf or not pdf.exists():
                     journal.log.warn(journal.SEARCH,
                                      "  chưa in PDF cho tin này — bấm In hàng loạt")
+                elif self._stale_pdf(conn, pdf):
+                    # Đổi email hay số điện thoại xong mà quên in lại thì lá
+                    # đơn mang bản CV cũ — sai chính chỗ nhà tuyển dụng dùng
+                    # để liên lạc.
+                    journal.log.warn(journal.SEARCH,
+                                     "  PDF in TRƯỚC lần sửa hồ sơ gần nhất — "
+                                     "in lại trước khi gửi")
                 journal.log.emit(journal.SEARCH,
                                  "  cửa sổ đang mở — trả nốt mấy ô trên, rồi bấm "
                                  "Gửi ở tab Quản lí (máy kiểm lại trước khi bấm)")
@@ -209,6 +220,24 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
 
         threading.Thread(target=_run, daemon=True, name="apply").start()
+
+    @staticmethod
+    def _stale_pdf(conn, pdf) -> bool:
+        """Bản in có cũ hơn hồ sơ không."""
+        from datetime import datetime, timezone
+        row = conn.execute(
+            "SELECT created_at FROM profile_version ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row is None or not row["created_at"]:
+            return False
+        try:
+            saved = datetime.fromisoformat(row["created_at"])
+        except (TypeError, ValueError):
+            return False
+        if saved.tzinfo is None:
+            saved = saved.replace(tzinfo=timezone.utc)
+        printed = datetime.fromtimestamp(pdf.stat().st_mtime, tz=timezone.utc)
+        return printed < saved
 
     def _start_send(self, row: dict) -> None:
         """Bấm Gửi cho một lá đơn, ở NỀN.
@@ -225,12 +254,14 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 tab = apply_send.find(int(row["posting_id"]))
                 if tab is None:
+                    board.unclaim(conn, int(row["id"]))
                     journal.log.error(
                         journal.SEARCH,
                         f"{who} — không thấy cửa sổ form. Bấm Nộp lại ở tab Search.")
                     return
                 done = apply_send.submit(tab, int(row["posting_id"]))
                 if not done.ok:
+                    board.unclaim(conn, int(row["id"]))
                     journal.log.warn(journal.SEARCH, f"{who} — KHÔNG gửi: {done.why}")
                     for gap in done.missing[:8]:
                         journal.log.warn(journal.SEARCH, f"  còn trống: {gap[:70]}")
@@ -241,6 +272,7 @@ class Handler(BaseHTTPRequestHandler):
                 if done.landed:
                     journal.log.emit(journal.SEARCH, f"  trang sau khi gửi: {done.landed}")
             except Exception as exc:                # noqa: BLE001
+                board.unclaim(conn, int(row["id"]))
                 journal.log.error(journal.SEARCH,
                                   f"{who} — gửi hỏng: {type(exc).__name__}: {exc}")
             finally:
@@ -248,6 +280,16 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
 
         threading.Thread(target=_run, daemon=True, name="send").start()
+
+    def _start_stage(self, stage: str) -> bool:
+        """Khởi động một khúc. Thêm chức năng mới = thêm MỘT nhánh ở đây,
+        không phải thêm một route."""
+        if stage == "search":
+            runner = sched.current()
+            threading.Thread(target=runner.scan_once, daemon=True,
+                             name="scan-manual").start()
+            return True
+        return False
 
     def _resume_build(self, skill: str) -> None:
         """Chạy bảy chặng cho một kỹ năng, ở NỀN.
@@ -297,11 +339,7 @@ class Handler(BaseHTTPRequestHandler):
             conn = db.connect()
             try:
                 if path == "/":
-                    return self._html(home.render(
-                        live.run_status(conn), live.counters(conn),
-                        live.needs_you(conn), live.activity(conn),
-                        days=live.per_day(conn), chances=live.chances(conn),
-                        funnel=live.funnel(conn)))
+                    return self._html(home.render())
                 parts = _segments(path)
                 found = live.job_detail(conn, parts[1])
                 if not found:
@@ -341,7 +379,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._html(search.render(
                     jobs=live.jobs(conn, flt), flt=flt,
                     counts=live.job_counts(conn, flt),
-                    sieve=live.sieve(conn)))
+                    sieve=live.sieve(conn),
+                    stage=live.search_stage(conn)))
             finally:
                 conn.close()
 
@@ -398,6 +437,23 @@ class Handler(BaseHTTPRequestHandler):
             conn = db.connect()
             try:
                 return self._html(projects.render(**live.project_board(conn)))
+            finally:
+                conn.close()
+
+        if path.startswith("/adjust/"):
+            # ĐIỀU CHỈNH — khác Cài đặt: Cài đặt đổi thứ APP LÀM (nhịp quét,
+            # khung giờ, hộp thư); Điều chỉnh đổi thứ MÀN HÌNH NÀY làm việc
+            # trên. Cùng tấm phủ, khác nội dung.
+            stage = _segments(path)[-1]
+            if stage not in STAGES:
+                return self._404()
+            conn = db.connect()
+            try:
+                if stage == "search":
+                    return self._html(search.adjust(live.sieve(conn)))
+                return self._html(
+                    f"<div class=sheethead>Điều chỉnh · {STAGES[stage]}</div>"
+                    "<div class=sheetwait>chưa có gì để chỉnh ở khúc này</div>")
             finally:
                 conn.close()
 
@@ -479,13 +535,23 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/sieve":
             # Lưới GIỮ/BỎ nằm trong HỒ SƠ. Lưu xong thì mọi tin tự thành cần
             # phán lại (judged_profile lệch phiên bản) — derive lo phần đó.
+            # Lưới RỖNG thì KHÔNG lưu. Một POST không mang trường nào — form
+            # gửi hụt, hay một yêu cầu lạc — sẽ ghi rỗng đè lên và xoá sạch
+            # danh sách chức danh; lúc đó MỌI tin lọt lưới (đo được: 197 -> 4660)
+            # và Vin không biết vì sao tab Search đầy rác. Đường phá hoại không
+            # được là đường mặc định.
+            titles = "\n".join(dict.fromkeys(
+                t.strip() for t in form.get("job_titles", []) if t.strip()))
+            if not titles:
+                return self._json({"ok": False,
+                                   "note": "lưới lọc rỗng — cần ít nhất một chức danh"},
+                                  status=400)
             conn = db.connect()
             try:
                 store.save(conn, {
                     # Ô thẻ gửi lên MỘT DANH SÁCH giá trị, mỗi thẻ một cái.
                     # Bỏ trùng, giữ thứ tự người dùng xếp.
-                    "job_titles": "\n".join(dict.fromkeys(
-                        t.strip() for t in form.get("job_titles", []) if t.strip())),
+                    "job_titles": titles,
                     "seniority": form.get("seniority", []),
                     "markets": form.get("markets", []),
                 }, note="lưới lọc sửa ở tab Search")
@@ -534,6 +600,27 @@ class Handler(BaseHTTPRequestHandler):
                 conn.close()
             return self._json({"ok": True, "reload": True})
 
+        if path in ("/api/stage/start", "/api/stage/stop"):
+            # HAI route cho MỌI khúc, không phải mỗi tab một route. Tên khúc
+            # là tham số — thêm một chức năng mới thì không phải thêm đường.
+            from ..core import halt
+
+            stage = form.get("arg", [""])[0].strip()
+            if stage not in STAGES:
+                return self._json({"ok": False, "note": "khúc lạ"}, status=400)
+            if path.endswith("/stop"):
+                halt.ask(stage)
+                journal.log.warn(journal.SEARCH,
+                                 f"xin dừng {STAGES[stage]} — sẽ dừng ở "
+                                 f"điểm ngắt gần nhất")
+                return self._json({"ok": True, "note": "đang dừng…"})
+            halt.clear(stage)
+            if not self._start_stage(stage):
+                return self._json({"ok": False,
+                                   "note": f"{STAGES[stage]} chưa nối nút Chạy"},
+                                  status=400)
+            return self._json({"ok": True, "note": "đang chạy…"})
+
         if path == "/api/apply":
             job = form.get("arg", [""])[0].strip()
             if not job.isdigit():
@@ -578,6 +665,8 @@ class Handler(BaseHTTPRequestHandler):
                 app_id = int(form.get("arg", ["0"])[0] or 0)
             except ValueError:
                 return self._json({"ok": False}, status=400)
+            from ..track import board
+
             conn = db.connect()
             try:
                 row = conn.execute(
@@ -585,6 +674,15 @@ class Handler(BaseHTTPRequestHandler):
                     " FROM application a WHERE a.id = ?", (app_id,)).fetchone()
                 if row is None or not row["posting_id"]:
                     return self._json({"ok": False, "note": "không có tin gốc"},
+                                      status=400)
+                # GIÀNH QUYỀN, nguyên tử. So `row["stage"] != DRAFT` rồi mới
+                # gửi là đọc-rồi-ghi: hai cú bấm cách nhau hai giây đều đọc
+                # thấy 'draft' vì việc đổi chặng xảy ra ở luồng nền, vài giây
+                # sau. Một câu UPDATE ... WHERE stage='draft' thì chỉ một cú
+                # bấm giành được.
+                if not board.claim(conn, int(row["id"])):
+                    return self._json({"ok": False,
+                                       "note": "đơn này đang gửi hoặc đã gửi rồi"},
                                       status=400)
                 row = dict(row)
             finally:
@@ -632,6 +730,12 @@ class Handler(BaseHTTPRequestHandler):
             if not address:
                 return self._json({"ok": False, "note": "thiếu địa chỉ"},
                                   status=400)
+            # KIỂM TRƯỚC, GHI SAU. Bản cũ ghi rồi mới kiểm, nên một mật khẩu
+            # tài khoản dán nhầm đã kịp nằm trong config.toml dù bị từ chối —
+            # mật khẩu thật của Vin nằm trên đĩa mà chẳng dùng được việc gì.
+            if secret and not tmail.APP_PASSWORD.fullmatch(secret):
+                return self._json({"ok": False, "reload": False, "note":
+                                   "đây không phải app password (16 chữ cái thường)"})
             cfg.write_value("mail", "address", address)
             if secret:
                 cfg.write_value("mail", "password", secret)
@@ -645,7 +749,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "reload": True})
 
         if path == "/api/mail/forget":
+            # Việc XOÁ phải nói rõ là xoá. Bản cũ xoá ngay khi nhận một POST
+            # rỗng — và một bài thử ném rác vào mọi route đã xoá mất app
+            # password thật, 12 lần liền, không ai biết cho tới khi quét thư
+            # báo "chưa cấu hình". Đường phá hoại không được là đường mặc định.
             from ..core import config as cfg
+            if form.get("arg", [""])[0].strip() != "xoa":
+                return self._json({"ok": False, "note": "cần xác nhận"},
+                                  status=400)
             cfg.write_value("mail", "password", "")
             journal.log.warn(journal.SEARCH, "đã xoá app password khỏi config")
             return self._json({"ok": True, "reload": True})
@@ -706,16 +817,18 @@ class Handler(BaseHTTPRequestHandler):
             base = f"http://127.0.0.1:{self.server.server_address[1]}"
 
             def _print():
-                from ..cv.pdf import render, slug
+                from ..cv.pdf import render
                 conn = db.connect()
                 try:
                     row = conn.execute(
                         "SELECT title, company FROM posting WHERE id = ?",
                         (int(job),)).fetchone()
-                    if row is None:
+                    # MỘT nguồn tên tệp, dùng chung với máy in hàng loạt và với
+                    # phần nộp. Tự ghép tên ở đây là in ra tệp mà phần nộp
+                    # không tìm.
+                    out = live.cv_pdf_for(conn, int(job))
+                    if row is None or out is None:
                         return
-                    name = f"{slug(row['company'])}-{slug(row['title'])}.pdf"
-                    out = Path(db.db_path()).parent / "cv" / name
                     journal.log.progress(journal.SCORE, f"in PDF — {row['title'][:40]}")
                     render(f"{base}/jobs/{job}/cv", out)
                     journal.log.ok(journal.SCORE, f"PDF: {out}")
@@ -737,17 +850,24 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 from ..cv.blocks import write_block
                 title = form.get("title", [""])[0].strip()
+                was = form.get("was", [""])[0].strip()
                 body = [l.strip() for l in form.get("line", []) if l.strip()]
                 if form.get("kill"):
                     body = []                      # thân rỗng = xoá khối
                 if title and (body or form.get("kill")):
                     answers = store.load(conn)
+                    text = answers.get("cv_text") or ""
+                    # ĐỔI TÊN khối: xoá khối tên CŨ trước. write_block tìm theo
+                    # tên MỚI, không thấy, nên chỉ thêm khối mới — CV còn CẢ
+                    # HAI, và mọi bản in ra có hai mục trùng nội dung.
+                    if was and was != title:
+                        text = write_block(text, form.get("kind", ["project"])[0],
+                                           was, "", [])
                     store.save(conn, {"cv_text": write_block(
-                        answers.get("cv_text") or "",
-                        form.get("kind", ["project"])[0],
+                        text, form.get("kind", ["project"])[0],
                         title, form.get("meta", [""])[0].strip(), body)},
                         note=f"soạn khối: {title[:40]}")
-                    live._CV_CACHE.clear()
+                    live._CV_CACHE.clear(); live._BLOCK_CACHE.clear()
                     journal.log.ok(journal.SCORE,
                                    f"CV: khối «{title[:40]}» — "
                                    + (f"{len(body)} câu" if body else "đã xoá"))
@@ -771,7 +891,7 @@ class Handler(BaseHTTPRequestHandler):
                     block = head + "\n" + "\n".join(body)
                     store.save(conn, {"cv_text": self._add_project(text, block)},
                                note=f"project #{pid} vào CV")
-                    live._CV_CACHE.clear()
+                    live._CV_CACHE.clear(); live._BLOCK_CACHE.clear()
                     journal.log.ok(journal.PROJECT,
                                    f"project #{pid}: đã thêm vào CV gốc")
             finally:

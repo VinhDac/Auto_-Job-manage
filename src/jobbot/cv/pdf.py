@@ -16,11 +16,17 @@ from __future__ import annotations
 
 import base64
 import re
+import threading
 from pathlib import Path
 
 from ..browser import cdp, chrome
 
 PORT = chrome.PDF_PORT   # cổng RIÊNG, profile RIÊNG — xem chrome.PROFILE
+
+# MỘT lượt in tại một thời điểm. Cả in-một-bản lẫn in-hàng-loạt đều mở rồi TẮT
+# Chrome ở cổng này; chạy chồng thì luồng xong trước tắt Chrome của luồng kia,
+# và 37 bản còn lại im lặng không được in.
+_ONE_AT_A_TIME = threading.Lock()
 
 PAPER = {                                    # A4, lề 14mm — khớp @page trong CSS
     "paperWidth": 8.27, "paperHeight": 11.69,
@@ -61,6 +67,11 @@ def render_many(jobs, timeout: float = 45.0, on_done=None):
     jobs = list(jobs)
     if not jobs:
         return []
+    with _ONE_AT_A_TIME:
+        return _render_all(jobs, timeout, on_done)
+
+
+def _render_all(jobs, timeout, on_done):
     started = chrome.launch(headless=True, port=PORT)
     tab = cdp.open_tab("about:blank", port=PORT)
     made = []

@@ -38,8 +38,66 @@ NAV = [
 ]
 
 
-def page(title: str, body: str, active: str = "", wide: bool = False,
-         status: str = "", flow: bool = True) -> str:
+# Logo app — chìa khoá. Vẽ bằng hình cơ bản chứ không phải một path dài:
+# ba vòng là ba <circle> có nét mà không tô, nên lỗ giữa là lỗ thật, sau này
+# đổi độ dày nét chỉ sửa MỘT số. Màu lấy từ `currentColor` nên CSS đổi màu là
+# xong, không phải sửa file ảnh.
+LOGO = (
+    "<svg class=logo viewBox='0 0 112 38' aria-hidden=true>"
+    "<g fill=none stroke=currentColor stroke-width=4.4>"
+    "<circle cx=12 cy=17.4 r=7.2 /><circle cx=25 cy=9.4 r=7.2 />"
+    "<circle cx=24.4 cy=26 r=7.2 /></g>"
+    "<g fill=currentColor>"
+    "<rect x=26 y=14.6 width=84 height=5.6 rx=2.8 />"      # thân chìa
+    "<rect x=67.6 y=8 width=4.8 height=17 rx=2.4 />"       # khấc giữa
+    "<rect x=78 y=20.2 width=24 height=4.8 />"             # sống răng
+    "<rect x=78 y=25 width=6 height=11.6 />"
+    "<rect x=87.6 y=25 width=5.4 height=11.6 />"
+    "<rect x=96 y=25 width=6 height=11.6 />"
+    "</g></svg>")
+
+
+def deck(stage: str, name: str, state: str, metrics: list,
+         adjust: str = "", run: str = "Chạy") -> str:
+    """Thanh của MỘT khúc: tên + trạng thái · số liệu · chạy/dừng · điều chỉnh.
+
+    MỘT khối cho mọi chức năng. Trước đây thanh trên cùng là của cả app —
+    cùng nội dung ở mọi tab — mà thứ nó điều khiển ("Chạy ngay", "Bật tự quét")
+    chỉ thuộc về Search. Thanh mang danh toàn app mà làm việc của một khúc.
+
+    `metrics` là [(số, nhãn)]. Chỉ nhận số nào trả lời được câu "giờ tôi nên
+    làm gì" — Home cũ chết vì đầy số đẹp mà không ai hành động theo.
+
+    Nút ⚟ dùng lại tấm phủ của Cài đặt (`data-settings` nhận URL), nên không
+    đẻ thêm trình nghe nào — mỗi đường mới là một nút có thể chết.
+    """
+    nums = "".join(
+        f"<span class=metric><b>{esc(str(v))}</b>{esc(label)}</span>"
+        for v, label in metrics)
+    knob = (f"<button class='mbtn knob' data-settings='{esc(adjust)}'"
+            f" title='Điều chỉnh {esc(name)}'>⚟</button>" if adjust else "")
+    # MỘT viên thuốc NẰM NGANG: được phép RỘNG, chỉ không được CAO. Tất cả
+    # trong một viên — tên khúc, số liệu, nút. Đẩy số liệu ra ngoài thì thanh
+    # vỡ thành ba tầng rời rạc, nhìn bẩn.
+    #
+    # Dòng trạng thái ("tự động: TẮT · quét lần cuối 09:42") KHÔNG ở đây: nó
+    # là tin chung của cả app, chỗ của nó là thanh trạng thái dưới đáy.
+    return (
+        f"<div class=deckwrap><div class=deckpill>"
+        f"<span class=deckpillname><span class=rdot></span>"
+        f"<b class=deckname>{esc(name)}</b></span>"
+        f"<span class=metrics>{nums}</span>"
+        f"<span class=deckbtns>"
+        f"<button class='mbtn go' data-post='/api/stage/start'"
+        f" data-arg='{esc(stage)}'>{esc(run)}</button>"
+        f"<button class=mbtn data-post='/api/stage/stop'"
+        f" data-arg='{esc(stage)}'>Dừng</button>"
+        f"{knob}</span>"
+        f"</div></div>")
+
+
+def page(title: str, body: str, active: str = "",
+         flow: bool = True, bar: str = "") -> str:
     """flow=True  trang cuộn như cũ — dành cho trang CHƯA chuyển sang widget
     flow=False trang không cuộn, nội dung là lưới widget tự cuộn bên trong
     """
@@ -51,23 +109,29 @@ def page(title: str, body: str, active: str = "", wide: bool = False,
                   f" title='{esc(label)}'>"
                   f"<i>{mark}</i><span>{esc(label)}</span></a>")
 
-    foot = (f"<div class=navfoot title='{esc(status)}'>"
-            f"<span class=dot></span><span>{esc(status)}</span></div>"
-            if status else "")
-    # Thanh master. Trạng thái và nhãn nút do live.js ghi đè ngay khi SSE nối
-    # được — chữ ở đây chỉ là thứ hiện trong tích tắc trước lúc đó.
-    top = ("<header class=topbar>"
-           "<div class=runstate><span class=rdot></span>"
-           "<b data-state>đang nối…</b></div>"
-           "<div class=masters>"
-           "<button class=mbtn data-act=run>Chạy ngay</button>"
-           "<button class=mbtn data-act=pause>Tắt tự quét</button>"
-           "<button class='mbtn gear' data-settings title='Cài đặt'>⚙</button>"
-           "</div></header>"
+    # Cài đặt: nút, KHÔNG phải link. /settings trả về mảnh HTML cho tấm phủ.
+    # `data-appset` chứ KHÔNG dùng chung `data-settings` với nút ⚟ của khúc:
+    # ⚟ chỉnh thứ MÀN HÌNH NÀY làm việc trên, còn đây là cài đặt CẢ APP. Một
+    # nút không thể vừa là của khúc vừa là của app — nên khác thuộc tính,
+    # khác cả khung (⚟ ra tấm bên phải, Cài đặt ra hộp giữa màn).
+    settings = ("<div class=navend>"
+                "<button class=navlink data-appset title='Cài đặt'>"
+                "<i>⚙</i><span>Cài đặt</span></button></div>")
+
+    # Thanh trạng thái ĐÁY APP — tin chung, không thuộc tab nào. Không nhận
+    # dữ liệu từ view: live.js đổ vào từ dòng SSE đang có sẵn, nên không phải
+    # luồn tham số qua cả chục hàm render và không bao giờ cũ.
+    foot = ("<footer class=statusbar>"
+            "<span class=sdot></span><b data-state>đang nối…</b>"
+            "<span class=smsg data-lastmsg></span></footer>")
+    # Thanh trên cùng LÀ thanh của khúc đang mở, không phải thanh của app.
+    # Trang chưa có khúc thì KHÔNG có thanh: trạng thái chung đã nằm ở thanh
+    # đáy rồi, vẽ thêm một dòng y hệt trên đầu chỉ là nói hai lần.
+    top = ((f"<header class=topbar>{bar}</header>" if bar else "")
            # Tấm phủ cho menu Cài đặt. Rỗng cho tới khi bấm bánh răng —
            # nạp nội dung lúc đó, để mọi trang khác không phải mang theo dữ
            # liệu cài đặt mà chúng không dùng.
-           "<div class=sheet hidden data-sheet><div class=sheetbox></div></div>")
+           + "<div class=sheet hidden data-sheet><div class=sheetbox></div></div>")
 
     # Đọc lựa chọn gập/mở NGAY trong <head>, trước khi vẽ. Để xuống cuối trang
     # thì mỗi lần chuyển tab thanh bên bung ra rồi mới co lại — nháy một cái.
@@ -84,11 +148,12 @@ def page(title: str, body: str, active: str = "", wide: bool = False,
         "<link rel=stylesheet href='/static/app.css'>"
         f"{early}</head><body>"
         f"<aside class=side>"
-        f"<div class=brandrow><div class=brand>jobbot</div>"
+        f"<div class=brandrow><div class=brand>{LOGO}jobbot</div>"
         f"<button class=navtoggle data-nav title='Gập thanh bên'>«</button></div>"
-        f"<nav>{links}</nav>{foot}</aside>"
-        f"<main class='{'wide' if wide else ''}{' flow' if flow else ''}'>{top}"
+        f"<nav>{links}</nav>{settings}</aside>"
+        f"<main class='{'flow' if flow else ''}'>{top}"
         f"<div class=inner>{body}</div></main>"
+        f"{foot}"
         "<script src='/static/live.js'></script></body></html>"
     )
 

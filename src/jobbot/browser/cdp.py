@@ -14,7 +14,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from .chrome import PORT
-from .ws import WebSocket, WSError
+from .ws import WebSocket
 
 # Nhịp giống người: mỗi thao tác nghỉ một chút, và nghỉ không đều nhau.
 # Không phải để né phát hiện — mà vì trang cần thời gian dựng, và bắn liên

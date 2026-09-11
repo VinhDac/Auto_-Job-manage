@@ -16,7 +16,7 @@ def check(name, cond):
     else:    fail += 1; print(f"  FAIL {name}")
 
 CV = """DAC VINH NGUYEN
-London, UK · +44 7454 070297 · me@example.com
+London, UK · +44 7000 000000 · me@example.com
 Eligible for UK Graduate visa — no employer sponsorship required.
 I want to work on interesting problems.
 EXPERIENCE
@@ -44,7 +44,7 @@ Compute — a GPU is fast at many simple operations at once.
 Method — I direct Claude Code and Copilot rather than prompt them.
 """
 
-PROFILE = {"cv_text": CV, "full_name": "Dac Vinh Nguyen", "email": "me@example.com",
+PROFILE = {"cv_text": CV, "full_name": "Ada Grace Lovelace", "email": "me@example.com",
            "location": "London, UK", "skills_strong": "Python, pandas, PyTorch, C++, SQL",
            "education": "MSc Computational Finance — Royal Holloway 2025-2026",
            "certifications": "CFA Level I, top 10% of global candidates"}
@@ -186,6 +186,31 @@ check("thân KHÔNG lặp lại chữ Certifications",
 check("nội dung còn nguyên",
       bool(_cert) and _cert[0].lines[0].startswith("CFA Level I"))
 check("nhãn thành tiêu đề khối", bool(_cert) and _cert[0].title == "Certifications")
+
+print("\n[đổi tên khối CV — không được nhân đôi]")
+from jobbot.cv.blocks import write_block as _wb, parse as _pp
+_cv2 = ("SELECTED PROJECTS\n"
+        "Alpha Research — a cross-sectional alpha signal on equity data\n"
+        "Walk-forward by construction.\n")
+# Route phải xoá khối tên CŨ trước khi ghi tên MỚI: write_block tìm theo tên
+# mới, không thấy, nên chỉ THÊM — CV còn cả hai và bản in ra có hai mục trùng.
+_renamed = _wb(_wb(_cv2, "project", "Alpha Research", "", []),
+               "project", "Alpha Signal", "", ["a cross-sectional alpha signal"])
+_titles = [b.title for b in _pp(_renamed) if b.kind == "project"]
+check("chỉ còn MỘT khối sau khi đổi tên", len(_titles) == 1)
+check("và mang tên mới", _titles == ["Alpha Signal"])
+_srv3 = (Path(__file__).resolve().parent.parent
+         / "src/jobbot/dashboard/server.py").read_text(encoding="utf-8")
+check("route đọc trường 'was'", 'form.get("was"' in _srv3)
+check("và xoá khối cũ trước khi ghi", "was != title" in _srv3)
+
+print("\n[tiêu đề khối vào URL phải URL-encode]")
+from urllib.parse import quote as _q
+_lst = (Path(__file__).resolve().parent.parent
+        / "src/jobbot/dashboard/views/cvlist.py").read_text(encoding="utf-8")
+# esc() là để chữ hiện an toàn trong HTML; nó KHÔNG làm dấu & hết cắt tham số.
+check("dùng quote() cho tham số URL", "quote(b['title']" in _lst)
+check("ký tự & được mã hoá", _q("Research & Development", safe="") == "Research%20%26%20Development")
 
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

@@ -19,9 +19,7 @@ Cổng còn đây kể cả khi đề bài do khuôn dựng: URL vẫn chết, k
 
 from __future__ import annotations
 
-import json
 import re
-import sqlite3
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field

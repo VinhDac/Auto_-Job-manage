@@ -146,7 +146,6 @@ def shutdown(port: int = PORT, wait: float = 6.0) -> bool:
     tiến trình "Google Chrome". Đi qua cổng debug 9333 thì chỉ chạm đúng bản
     chạy bằng profile riêng của app.
     """
-    from .cdp import CDPError
     from .ws import WebSocket, WSError
 
     if not alive(port):

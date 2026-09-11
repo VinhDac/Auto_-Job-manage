@@ -267,8 +267,29 @@ MIGRATIONS: list[str] = [
 ]
 
 
+SECRET = 0o600      # chỉ chủ máy đọc — xem _lock_down
+
+
+def _lock_down(path: Path) -> None:
+    """Chỉ chủ máy đọc được DB, và cả tệp WAL/SHM đi kèm.
+
+    Trong đó có TOÀN VĂN CV, hồ sơ cá nhân, và tiêu đề + 400 ký tự đầu của mọi
+    thư tuyển dụng. Mặc định của sqlite là 0644 — bất kỳ tài khoản nào trên
+    máy cũng đọc được. Đặt một lần lúc mở kết nối thì không phải nhớ.
+    """
+    for suffix in ("", "-wal", "-shm"):
+        try:
+            target = Path(str(path) + suffix)
+            if target.exists() and (target.stat().st_mode & 0o077):
+                target.chmod(SECRET)
+        except OSError:
+            pass
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(path or db_path())
+    path = path or db_path()
+    conn = sqlite3.connect(path)
+    _lock_down(Path(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")   # đọc được trong lúc đang ghi (chạy 24/7)

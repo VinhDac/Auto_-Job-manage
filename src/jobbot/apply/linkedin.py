@@ -45,7 +45,13 @@ def unwrap(href: str) -> str:
     if not href:
         return ""
     if not SAFETY.search(href):
-        return "" if "linkedin.com" in href.lower() else href
+        # CHỈ nhận http/https. Nút Apply trên LinkedIn rất hay là
+        # <a href="javascript:void(0)"> mở hộp thoại; trả nguyên si thì
+        # tab.go() điều hướng tới một lược đồ không phải web.
+        low = href.lower()
+        if "linkedin.com" in low or not low.startswith(("http://", "https://")):
+            return ""
+        return href
     query = urllib.parse.urlparse(href).query
     found = urllib.parse.parse_qs(query).get("url") or []
     out = urllib.parse.unquote(found[0]) if found else ""

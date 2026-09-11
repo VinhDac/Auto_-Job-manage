@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from html import escape as esc
 
-from ..layout import badge, card, empty, h1, page, score_bar
+from ..layout import card, empty, h1, page, score_bar
 
 CHANCE_BADGE = {"likely": ("worth applying", "ok"),
                 "possible": ("maybe", ""),
@@ -78,7 +78,7 @@ def render_detail(job: dict) -> str:
     proj = job.get("project")
     return page(
         job["title"],
-        f"<a class=back href='/jobs'>← Jobs</a>"
+        f"<a class=back href='/search'>← Jobs</a>"
         + h1(job["title"], f"{job['company']} · {job['location']} · {job['salary']}")
         + f"<div class=jmeta>{_score(job)}"
           f"<span class=spacer></span><span class=muted>{esc(job['posted'])}</span></div>"
@@ -102,5 +102,5 @@ def render_detail(job: dict) -> str:
         + "<div class=actbar><button class=primary>Queue for approval</button>"
           "<button class=ghostbtn>Reject…</button>"
           "<span class=muted>Nothing is sent until you approve it in the queue.</span></div>",
-        active="/jobs", status="Running",
+        active="/jobs",
     )

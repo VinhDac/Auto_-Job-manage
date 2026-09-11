@@ -160,6 +160,48 @@ with tempfile.TemporaryDirectory() as tmp:
             check(f"{page:<10} nút data-post không chặn lan truyền",
                   "stopPropagation" not in head)
 
+    # Nút trỏ vào route KHÔNG TỒN TẠI cũng là nút chết, và im lặng y hệt:
+    # fetch trả 404, .json() nổ, .catch() nuốt. Đối chiếu mọi đích data-post
+    # trên trang với danh sách route máy chủ thật sự xử lý.
+    import re as _re
+    _server = (Path(__file__).resolve().parent.parent
+               / "src/jobbot/dashboard/server.py").read_text(encoding="utf-8")
+    # Route có thể khai bằng `path == "x"` HOẶC `path in ("x", "y")` —
+    # bộ dò chỉ nhận dạng thứ nhất thì báo nhầm route thật là không tồn tại.
+    _known = set(_re.findall(r'path == "([^"]+)"', _server))
+    for _grp in _re.findall(r'path in \(([^)]*)\)', _server):
+        _known |= set(_re.findall(r'"([^"]+)"', _grp))
+    _known |= set(_re.findall(r'path\.startswith\("([^"]+)"\)', _server))
+    _wired = set()
+    for page in ("/search", "/cv", "/track", "/projects", "/"):
+        _s, body = get(page)
+        if _s != 200:
+            continue
+        _wired |= set(_re.findall(r"data-post='([^']+)'", body))
+        _wired |= set(_re.findall(r'data-post="([^"]+)"', body))
+    # Vẽ thẳng tab Quản lí với ĐỦ MỌI loại dòng: DB thử không có dòng nộp nào
+    # nên nút "Gửi đơn", "bỏ", "đổi chặng", "quét thư" không hiện, và những nút
+    # đó chính là những nút mới nhất — tức là những nút dễ sai đích nhất.
+    from jobbot.dashboard.views import track as _track
+    from jobbot.track import board as _board
+    _row = dict(id=1, stage=_board.DRAFT, company="X", role="R", days=1,
+                event_days=None, last_event="", silent=False, cv_file="c.pdf",
+                posting_id=9, url="u", score=90)
+    for _ready in (False, True):
+        for _stage in _board.STAGES:
+            _html = _track.render(rows=[{**_row, "stage": _stage}],
+                                  asks=[dict(id=2, company="X", company_guess="X",
+                                             stage=_stage, kind="rejected",
+                                             subject="s", snippet="n", app_id=1)],
+                                  counts={"total": 1}, mail_ready=_ready,
+                                  mail_address="a@b.c")
+            _wired |= set(_re.findall(r"data-post='([^']+)'", _html))
+            _wired |= set(_re.findall(r'data-post="([^"]+)"', _html))
+
+    check("có nút data-post để mà kiểm", len(_wired) >= 8, str(sorted(_wired)))
+    for _target in sorted(_wired):
+        check(f"route {_target} có thật", _target in _known)
+
     print("\n[PDF: bản in KHÔNG phải bản màn hình thu nhỏ]")
     css = (Path("src/jobbot/dashboard/web/app.css")).read_text()
     rule = css[css.index("@media print"):] if "@media print" in css else ""
@@ -294,10 +336,91 @@ with tempfile.TemporaryDirectory() as tmp:
     check("tấm phủ có nền che thật (nên nếu hở là chắn cả trang)",
           "rgba(0,0,0,.5)" in body_rule or "z-index:60" in body_rule)
 
+    print("\n[sắc độ — thang xám kiểu VS Code]")
+    # Lỗi cũ: --mute (màu chữ dùng nhiều nhất app, 84 chỗ) chỉ đạt 3.1:1 trên
+    # --panel-2, dưới ngưỡng 4.5 của chữ thường mà lại toàn cỡ 10-12px. Chốt
+    # luật ở đây để không ai hạ bậc chữ xuống dưới ngưỡng nữa.
+    def _cr(a, b):
+        def _lin(c):
+            c /= 255
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+        def _lum(h):
+            h = h.lstrip("#")
+            r, g, bl = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+            return .2126 * _lin(r) + .7152 * _lin(g) + .0722 * _lin(bl)
+        x, y = _lum(a), _lum(b)
+        return (max(x, y) + .05) / (min(x, y) + .05)
+
+    import re as _rec
+    _cssv = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
+    _root = _rec.search(r":root\{(.*?)\n\}", _cssv, _rec.S)
+    _var = dict(_rec.findall(r"--([a-z0-9-]+):\s*(#[0-9A-Fa-f]{6})", _root.group(1)))
+    _mat = [v for v in ("side", "bg", "panel", "panel-2") if v in _var]
+    _txt = [v for v in ("ink", "dim", "mute", "acc", "warn", "bad") if v in _var]
+    check("đọc được đủ 4 mặt nền và 6 bậc chữ", len(_mat) == 4 and len(_txt) == 6)
+    _low = [f"{t} trên {m} = {_cr(_var[t], _var[m]):.2f}"
+            for t in _txt for m in _mat if _cr(_var[t], _var[m]) < 4.5]
+    check("mọi bậc chữ đọc được trên mọi mặt nền (>=4.5:1)", not _low, str(_low))
+    # Tự chứng: đắp lại giá trị CŨ thì luật trên PHẢI gãy. Không có dòng này
+    # thì một hôm nào đó :root đổi tên biến, vòng lặp quét 0 cặp và vẫn xanh.
+    check("luật này bắt được đúng lỗi cũ (#717976)",
+          _cr("#717976", _var["panel-2"]) < 4.5)
+    # Xám phải TRUNG TÍNH — xám ngả màu thì cãi nhau với màu nhấn.
+    _amm = {k: max(int(_var[k][i:i + 2], 16) for i in (1, 3, 5))
+            - min(int(_var[k][i:i + 2], 16) for i in (1, 3, 5)) for k in _mat}
+    check("mặt nền là xám trung tính, không ám màu", max(_amm.values()) == 0, str(_amm))
+
+    # KHUNG NÓI NHỎ, NỘI DUNG NÓI TO. Trước đây ngược: thanh bên 8.1:1 và
+    # thanh trạng thái 12.2:1 trong khi nội dung chỉ 6.8:1 — đồ phụ hét to hơn
+    # việc đang làm. Chữ khung đo trên --side, chữ nội dung đo trên --panel.
+    # BẬC NỀN: tương phản phải dồn vào chỗ LÀM VIỆC, không dồn vào đồ phụ.
+    # VS Code chỉ có hai mặt phẳng: khung nằm dưới editor 3.5 điểm L* (yếu),
+    # mặt nổi bật lên 8.6 điểm (mạnh). Bản cũ của ta chia đều +3.5 / +3.9 nên
+    # thanh bên nặng ngang nội dung — thẻ không nổi lên được.
+    def _ls(h):
+        def _lin(c):
+            c /= 255
+            return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+        h = h.lstrip("#")
+        r, g, bl = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+        y = .2126 * _lin(r) + .7152 * _lin(g) + .0722 * _lin(bl)
+        return 116 * y ** (1 / 3) - 16 if y > 0.008856 else 903.3 * y
+
+    def _luat(var):
+        """(nền main có đen không, khung có xám-sáng-hơn-main không, thẻ bật bao nhiêu)"""
+        return (_ls(var["bg"]) <= 5.0,
+                _ls(var["side"]) - _ls(var["bg"]) >= 3.0,
+                _ls(var["panel"]) - _ls(var["bg"]))
+    _den, _xam, _bat = _luat(_var)
+    check(f"nền vùng main là ĐEN (L*{_ls(_var['bg']):.1f} <= 5)", _den)
+    check(f"khung phụ là XÁM, sáng hơn main "
+          f"(+{_ls(_var['side']) - _ls(_var['bg']):.1f})", _xam)
+    check(f"thẻ bật hẳn khỏi nền main (+{_bat:.1f} >= 8)", _bat >= 8.0)
+    # Tự chứng: bộ CŨ (khung tối hơn main, thẻ bật yếu) phải phá cả ba luật.
+    _cu = {"side": "#161616", "bg": "#1D1D1D", "panel": "#252525"}
+    check("luật này bắt được đúng bộ cũ (khung tối hơn main)",
+          not any((_luat(_cu)[0], _luat(_cu)[1], _luat(_cu)[2] >= 8.0)))
+
+    _sc = _rec.search(r"\.side,\.statusbar\{(.*?)\}", _cssv, _rec.S)
+    _cvar = dict(_rec.findall(r"--([a-z0-9-]+):\s*(#[0-9A-Fa-f]{6})", _sc.group(1)))
+    check("khung app khai lại đủ ba bậc chữ của riêng nó",
+          sorted(_cvar) == ["dim", "ink", "mute"])
+    _khung = max(_cr(v, _var["side"]) for v in _cvar.values())
+    _noidung = min(_cr(_var[t], _var["panel"]) for t in ("ink", "dim", "mute"))
+    check(f"chữ khung nhạt hơn chữ nội dung ({_khung:.2f} < {_noidung:.2f})",
+          _khung < _noidung)
+    check("nhưng chữ khung vẫn đọc được (>=4.5:1)",
+          min(_cr(v, _var["side"]) for v in _cvar.values()) >= 4.5)
+    # Tự chứng: bậc chữ khung CŨ (dùng chung --dim của nội dung) phải phá luật.
+    check("luật này bắt được đúng lỗi cũ (khung dùng chung --dim)",
+          not _cr(_var["dim"], _var["side"]) < _noidung)
+
     print("\n[Cài đặt là MENU, không phải tab]")
     _, home = get("/")
     check("Settings không còn trong thanh bên", "href='/settings'" not in home)
-    check("có nút bánh răng trên thanh trên", "data-settings" in home)
+    check("có nút bánh răng ở đáy thanh bên", "data-appset" in home)
     check("và có sẵn tấm phủ rỗng để nạp vào", "data-sheet" in home)
     check("tấm phủ mặc định ĐANG ĐÓNG", "class=sheet hidden" in home)
 
@@ -367,13 +490,185 @@ with tempfile.TemporaryDirectory() as tmp:
     check("mọi mục nav có title để lúc gập còn biết là gì",
           bool(_navlinks) and all("title=" in a for a in _navlinks),
           f"{sum('title=' not in a for a in _navlinks)}/{len(_navlinks)} thiếu")
-    check("dòng trạng thái dưới cùng cũng có title",
-          "class=navfoot title=" in home_html)
-    css = get("/static/app.css")[1]
-    check("gập thì ĐỔI --nav-w, không chỉnh sidebar rời khỏi nội dung",
-          ":root.navmin{--nav-w:" in css)
-    check("gập thì giấu chữ, giữ icon",
-          ".navmin .navlink span{display:none}" in css)
+    # navfoot ở thanh bên ĐÃ BỎ: nó hiện đúng thông tin mà thanh trạng thái
+    # đáy app đang hiện — hai chỗ một sự thật thì có ngày lệch nhau.
+    _, _with_status = get("/profile")
+    check("thanh trạng thái nằm ở ĐÁY APP, không trong thanh bên",
+          "class=statusbar" in _with_status and "class=navfoot" not in _with_status)
+
+    print("\n[thanh của KHÚC — một khối cho mọi chức năng]")
+    _, _srch = get("/search")
+    check("Search có thanh khúc", "<header class=topbar>" in _srch)
+    check("có nút Chạy của riêng nó", "/api/stage/start" in _srch)
+    check("có nút Dừng của riêng nó", "/api/stage/stop" in _srch)
+    check("nút chạy/dừng mang tên khúc", "data-arg='search'" in _srch)
+    check("có nút Điều chỉnh ⚟", "data-settings='/adjust/search'" in _srch)
+    check("có số liệu, không phải câu văn", _srch.count("class=metric") >= 3)
+    # MỘT viên pill căn giữa, không phải dải kéo hết bề ngang: trên màn 1900px
+    # dải đẩy tên khúc sang trái và nút sang phải cách nhau cả gang tay.
+    check("có viên thuốc điều khiển", "class=deckpill" in _srch)
+    # .pill ĐÃ CÓ SẴN: huy hiệu trạng thái trên bảng Quản lí (.pill.applied,
+    # .pill.interview…). Đặt trùng tên là đúng lớp lỗi .frow/.prow đã sửa.
+    # Vẽ thẳng view với một dòng mẫu: DB thử không có lần nộp nào nên bảng
+    # thật không vẽ huy hiệu, và bài test sẽ xanh mà chẳng kiểm gì.
+    from jobbot.dashboard.views import track as _tk
+    from jobbot.track import board as _bd2
+    _trk = _tk.render(
+        rows=[dict(id=1, stage=_bd2.SENT, company="X", role="R", days=1,
+                   event_days=None, last_event="", silent=False, cv_file="",
+                   posting_id=None, url="", score=0)],
+        asks=[], counts={"total": 1}, mail_ready=False, mail_address="")
+    check("bảng Quản lí vẫn vẽ huy hiệu .pill", "class='pill " in _trk)
+    check("và huy hiệu KHÔNG dính kiểu của viên thuốc",
+          "class=deckpill" not in _trk)
+    _cssP = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
+    check("viên thuốc căn giữa", "align-items:center" in _cssP)
+    check("viên thuốc bo tròn", ".deckpill{" in _cssP)
+    # NẰM NGANG, không bao giờ xếp cao: cho xuống dòng thì màn hẹp nó phình
+    # thành khối 211px, hết còn là viên thuốc.
+    _pl = _cssP[_cssP.index(".deckpill{"):_cssP.index(".deckpill{") + 320]
+    check("viên thuốc KHÔNG xuống dòng", "flex-wrap:nowrap" in _pl)
+    # Màn quá hẹp thì cuộn ngang, KHÔNG giấu nút: một nút bấm không tới được
+    # thì cũng như không có.
+    check("quá hẹp thì cuộn ngang", "overflow-x:auto" in _pl)
+    # Tất cả trong MỘT viên: tên khúc, số liệu, nút. Đẩy số liệu ra ngoài thì
+    # thanh vỡ thành ba tầng rời rạc.
+    _pillhtml = _srch[_srch.index("class=deckpill"):]
+    _pillhtml = _pillhtml[:_pillhtml.index("</div>")]
+    check("số liệu nằm TRONG viên thuốc", "class=metric" in _pillhtml)
+    check("nút cũng trong viên thuốc", "/api/stage/start" in _pillhtml)
+    # `nowrap` trần thì màn hẹp là dòng trạng thái chạy quá mép pill rồi bị
+    # cắt cụt giữa chữ.
+
+    print("\n[thanh TRẠNG THÁI đáy app]")
+    # Tin CHUNG của cả app, không thuộc tab nào. Dòng "tự động: TẮT · quét lần
+    # cuối…" trước nằm trong thanh của tab — sai chỗ: nó không phải số liệu của
+    # khúc, nó là trạng thái của app.
+    for _pg2 in ("/", "/search", "/track", "/profile"):
+        _b2 = get(_pg2)[1]
+        check(f"{_pg2} có thanh trạng thái", "class=statusbar" in _b2)
+    # Thanh trạng thái chạy HẾT bề ngang, kể cả dưới thanh bên — nó là tin của
+    # cả app. Kèm đó thanh bên phải chừa chỗ, không thì nút Cài đặt bị che.
+    _cssb = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
+    check("thanh trạng thái tràn hết bề ngang",
+          ".statusbar{position:fixed;left:0;right:0" in _cssb)
+    check("thanh bên chừa chỗ cho nó", "calc(10px + var(--status-h))" in _cssb)
+    check("thanh đáy có ô trạng thái sống", "data-state" in _srch)
+    check("và ô tin gần nhất", "data-lastmsg" in _srch)
+    # Một trang chỉ được nói trạng thái chung MỘT lần. live.js ghi vào MỌI
+    # [data-state], nên hai ô là hai dòng chữ y hệt nhau nằm hai đầu màn.
+    for _pg3 in ("/", "/search", "/cv", "/track", "/profile", "/projects"):
+        _, _b3 = get(_pg3)
+        check(f"{_pg3} chỉ có một ô trạng thái", _b3.count("data-state") == 1)
+    # live.js đổ vào từ dòng SSE — không luồn tham số qua chục hàm render.
+    _js2 = (Path(__file__).resolve().parent.parent
+            / "src/jobbot/dashboard/web/live.js").read_text(encoding="utf-8")
+    check("live.js có hàm đổ tin", "function setLastMessage" in _js2)
+    check("gọi khi có sự kiện mới", _js2.count("setLastMessage(") >= 3)
+    check("nội dung không nấp sau thanh đáy", "var(--status-h)" in _cssP)
+    # navfoot cũ hiện đúng thông tin đó ở thanh bên — hai chỗ một sự thật.
+    _lay2 = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/dashboard/layout.py").read_text(encoding="utf-8")
+    check("bỏ hẳn navfoot ở thanh bên", "navfoot" not in _lay2)
+    check("và bỏ tham số status= đã chết", "status: str" not in _lay2)
+    # Hai nút "Chạy ngay"/"Bật tự quét" cũ nằm trên thanh TOÀN APP nhưng chỉ
+    # điều khiển đúng khúc Search. Thanh mang danh cả app mà làm việc một khúc.
+    check("bỏ hẳn nút toàn app", "data-act=run" not in _srch
+          and "data-act=pause" not in _srch)
+    # ⚟ dùng LẠI tấm phủ của Cài đặt — mỗi đường mới là một nút có thể chết.
+    _cA, _adj = get("/adjust/search")
+    check("/adjust/search trả mảnh HTML", _cA == 200 and "Điều chỉnh" in _adj)
+    check("và chứa lưới sàng", "/api/sieve" in _adj)
+    check("khúc lạ thì 404", get("/adjust/khong-co-that")[0] == 404)
+    # Lọc (bấm vài giây một lần) phải ở NGAY trên trang, không giấu vào menu.
+    check("bộ lọc vẫn ở trên trang", "?show=" in _srch or "show=" in _srch)
+
+    print("\n[dừng phải dừng THẬT, không phải nút cho có]")
+    _run = (Path(__file__).resolve().parent.parent
+            / "src/jobbot/scan_runner.py").read_text(encoding="utf-8")
+    _li = (Path(__file__).resolve().parent.parent
+           / "src/jobbot/ingest/web/linkedin.py").read_text(encoding="utf-8")
+    # `stop()` của lịch trình chỉ chặn lần chạy SAU. Một vòng quét chạy 8-16
+    # phút vì mở Chrome đọc từng tin — nút Dừng mà không ngắt được là nút chết.
+    check("ngắt giữa hai nguồn API", "halt.wanted(STAGE)" in _run)
+    check("truyền cờ xuống LinkedIn", "stop=lambda: halt.wanted(STAGE)" in _run)
+    check("ngắt trong vòng ĐỌC KỸ (chỗ tốn 8-16 phút)", "đã đọc kỹ" in _li)
+    check("ngắt cả trong vòng tìm", "mới xong" in _li)
+    _halt = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/core/halt.py").read_text(encoding="utf-8")
+    # Dừng vòng quét KHÔNG được dừng luôn việc quét thư đang chạy song song.
+    check("cờ theo TỪNG khúc, không phải một cờ chung", "stage: str" in _halt)
+    _srv = (Path(__file__).resolve().parent.parent
+            / "src/jobbot/dashboard/server.py").read_text(encoding="utf-8")
+    # Thêm một chức năng mới thì không được đẻ thêm route.
+    check("hai route dùng chung cho mọi khúc",
+          '"/api/stage/start", "/api/stage/stop"' in _srv)
+    check("khúc lạ bị từ chối", 'stage not in STAGES' in _srv)
+
+    print("\n[khung không được bỏ phí — MỌI trang, không riêng trang nào]")
+    import re as _re9
+    _css9 = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
+    _bare = _re9.sub(r"/\*.*?\*/", "", _css9, flags=_re9.S)
+
+    # Lỗi gốc: `.inner{max-width:840px}` chặn cứng MỌI trang kiểu dòng chảy.
+    # Đo trên màn 1900px: khung 1684, nội dung 840 -> bỏ trống 844px, ở BỐN
+    # trang cùng lúc. Vá một trang là để ba trang kia y nguyên.
+    _inner = _re9.search(r"\.inner\{([^}]*)\}", _bare)
+    check("có luật .inner", bool(_inner))
+    _mw = _re9.search(r"max-width:([^;}]+)", _inner.group(1)) if _inner else None
+    check(".inner KHÔNG còn trần cố định",
+          bool(_mw) and _mw.group(1).strip() == "none",
+          _mw.group(1).strip() if _mw else "không có max-width")
+    # Bề rộng là tính chất của NỘI DUNG: chỉ đoạn văn mới cần bề rộng đọc được.
+    check("nhưng đoạn văn vẫn giữ bề rộng đọc được",
+          bool(_re9.search(r"\.inner p[^{]*\{[^}]*max-width:\d+ch", _bare)))
+    # Cờ `wide=` là nút mà mỗi trang phải NHỚ bật — sẽ có trang quên. Đã bỏ.
+    _lay = (Path(__file__).resolve().parent.parent
+            / "src/jobbot/dashboard/layout.py").read_text(encoding="utf-8")
+    check("bỏ hẳn cờ wide (đường dễ quên)", "wide" not in _lay)
+    check("và không còn luật CSS .wide", "main.wide" not in _bare)
+
+    # Duyệt THẬT mọi trang trong thanh bên, không chỉ trang vừa sửa.
+    _c9, _nav = get("/")
+    _pages = set(_re9.findall(r"<a class='navlink[^']*' href='([^']+)'", _nav))
+    _pages |= {"/profile/health", "/profile/import", f"/jobs/{job_id}"}
+    check("tìm được đủ trang để kiểm", len(_pages) >= 7, str(sorted(_pages)))
+    for _pg in sorted(_pages):
+        _code, _body = get(_pg)
+        if _code != 200:
+            check(f"{_pg} mở được", False, f"HTTP {_code}")
+            continue
+        _m = _re9.search(r"<main class='([^']*)'", _body)
+        check(f"{_pg} không mang lớp cố định bề rộng",
+              bool(_m) and "wide" not in _m.group(1))
+
+    # Bảng: `width` trên ô chỉ là GỢI Ý khi bảng tự dàn cột — nhãn dài kéo cột
+    # ra 650px. Và dàn cột cố định thì Chrome BỎ QUA min()/clamp() (đo được:
+    # rơi về 803px), chỉ nhận px hoặc phần trăm.
+    check("bảng hồ sơ dàn cột cố định", "table-layout:fixed" in _bare)
+    _th = _bare[_bare.index(".sum th{"):_bare.index(".sum th{") + 260]
+    check("cột nhãn dùng bề rộng trần, không min()/clamp()",
+          "width:340px" in _th and "min(" not in _th and "clamp(" not in _th)
+    check("màn hẹp có luật riêng cho cột nhãn", ".sum th{width:40%}" in _bare)
+
+    print("\n[Home đang để trống, chờ thiết kế lại]")
+    _, _blank = get("/")
+    check("Home vẫn mở được", "Home" in _blank)
+    check("và nói rõ là đang trống", "đang trống" in _blank)
+    # Gỡ nội dung mà để lại đống code nuôi nó thì mới là bẩn.
+    for _gone in ("class=funnel", "class=needs", "class=stats", "class=plot"):
+        check(f"không còn {_gone}", _gone not in _blank)
+    _live8 = (Path(__file__).resolve().parent.parent
+              / "src/jobbot/dashboard/live.py").read_text(encoding="utf-8")
+    for _fn in ("def run_status", "def counters", "def needs_you", "def activity",
+                "def per_day", "def chances", "def funnel"):
+        check(f"live.py đã gỡ {_fn[4:]}", _fn not in _live8)
+    check("dashboard/plot.py đã xoá",
+          not (Path(__file__).resolve().parent.parent
+               / "src/jobbot/dashboard/plot.py").exists())
 
     print("\n[Search: ba ô — danh sách · lưới lọc · nhật ký dẹt]")
     from jobbot.dashboard.views.runtime import _rows_needed
@@ -381,47 +676,42 @@ with tempfile.TemporaryDirectory() as tmp:
           _rows_needed([("a", "", 1, 4), ("b", "", 2, 4)], 3, 0) == 4)
 
     _, search_html = get("/search")
+    _, adj_html = get("/adjust/search")
     check("ô danh sách việc", "Việc tìm được" in search_html)
-    check("ô lưới lọc", "Lưới lọc" in search_html)
     check("ô nhật ký dạng dẹt", "class=jflat" in search_html)
     check("tiến độ gộp vào dải nhật ký", "data-progress='search'" in search_html)
-    # Nhật ký nằm GÓC DƯỚI TRÁI, không kéo hết bề ngang — nó là thứ liếc mắt,
-    # chiếm cả chiều ngang là ăn mất chỗ của danh sách.
-    check("nhật ký ở góc, không full width",
-          "wid flat corner" in search_html)
-    check("và ghim đúng ô (1,2)", "grid-column:1 / span 1;grid-row:2" in search_html)
-    # Danh sách kéo suốt hai hàng -> chạm đáy màn hình.
-    check("danh sách việc kéo suốt chiều cao",
-          "grid-column:2 / span 1;grid-row:1 / span 2" in search_html)
-    # Cột lưới rộng hơn kiểu chia đều ba cột (366px).
-    check("cột lưới được nới rộng", "minmax(360px, 1fr) 1.75fr" in search_html)
+    # Lưới sàng đã chuyển vào ⚟ nên cột trái hết việc: danh sách — thứ Vin
+    # thật sự đọc — lấy cả bề ngang, nhật ký về dải dẹt dưới đáy.
+    check("danh sách ăn cả bề ngang", "Lưới lọc" not in search_html)
+    check("nhật ký là dải dưới đáy, không phải ô góc",
+          "wid flat corner" not in search_html)
 
-    # Lưới lọc phải SỬA ĐƯỢC — không phải bảng đọc như bản trước.
-    check("lưới lọc là FORM thật", "form class=sieve" in search_html)
+    # Lưới sàng phải SỬA ĐƯỢC — và giờ nó nằm sau nút ⚟, không chiếm chỗ
+    # thường trực trên trang. LỌC thì vẫn ở trên trang (bấm vài giây một lần);
+    # SÀNG đổi vài tháng một lần và mỗi lần là phán lại toàn kho.
+    check("lưới sàng là FORM thật", "form class=sieve" in adj_html)
+    check("và KHÔNG còn chiếm chỗ trên trang", "form class=sieve" not in search_html)
     # Chức danh là Ô THẺ, không phải khối chữ: gõ rồi Enter là thêm, bấm ×
     # là bỏ. Khối chữ bắt người dùng tự nhớ luật "mỗi dòng một cái", và một
     # dòng trống hay dấu phẩy thừa là ra chức danh rác.
     check("chức danh là ô thẻ, KHÔNG phải khối chữ",
-          "class=tagbox" in search_html and "<textarea" not in search_html)
-    # KHÔNG so với PROFILE của fixture: khối POST phía trên đã sửa job_titles,
-    # nên số chức danh lúc này khác lúc nạp. Kiểm tính nhất quán nội tại —
-    # bao nhiêu thẻ thì bấy nhiêu dấu × và bấy nhiêu giá trị gửi lên.
-    n_tags = search_html.count("<span class=tag>")
+          "class=tagbox" in adj_html and "<textarea" not in adj_html)
+    n_tags = adj_html.count("<span class=tag>")
     check("có ít nhất một thẻ", n_tags > 0)
     check("mỗi thẻ có đúng một dấu × để bỏ",
-          search_html.count("data-untag") == n_tags)
+          adj_html.count("data-untag") == n_tags)
     check("mỗi thẻ mang đúng một giá trị gửi lên",
-          search_html.count("name=job_titles") == n_tags)
+          adj_html.count("name=job_titles") == n_tags)
     check("nút × là type=button, không gửi nhầm cả form",
-          "<button type=button class=untag" in search_html)
-    check("có ô để gõ thêm", "class=taginput" in search_html)
+          "<button type=button class=untag" in adj_html)
+    check("có ô để gõ thêm", "class=taginput" in adj_html)
     check("có ô tích cấp bậc và thị trường",
-          "name=seniority" in search_html and "name=markets" in search_html)
-    check("có nút Áp dụng", "Áp dụng" in search_html)
+          "name=seniority" in adj_html and "name=markets" in adj_html)
+    check("có nút Áp dụng", "Áp dụng" in adj_html)
     # Nút phải nói TRƯỚC hậu quả, không phải "Lưu" trống không.
-    check("nút nói rõ sẽ phán lại bao nhiêu tin", "phán lại" in search_html)
+    check("nút nói rõ sẽ phán lại bao nhiêu tin", "phán lại" in adj_html)
     check("và nói rõ đây là hồ sơ, sửa là đổi cả điểm",
-          "hồ sơ" in search_html and "đổi cả điểm" in search_html)
+          "hồ sơ" in adj_html and "đổi cả điểm" in adj_html)
 
     # Nút XEM tách khỏi lưới: bấm là đổi ngay, không qua Áp dụng.
     check("nút XEM là link, không nằm trong form",
@@ -484,6 +774,90 @@ with tempfile.TemporaryDirectory() as tmp:
         check(f"{page} mở được", code == 200, f"HTTP {code}")
         check(f"{page} không trả trang lỗi", "Traceback" not in body)
 
+    print("\n[mọi liên kết trong trang phải tới được]")
+    _links = set()
+    # Không tìm thấy link nào nghĩa là bài test này KHÔNG kiểm gì —
+    # tệ hơn không có, vì nó vẫn xanh.
+    for _page in ("/", "/search", "/track", "/projects", "/cv", "/profile"):
+        _s3, _b3 = get(_page)
+        if _s3 != 200:
+            continue
+        _links |= set(_re2.findall(r"href='(/[^'#?]*)", _b3))
+        _links |= set(_re2.findall(r'href="(/[^"#?]*)', _b3))
+    for _href in sorted(_links):
+        if _href.startswith("/static") or _re2.search(r"/\d+", _href):
+            continue
+        _c4, _ = get(_href)
+        check(f"liên kết {_href} tới được", _c4 in (200, 303), f"HTTP {_c4}")
+    check("có liên kết để mà kiểm", len(_links) >= 5, str(len(_links)))
+
+    print("\n[thanh bên: logo và mục Cài đặt ở đáy]")
+    _c7, _home = get("/")
+    check("mục Cài đặt có trong thanh bên", "navend" in _home)
+    # Là <button>, KHÔNG phải <a>: /settings trả về MẢNH HTML cho tấm phủ,
+    # link tới đó là ra trang trắng.
+    import re as _re7
+    _end = _re7.search(r"<div class=navend>(.*?)</div>", _home, _re7.S)
+    check("Cài đặt là nút, không phải link", bool(_end) and "<button" in _end.group(1))
+    check("và không phải thẻ <a>", bool(_end) and "<a " not in _end.group(1))
+    # Dùng CHUNG data-settings với bánh răng trên thanh master: một trình nghe
+    # lo cả hai, không thêm đường nào mới để mà chết.
+    # Dùng CHUNG `data-settings` với bánh răng trên thanh master: một trình
+    # nghe lo cả hai, không thêm đường nào mới để mà chết. Đếm theo VÙNG, không
+    # đếm cả trang — vài trang còn nút mở tấm phủ khác cũng dùng thuộc tính đó.
+    # Nút Cài đặt KHÔNG dùng chung đường với nút ⚟ của khúc: ⚟ chỉnh khúc,
+    # Cài đặt chỉnh cả app. Chung một thuộc tính thì sớm muộn chung luôn nội
+    # dung, rồi lại thành "một thanh vừa của app vừa của khúc" như thanh cũ.
+    check("mục Cài đặt mang data-appset",
+          bool(_end) and "data-appset" in _end.group(1))
+    check("và KHÔNG dính vào khung ⚟ của khúc",
+          bool(_end) and "data-settings" not in _end.group(1))
+    # Bánh răng ĐÃ RỜI thanh trên cùng: Cài đặt (toàn app) về đáy thanh bên,
+    # còn thanh trên cùng giờ là thanh của KHÚC đang mở, mang nút ⚟ Điều chỉnh
+    # của riêng khúc đó. Một thanh không thể vừa là của app vừa là của khúc.
+    # Trang chưa có khúc thì KHÔNG vẽ thanh trên cùng: trạng thái chung đã ở
+    # thanh đáy, vẽ thêm dòng y hệt trên đầu là nói hai lần.
+    check("trang chưa có khúc thì không có thanh trên cùng",
+          "class='topbar" not in _home and "class=runstate" not in _home)
+    _, _s2 = get("/search")
+    _bar2 = _re7.search(r"<header class=topbar>(.*?)</header>", _s2, _re7.S)
+    check("trang có khúc thì thanh mang nút ⚟ của khúc",
+          bool(_bar2) and "data-settings='/adjust/search'" in _bar2.group(1))
+    _css7 = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
+    _, _sv = get("/")
+    check("logo là chìa khoá vẽ bằng SVG", "<svg class=logo" in _sv)
+    check("ba vòng chìa là vòng THẬT — có lỗ, không phải chấm đặc",
+          _sv.count("<circle") == 3 and "fill=none" in _sv)
+    check("logo ăn màu từ CSS, không đóng cứng trong hình",
+          "currentColor" in _sv and ".logo{" in _css7)
+    check("navend bị đẩy xuống đáy", "margin-top:auto" in _css7)
+
+    print("\n[đường PHÁ HOẠI không được là đường mặc định]")
+    # Một POST rỗng tới /api/sieve đã XOÁ SẠCH lưới lọc chức danh: mọi tin lọt
+    # lưới (đo được 197 -> 4660 tin), tab Search đầy rác, và không có cảnh báo
+    # nào. Cùng lớp lỗi với /api/mail/forget xoá app password.
+    for _bad in (b"", b"arg=abc", b"seniority=junior"):
+        _c5 = post("/api/sieve", _bad)
+        check(f"POST rỗng tới /api/sieve bị từ chối ({_bad[:12]!r})", _c5 == 400,
+              f"HTTP {_c5}")
+    _conn5 = db.connect(Path(tmp) / "jobbot.db")
+    _titles5 = (store.load(_conn5).get("job_titles") or "")
+    _conn5.close()
+    check("lưới lọc còn nguyên sau mấy cú POST đó", bool(_titles5.strip()))
+
+    print("\n[tab CV phải mở NHANH]")
+    import time as _t5
+    from jobbot.dashboard import live as _live5
+    _conn6 = db.connect(Path(tmp) / "jobbot.db")
+    _live5._BLOCK_CACHE.clear()
+    _t0 = _t5.perf_counter(); _live5.cv_blocks(_conn6); _cold = _t5.perf_counter() - _t0
+    _t0 = _t5.perf_counter(); _live5.cv_blocks(_conn6); _warm = _t5.perf_counter() - _t0
+    # Đo trên máy Vin: 7,8 giây MỖI LẦN gọi, và tab CV gọi nó mỗi lần mở.
+    check("cv_blocks có cache", _warm < _cold / 5 or _warm < 0.01,
+          f"lạnh {_cold:.3f}s · ấm {_warm:.3f}s")
+    _conn6.close()
+
     print("\n[thoát HTML — dữ liệu cào về không được thành mã]")
     conn = db.connect(Path(tmp) / "jobbot.db")
     conn.execute("UPDATE posting SET company = ? WHERE kept = 1",
@@ -512,6 +886,24 @@ with tempfile.TemporaryDirectory() as tmp:
 
     httpd.shutdown(); httpd.server_close()
     os.environ.pop("JOBBOT_DATA_DIR", None)
+
+print("\n[CSS: hai class cùng tên KHÔNG được đá nhau về bố cục]")
+import re as _re2
+from collections import Counter as _C
+_css = (Path(__file__).resolve().parent.parent
+        / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
+_depth, _seen = 0, {}
+for _line in _css.splitlines():
+    _m = _re2.match(r"\s*(\.[a-zA-Z][\w-]*)\s*\{(.*)$", _line)
+    if _m and _depth == 0:
+        _disp = _re2.search(r"display\s*:\s*([a-z-]+)", _m.group(2))
+        if _disp:
+            _seen.setdefault(_m.group(1), set()).add(_disp.group(1))
+    _depth += _line.count("{") - _line.count("}")
+_clash = {k: v for k, v in _seen.items() if len(v) > 1}
+# .frow từng vừa là hàng lọc (flex) vừa là hàng phễu (grid): ô tải CV lên và
+# hàng lọc hồ sơ bị bẻ thành lưới 3 cột. .prow tương tự với thanh tiến độ.
+check("không class nào có hai kiểu display", not _clash, str(_clash))
 
 print("\n[nút trong form — bấm không được nuốt mất form]")
 _js = (Path(__file__).resolve().parent.parent

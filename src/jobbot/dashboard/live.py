@@ -16,7 +16,6 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from ..core import postings
-from ..dedup import group
 
 
 STALE_DAYS = 45          # quá ngần này thì nhiều khả năng đã tuyển xong
@@ -48,87 +47,6 @@ def _ago(stamp: str) -> str:
     if seconds < 172800:
         return f"{int(seconds // 3600)} hours ago"
     return f"{int(seconds // 86400)} days ago"
-
-
-def run_status(conn: sqlite3.Connection) -> dict:
-    runs = postings.last_runs(conn)
-    failed = [f"{r['source']} — {r['error'][:60]}" for r in runs if not r["ok"]]
-    last = max((r["at"] for r in runs), default="")
-    return {
-        "state": "idle" if runs else "never run",
-        "last_scan": _ago(last) if last else "never",
-        "next_scan": "manual — run scripts/scan.py",
-        "window": "08:00 – 22:00 (human-paced sources)",
-        "sources_ok": sum(1 for r in runs if r["ok"]),
-        "sources_total": len(runs),
-        "sources_failed": failed,
-    }
-
-
-def counters(conn: sqlite3.Connection) -> list[dict]:
-    total = postings.count(conn)
-    kept = postings.count(conn, kept_only=True)
-    unique = postings.count_groups(conn)
-    strong = int(conn.execute("SELECT COUNT(*) FROM posting WHERE kept=1 AND score >= 75").fetchone()[0])
-    return [
-        {"value": f"{total:,}", "label": "Postings pulled", "note": "all sources"},
-        {"value": f"{kept:,}", "label": "Match your titles", "note": f"{total - kept:,} filtered out"},
-        {"value": f"{unique:,}", "label": "Unique jobs", "note": f"{kept - unique} duplicates merged"},
-        {"value": f"{strong}", "label": "Scored 75+", "note": "strong matches"},
-        {"value": "—", "label": "Applications", "note": "step 5"},
-        {"value": "—", "label": "Replies", "note": "step 6"},
-    ]
-
-
-def per_day(conn: sqlite3.Connection, days: int = 14) -> list[tuple[str, int]]:
-    """Mỗi ngày lấy về bao nhiêu tin MỚI — theo lúc CÀO VỀ, không phải lúc đăng.
-
-    Dùng raw_posting.fetched_at vì đây là câu hỏi "máy làm được gì mỗi ngày",
-    chứ không phải "thị trường đăng gì mỗi ngày". Ngày không có tin vẫn phải
-    có cột 0, nếu không biểu đồ nói dối về nhịp chạy.
-    """
-    rows = dict(conn.execute(
-        "SELECT substr(fetched_at, 1, 10) AS d, COUNT(*) FROM raw_posting"
-        " WHERE d >= date('now', ?) GROUP BY d", (f"-{days - 1} days",)).fetchall())
-    out = []
-    for back in range(days - 1, -1, -1):
-        day = conn.execute("SELECT date('now', ?)", (f"-{back} days",)).fetchone()[0]
-        out.append((day[8:10] + "/" + day[5:7], rows.get(day, 0)))
-    return out
-
-
-def chances(conn: sqlite3.Connection) -> list[tuple[str, int, str]]:
-    """Phân bố "có cửa không" — trả lời câu hỏi thật, không phải điểm khớp."""
-    got = dict(conn.execute(
-        "SELECT realism, COUNT(*) FROM posting WHERE kept = 1 GROUP BY realism").fetchall())
-    return [("likely", got.get("likely", 0), "hi"),
-            ("possible", got.get("possible", 0), "mid"),
-            ("unlikely", got.get("unlikely", 0), "lo")]
-
-
-def funnel(conn: sqlite3.Connection) -> list[dict]:
-    """Phễu: mỗi bậc là một câu SQL đếm được, không bậc nào là số bịa.
-
-    Bậc nào chưa làm thì ghi thẳng 'chưa làm' — để số 0 trần thì đọc ra là
-    "đã chạy mà không ra gì", sai hẳn nghĩa.
-    """
-    one = lambda sql: int(conn.execute(sql).fetchone()[0])
-    return [
-        {"name": "tải về", "n": one("SELECT COUNT(*) FROM posting"), "todo": False},
-        {"name": "qua bộ lọc", "n": one("SELECT COUNT(*) FROM posting WHERE kept=1"),
-         "todo": False},
-        {"name": "việc duy nhất",
-         "n": one("SELECT COUNT(DISTINCT COALESCE(group_id, CAST(id AS TEXT)))"
-                  " FROM posting WHERE kept=1"), "todo": False},
-        {"name": "chấm được",
-         "n": one("SELECT COUNT(*) FROM posting WHERE kept=1 AND score IS NOT NULL"),
-         "todo": False},
-        {"name": "đáng nộp",
-         "n": one("SELECT COUNT(*) FROM posting WHERE kept=1 AND score>=70"
-                  " AND realism!='unlikely'"), "todo": False},
-        {"name": "đã gửi", "n": 0, "todo": True},
-        {"name": "có hồi âm", "n": 0, "todo": True},
-    ]
 
 
 def sieve(conn: sqlite3.Connection) -> dict:
@@ -276,74 +194,6 @@ def _reqs(row) -> list[dict]:
     data = json.loads(row["score_json"])
     return [{"text": r["text"], "met": r["met"], "must": r["must"],
              "evidence": r["evidence"] or "—"} for r in data.get("requirements", [])]
-
-
-def needs_you(conn: sqlite3.Connection) -> list[dict]:
-    """Chỉ nói những việc CÓ THẬT. Chưa tới bước nào thì nói thẳng chưa tới."""
-    out: list[dict] = []
-    unique = postings.count_groups(conn)
-
-    state = health(conn)
-    if state["stale"]:
-        out.append({
-            "kind": "warn",
-            "text": f"{state['stale']:,} postings were judged by older rules",
-            "href": "#settings",
-            "note": "Your profile or the matching rules changed. What you see below "
-                    "was decided before that — the next scan re-judges them.",
-        })
-    for run in state["broken"]:
-        out.append({
-            "kind": "warn",
-            "text": f"Source failing: {run['source']}",
-            "href": "#settings",
-            "note": run["error"][:130] or "no reason recorded",
-        })
-
-    if postings.count(conn) == 0:
-        out.append({"kind": "approve", "text": "No postings yet — run the first scan",
-                    "href": "#settings", "note": "python3 scripts/scan.py"})
-        return out
-
-    # Dòng này từng viết "waiting to be scored — scoring is step 2" và ở nguyên
-    # đó rất lâu sau khi bước 2 xong. Chữ cứng trên màn hình mà không tính từ dữ
-    # liệu thì nó chỉ đúng vào đúng ngày viết ra.
-    worth = int(conn.execute(
-        "SELECT COUNT(*) FROM posting WHERE kept = 1 AND via_agency = 0"
-        " AND score >= 70 AND realism IN ('likely','possible')").fetchone()[0])
-    strong = int(conn.execute(
-        "SELECT COUNT(*) FROM posting WHERE kept = 1 AND via_agency = 0"
-        " AND realism = 'likely'").fetchone()[0])
-    unscored = int(conn.execute(
-        "SELECT COUNT(*) FROM posting WHERE kept = 1 AND score IS NULL").fetchone()[0])
-
-    if worth:
-        out.append({
-            "kind": "approve",
-            "text": f"{worth} jobs are worth a look — {strong} of them are a real shot",
-            "href": "/search",
-            "note": "Direct employers only, scored 70+, and the posting does not rule "
-                    "you out on a PhD or years of experience.",
-        })
-    if unscored:
-        out.append({
-            "kind": "scan",
-            "text": f"{unscored} postings still have no description to judge from",
-            "href": "/search",
-            "note": "The deep-read pass has not reached them. Run "
-                    "python3 scripts/scan.py to fetch the full text.",
-        })
-    return out
-
-
-def activity(conn: sqlite3.Connection) -> list[dict]:
-    kind_map = {"scan_started": "scan", "scan_finished": "scan",
-                "source_failed": "warn"}
-    return [
-        {"time": _ago(r["at"]), "kind": kind_map.get(r["kind"], "check"),
-         "text": f"{r['kind'].replace('_', ' ')}" + (f" — {r['detail']}" if r["detail"] else "")}
-        for r in postings.recent_audit(conn, 12)
-    ]
 
 
 # ---------------------------------------------------------------- settings
@@ -548,6 +398,42 @@ def cv_versions(conn: sqlite3.Connection) -> dict:
     return value
 
 
+def search_stage(conn: sqlite3.Connection) -> dict:
+    """Số liệu + trạng thái của khúc SEARCH.
+
+    MỘT chỗ tính. Thanh của tab và bảng dây chuyền trên Home sau này đều đọc ở
+    đây — hai chỗ tự đếm là hai con số rồi có ngày lệch nhau.
+    """
+    from ..core import halt
+    from ..core.scheduler import current as sched_now
+
+    one = lambda q: conn.execute(q).fetchone()[0]          # noqa: E731
+    worth = one("SELECT COUNT(*) FROM posting WHERE kept = 1"
+                " AND realism IN ('likely','possible')")
+    last = conn.execute(
+        "SELECT at FROM audit WHERE kind = 'scan_started'"
+        " ORDER BY id DESC LIMIT 1").fetchone()
+    when = (last["at"] or "")[11:16] if last else ""
+    # "Mới" = tin LẦN QUÉT NÀY mang về, đo bằng lúc tải raw về, không phải
+    # hiệu hai lần đếm: lấy hiệu thì quét về 10 tin mới mà đồng thời 10 tin cũ
+    # bị loại sẽ ra 0, và Vin không được báo gì cả.
+    fresh = one(
+        "SELECT COUNT(*) FROM posting p JOIN raw_posting r ON r.id = p.raw_id"
+        " WHERE p.kept = 1 AND r.fetched_at >= COALESCE("
+        "   (SELECT at FROM audit WHERE kind = 'scan_started'"
+        "    ORDER BY id DESC LIMIT 1), '')")
+
+    runner = sched_now()
+    if halt.wanted("search"):
+        state = "đang dừng…"
+    elif runner.running:
+        state = "đang quét"
+    else:
+        auto = "tự động: BẬT" if not runner.paused else "tự động: TẮT"
+        state = f"{auto} · quét lần cuối {when}" if when else f"{auto} · chưa quét lần nào"
+    return {"worth": worth, "fresh": fresh, "state": state}
+
+
 def cv_pdf_plan(conn: sqlite3.Connection) -> list[dict]:
     """Kế hoạch in: MỘT tệp cho MỖI BẢN CV, và tin nào dùng tệp nào.
 
@@ -579,11 +465,31 @@ def cv_pdf_plan(conn: sqlite3.Connection) -> list[dict]:
 
 
 def cv_pdf_for(conn: sqlite3.Connection, posting_id: int) -> Path | None:
-    """Bản PDF sẽ gửi kèm cho tin này. Chưa in thì trả None."""
+    """Đường dẫn bản PDF của tin này. LUÔN trả đúng một tên — người gọi tự
+    kiểm `.exists()` để biết đã in chưa.
+
+    Tin không nằm nhóm nào (điểm thấp, không lọt vòng dựng CV) thì vẫn phải có
+    tên, và tên đó phải theo ĐÚNG công thức của kế hoạch in. Nút "In bản này"
+    trước đây tự ghép tên theo công thức cũ (thiếu số hiệu tin) nên in ra một
+    tệp mà phần nộp không bao giờ đi tìm.
+    """
+    from pathlib import Path as _Path
+
+    from ..core import db as _db
+    from ..cv.pdf import slug
+
     for item in cv_pdf_plan(conn):
         if posting_id in item["ids"]:
             return item["file"]
-    return None
+    row = conn.execute("SELECT company, title FROM posting WHERE id = ?",
+                       (posting_id,)).fetchone()
+    if row is None:
+        return None
+    root = _Path(_db.db_path()).parent / "cv"
+    return root / f"{slug(row['company'])}-{slug(row['title'])}-{posting_id}.pdf"
+
+
+_BLOCK_CACHE: dict = {}
 
 
 def cv_blocks(conn: sqlite3.Connection) -> list[dict]:
@@ -597,6 +503,13 @@ def cv_blocks(conn: sqlite3.Connection) -> list[dict]:
     from ..cv.blocks import parse as parse_cv, sentences as split_cv
     from ..cv.build import skills_in
     from ..profile import store as pstore
+
+    # Có CACHE, như cv_versions. Đo được: 7,8 giây MỖI LẦN gọi, và tab CV gọi
+    # nó mỗi lần mở — Vin ngồi chờ 10 giây để xem một trang không đổi gì.
+    answers_now = pstore.load(conn)
+    key = _cv_key(conn, answers_now.get("cv_text") or "")
+    if _BLOCK_CACHE.get("key") == key:
+        return _BLOCK_CACHE["value"]
     from ..projects import inventory
 
     text = pstore.load(conn).get("cv_text") or ""
@@ -618,6 +531,7 @@ def cv_blocks(conn: sqlite3.Connection) -> list[dict]:
             "reach": sum(demand.get(s, 0) for s in skills),
         })
     out.sort(key=lambda b: -b["reach"])
+    _BLOCK_CACHE.update(key=key, value=out)
     return out
 
 

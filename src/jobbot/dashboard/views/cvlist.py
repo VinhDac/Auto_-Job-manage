@@ -17,6 +17,7 @@ CHỈ VẼ.
 from __future__ import annotations
 
 from html import escape as esc
+from urllib.parse import quote
 
 from . import runtime
 
@@ -118,7 +119,11 @@ def _blocks(blocks: list[dict], gaps: list[str]) -> str:
         dead = " dead" if b["reach"] == 0 else ""
         rows += (
             f"<a class='blk{dead}' href='#' data-settings="
-            f"'/cv/block?title={esc(b['title'])}'>"
+            # quote(), KHÔNG phải esc(): esc() là để CHỮ hiện an toàn trong
+            # HTML, còn đây là THAM SỐ URL. Tiêu đề "Research & Development"
+            # thoát HTML thành "Research &amp; Development" — dấu & vẫn cắt
+            # tham số, và trang mở ra một khối khác hoặc khối rỗng.
+            f"'/cv/block?title={quote(b['title'], safe='')}'>"
             f"<div class=blkmain>"
             f"<div class=blkhead><b>{esc(b['title'][:44])}</b>"
             f"<span class=blkkind>{esc(KIND_TAG.get(b['kind'], b['kind']))}</span></div>"

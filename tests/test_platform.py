@@ -96,13 +96,13 @@ def _pdf(lines):
     return (b"%PDF-1.4\n4 0 obj<</Length " + str(len(st)).encode()
             + b"/Filter/FlateDecode>>stream\n" + st + b"\nendstream endobj\n%%EOF")
 
-CV = _pdf(["DAC VINH NGUYEN  London, UK  dacvinh268@gmail.com"]
+CV = _pdf(["ADA GRACE LOVELACE  London, UK  you@example.com"]
           + ["EXPERIENCE  Analyst at Acme, built pipelines in Python and SQL"] * 4
           + ["EDUCATION  MSc Computational Finance, Royal Holloway 2026"])
 
 with platform_is(ic, "win32"):
     text = ic.from_pdf(CV)
-    check("Windows đọc được PDF chữ thường", "DAC VINH NGUYEN" in text)
+    check("Windows đọc được PDF chữ thường", "ADA GRACE LOVELACE" in text)
     check("và lấy được cả phần dưới", "Computational Finance" in text)
     # Font nhúng bảng mã riêng (LaTeX, Canva) bóc ra là rác. Nhét rác vào hồ
     # sơ còn tệ hơn báo lỗi — người dùng còn đường dán chữ.

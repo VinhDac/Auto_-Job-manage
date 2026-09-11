@@ -94,6 +94,15 @@ def _hide(text: str, secret: str) -> str:
     return text.replace(secret, "***") if secret else text
 
 
+def _made_id(msg) -> str:
+    """Id thay thế cho thư không có Message-ID — băm từ người gửi, tiêu đề,
+    ngày. Cùng một lá thư thì cùng một id, dù nó nằm ở vị trí nào."""
+    import hashlib
+
+    seed = "|".join(str(msg.get(h) or "") for h in ("From", "Subject", "Date"))
+    return "no-id-" + hashlib.sha1(seed.encode("utf-8", "replace")).hexdigest()[:20]
+
+
 def _text(raw) -> str:
     out = []
     for part, enc in decode_header(raw or ""):
@@ -135,26 +144,53 @@ def fetch(address: str, password: str, since_days: int = SINCE_DAYS,
             raise MailError(f"tìm thư hỏng: {ok}")
         ids = (data[0] or b"").split()[-limit:]
 
-        out = []
+        out, broken = [], 0
         for num in ids:
-            # BODY.PEEK: lấy mà KHÔNG đặt cờ \Seen. BODY[] thường thì có.
-            ok, chunk = box.fetch(num, "(BODY.PEEK[])")
-            if ok != "OK" or not chunk or not isinstance(chunk[0], tuple):
+            # MỘT lá thư dị dạng KHÔNG được giết cả vòng quét. Ngày sai định
+            # dạng, mã hoá lạ, MIME hỏng — parsedate_to_datetime và
+            # decode_header đều ném lỗi được, và một lá như thế làm mất luôn
+            # 29 lá còn lại. Thư quảng cáo hỏng thì bỏ; thư từ chối thì không
+            # được bỏ vì lá bên cạnh hỏng.
+            try:
+                # BODY.PEEK: lấy mà KHÔNG đặt cờ \Seen. BODY[] thường thì có.
+                ok, chunk = box.fetch(num, "(BODY.PEEK[])")
+                if ok != "OK" or not chunk or not isinstance(chunk[0], tuple):
+                    continue
+                msg = email.message_from_bytes(chunk[0][1])
+                addr = email.utils.parseaddr(msg.get("From", ""))
+                try:
+                    when = email.utils.parsedate_to_datetime(msg.get("Date", "")) \
+                        if msg.get("Date") else None
+                except (TypeError, ValueError):
+                    when = None
+            except Exception:                    # noqa: BLE001
+                broken += 1
                 continue
-            msg = email.message_from_bytes(chunk[0][1])
-            addr = email.utils.parseaddr(msg.get("From", ""))
-            when = email.utils.parsedate_to_datetime(msg.get("Date", "")) \
-                if msg.get("Date") else None
             out.append({
-                "msg_id": msg.get("Message-ID") or f"no-id-{num.decode()}",
+                # KHÔNG dùng số thứ tự làm id thay thế: số đó đổi mỗi khi hộp
+                # thư thêm/bớt thư, nên lần quét sau một lá KHÁC mang cùng
+                # "no-id-42" và bị coi là đã đọc rồi — thư từ chối biến mất.
+                # Băm từ chính nội dung thì id ổn định theo lá thư.
+                "msg_id": msg.get("Message-ID") or _made_id(msg),
                 "from_addr": addr[1], "from_name": _text(addr[0]),
                 "subject": _text(msg.get("Subject")),
                 "received_at": when.isoformat(timespec="seconds") if when else "",
                 "snippet": _body(msg),
             })
+        if broken:
+            from ..core.journal import SEARCH, log as jlog
+            jlog.warn(SEARCH, f"bỏ qua {broken} thư đọc không nổi (định dạng lạ)")
         return out
     finally:
+        # logout() ném lỗi khi kết nối đã gãy, và imaplib KHÔNG tự đóng socket
+        # bên dưới. Quét mỗi giờ, mạng chập chờn, là rò dần file descriptor.
         try:
             box.logout()
+        except Exception:                # noqa: BLE001
+            pass
+        try:
+            sock = getattr(box, "sock", None)
+            if sock is not None:
+                sock.close()
         except Exception:                # noqa: BLE001
             pass

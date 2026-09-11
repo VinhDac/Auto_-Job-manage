@@ -47,14 +47,30 @@ def add(conn: sqlite3.Connection, company: str, role: str,
     đẻ dòng mới — đó là một lần nộp, không phải hai."""
     key = norm(company)
     found = conn.execute(
-        "SELECT id FROM application WHERE company_key = ? AND role = ?",
-        (key, role)).fetchone()
+        "SELECT id, stage, posting_id FROM application"
+        " WHERE company_key = ? AND role = ?", (key, role)).fetchone()
     if found:
+        app_id = int(found["id"])
         if cv_file:
             conn.execute("UPDATE application SET cv_file = ? WHERE id = ?",
-                         (cv_file, found["id"]))
-            conn.commit()
-        return int(found["id"])
+                         (cv_file, app_id))
+        # Dòng dựng từ thư không có số hiệu tin. Không gắn vào thì nút Gửi đơn
+        # đi tìm cửa sổ theo posting_id và trả "không có tin gốc".
+        if posting_id and not found["posting_id"]:
+            conn.execute("UPDATE application SET posting_id = ? WHERE id = ?",
+                         (posting_id, app_id))
+        # NỘP LẠI nơi từng bị từ chối (công ty mở lại tin) là một lần nộp MỚI.
+        # Giữ nguyên chặng cũ thì bảng vẫn ghi "từ chối", nút Gửi đơn không
+        # hiện, và đơn Vin vừa điền không bao giờ đi. Kéo về nháp, nhưng NÓI RA
+        # kết cục cũ — mất lịch sử cũng là nói dối.
+        if stage == DRAFT and found["stage"] in (REJECTED, OFFER):
+            conn.execute(
+                "UPDATE application SET stage = ?, last_event = ?,"
+                " last_event_at = ? WHERE id = ?",
+                (DRAFT, f"nộp lại — lần trước: {STAGE_LABEL[found['stage']]}",
+                 _now(), app_id))
+        conn.commit()
+        return app_id
     cur = conn.execute(
         "INSERT INTO application (company, company_key, role, posting_id,"
         " origin, applied_at, stage, cv_file) VALUES (?,?,?,?,?,?,?,?)",
@@ -72,6 +88,31 @@ def set_stage(conn: sqlite3.Connection, app_id: int, stage: str,
         "UPDATE application SET stage = ?, last_event_at = ?, last_event = ?"
         " WHERE id = ?",
         (stage, _now(), event or STAGE_LABEL[stage], app_id))
+    conn.commit()
+
+
+SENDING = "sending"          # đang bấm Gửi — chặng TẠM, không hiện thành nhãn
+
+
+def claim(conn: sqlite3.Connection, app_id: int) -> bool:
+    """Giành quyền gửi lá đơn này. Trả True nếu giành được.
+
+    Một câu UPDATE ... WHERE stage = 'draft' là NGUYÊN TỬ: hai cú bấm cách
+    nhau hai giây thì chỉ một câu đổi được dòng, câu kia đếm 0. Đọc-rồi-ghi ở
+    tầng route thì cả hai cùng thấy 'draft' và cùng đi bấm Submit — hai lá đơn
+    giống nhau tới cùng một nhà tuyển dụng.
+    """
+    cur = conn.execute(
+        "UPDATE application SET stage = ? WHERE id = ? AND stage = ?",
+        (SENDING, app_id, DRAFT))
+    conn.commit()
+    return cur.rowcount == 1
+
+
+def unclaim(conn: sqlite3.Connection, app_id: int) -> None:
+    """Trả lại về nháp khi gửi không thành."""
+    conn.execute("UPDATE application SET stage = ? WHERE id = ? AND stage = ?",
+                 (DRAFT, app_id, SENDING))
     conn.commit()
 
 

@@ -111,9 +111,15 @@ def education(text: str) -> Education:
         out.missing = ["học vấn"]
         return out
 
-    left, _, right = head.partition("—")
-    if not right:
-        left, _, right = head.partition(" - ")
+    # Nhiều kiểu dấu ngăn. Chỉ nhận "—" và " - " thì Vin gõ "MSc X-Royal
+    # Holloway" hay "MSc X | Royal Holloway" là CẢ DÒNG chui vào ô ngành học
+    # và ô trường bỏ trống — nhà tuyển dụng nhận một chuỗi vô nghĩa.
+    left, right = head, ""
+    for dash in ("—", "–", " - ", " | ", " · ", ", "):
+        a, sep, b = head.partition(dash)
+        if sep and b.strip():
+            left, right = a, b
+            break
     left, right = left.strip(), right.strip()
 
     match = _DEGREE_HEAD.match(left)

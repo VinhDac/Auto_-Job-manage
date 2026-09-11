@@ -20,13 +20,11 @@ thứ. Muốn dài hơn thì làm thêm project, không phải lấp thêm câu.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 
 from ..ingest.base import norm
-from ..scoring.vocab import ALIASES, alias_hits
+from ..scoring.vocab import alias_hits
 from . import rules
-from ..scoring.score import Evidence
 from .blocks import Block, parse, sentences
 
 

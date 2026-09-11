@@ -31,9 +31,20 @@ NEVER = re.compile(
 # --- HỎI ------------------------------------------------------------------
 # Mỗi dòng kèm LÝ DO, vì lý do là thứ Vin đọc để biết phải làm gì.
 ASK_RULES: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"sponsor|visa|right to work|work (authoris|authoriz)|immigration|"
-                r"eligib\w* to work"),
+    # Lối viết phổ biến nhất của Greenhouse/Lever là ĐẢO: "authorized to work
+    # in this country". Bản cũ chỉ bắt "work authoriz…" theo đúng thứ tự đó,
+    # nên câu đảo lọt xuống luật ĐIỀN `country` và máy trả lời một câu Có/Không
+    # về quyền làm việc bằng chữ "United Kingdom".
+    (re.compile(r"sponsor|visa|right to work|immigration|"
+                r"work (authoris|authoriz)|(authoris|authoriz)\w*\s+to work|"
+                r"legally (authoris|authoriz)|eligib\w*\s+to work|"
+                r"work permit|permitted to work"),
      "sai một chữ là hỏng đơn — Graduate visa: HIỆN không cần bảo lãnh, TƯƠNG LAI có"),
+    # Quốc tịch / nơi sinh KHÔNG phải nơi đang ở. Bản cũ để mọi ô có chữ
+    # "country" rơi vào luật ĐIỀN và trả lời bằng nước cư trú.
+    (re.compile(r"citizen|nationalit|country of birth|born in|place of birth|"
+                r"passport|domicile|country of origin"),
+     "tư cách pháp lý — Vin quốc tịch Việt Nam, đang ở UK bằng Graduate visa"),
     (re.compile(r"\bgpa\b|grade point|classification|predicted grade"),
      "MSc chưa có điểm tổng; BA là 3.59/4.0"),
     (re.compile(r"graduat\w*|expected completion|when .* finish"),
@@ -49,7 +60,10 @@ ASK_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"criminal|conviction|background check|dbs"), "khai báo pháp lý"),
     (re.compile(r"agree|consent|acknowledg|privacy|terms|gdpr|data protection"),
      "đồng ý điều khoản là chữ ký — chỉ Vin bấm được"),
-    (re.compile(r"how did you hear|referr|source|who referred"), "Vin tự chọn"),
+    # \b: chuỗi "referr" nằm NGAY TRONG chữ "preferred", nên mọi ô
+    # "Preferred name" bị xếp vào giỏ HỎI và Vin phải gõ tay tên mình mỗi lần.
+    (re.compile(r"how did you hear|\breferr|\bsource\b|who referred"),
+     "Vin tự chọn"),
     (re.compile(r"cover_letter|coverletter"), "chưa có tệp thư ngỏ"),
 ]
 
@@ -79,6 +93,17 @@ FILL_RULES: list[tuple[re.Pattern, str]] = [
 ]
 
 RESUME = re.compile(r"resume|\bcv\b|curriculum")
+
+# Dấu hiệu đây là một CÂU HỎI, không phải nhãn của một ô dữ kiện.
+#
+# Luật ĐIỀN so khớp chuỗi con, nên "Do you have a valid driving licence for
+# work in your city?" trúng luật `city` và máy điền "London" vào đó. Nhãn ô dữ
+# kiện thật thì ngắn và không hỏi han: "City", "Country", "Phone". Câu hỏi thì
+# có chủ ngữ và dấu hỏi. Thấy dấu hiệu hỏi -> để Vin trả lời.
+ASKING = re.compile(
+    r"\b(do|did|does|are|is|have|has|will|would|can|could|should|were|was)\s+you"
+    r"|\byou\b.{0,24}\?|^\s*(why|how|what|which|when|where|who)\b"
+    r"|\bplease (tell|describe|explain|list|confirm)\b")
 
 # Đọc mọi ô đang hiện, gắn cho mỗi ô một số hiệu để lát nữa điền không bị lạc.
 #
@@ -126,8 +151,16 @@ READ_JS = r"""
   document.querySelectorAll('input,select,textarea').forEach(el => {
     const type = (el.type || '').toLowerCase();
     if (['hidden','submit','button','image','reset'].includes(type)) return;
-    if (el.disabled || el.readOnly) return;
-    if (!el.name && !el.id) return;                       // ô bóng, form không đọc
+    if (el.disabled) return;
+    // Ô KHOÁ (readOnly) vẫn phải VÀO danh sách. Widget chọn ngày hay khoá ô
+    // chữ để bắt bấm vào lịch, và ô đó thường BẮT BUỘC. Bỏ nó ra khỏi danh
+    // sách thì missing() không thấy, và máy bấm Gửi cho một lá đơn thiếu ngày
+    // tốt nghiệp. Giữ lại, đánh dấu là khoá, rồi để Vin tự chọn.
+    const locked = !!el.readOnly;
+    // Ô bóng (không name lẫn id) thì form không đọc — BỎ, TRỪ ô tệp: rất
+    // nhiều ATS để <input type=file> ẩn, không name không id, điều khiển
+    // hoàn toàn bằng JS. Bỏ nó là gửi đơn KHÔNG có CV mà không ai báo.
+    if (!el.name && !el.id && type !== 'file') return;
     if (type !== 'file' && !el.offsetParent) return;
     const n = seen.length; seen.push(el); el.setAttribute('data-jb', n);
 
@@ -139,6 +172,10 @@ READ_JS = r"""
                : type;
     const mine = own(el);
     const grouped = (type === 'checkbox' || type === 'radio');
+    // Nhãn DÙNG ĐỂ DÒ. Với ô nhóm, nhãn của từng lựa chọn là "London",
+    // "Yes" — không có dấu * nào, nên cờ `required` tính từ nó luôn ra false
+    // và missing() không thấy câu sponsorship bắt buộc còn trống.
+    const lab = grouped ? (groupLabel(el, mine) || mine) : (mine || el.placeholder || '');
     // Giá trị ĐANG CÓ. Với danh sách thả xuống, giá trị thật không nằm ở
     // el.value (đó chỉ là ô lọc) mà ở cái "chip" vẽ trong thẻ bọc.
     let now = '';
@@ -152,11 +189,12 @@ READ_JS = r"""
     else now = el.value || '';
     out.push({
       k: n, name: el.name || '', dom_id: el.id || '', kind: kind,
-      label: grouped ? (groupLabel(el, mine) || mine) : (mine || el.placeholder || ''),
+      label: lab,
       option: grouped ? mine : '',
       group: grouped ? (el.name || el.id) : '',
       required: !!(el.required || el.getAttribute('aria-required') === 'true'
-                   || /\*/.test(mine)),
+                   || /[*✱]/.test(lab)),
+      locked: locked,
       value: now,
       options: el.tagName === 'SELECT'
              ? Array.from(el.options).map(o => clean(o.text)).filter(Boolean).slice(0, 60) : [],
@@ -200,8 +238,13 @@ def classify(field: dict) -> tuple[str, str]:
     for rule, reason in ASK_RULES:
         if rule.search(hay):
             return ASK, reason
+    asking = bool(ASKING.search(asked)) or asked.count(" ") >= 8
     for rule, key in FILL_RULES:
         if rule.search(hay):
+            # Câu hỏi dài, có chủ ngữ "you", hay có dấu hỏi thì không phải một
+            # ô dữ kiện — dù nó có tình cờ nhắc tới "city" hay "country".
+            if asking:
+                return ASK, "câu hỏi, không phải ô dữ kiện — máy không đoán"
             return FILL, key
     return ASK, ""
 
@@ -227,4 +270,8 @@ def read(tab) -> list[dict]:
         out.append(f)
     for f in out:
         f["bucket"], f["key"] = classify(f)
+        # Ô khoá thì không gõ vào được — chỉ chọn bằng widget. Giữ trong danh
+        # sách để missing() thấy, nhưng đừng để fill() đi gõ.
+        if f.get("locked") and f["bucket"] == FILL:
+            f["bucket"], f["key"] = ASK, "ô khoá — chọn bằng lịch/widget trên trang"
     return out

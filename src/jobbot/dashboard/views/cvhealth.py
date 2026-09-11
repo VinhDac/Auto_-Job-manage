@@ -38,7 +38,7 @@ def render(cv_text: str) -> str:
     if not cv_text.strip():
         return page("CV health", h1("CV health")
                     + empty("No CV on your profile yet — import one first."),
-                    active="/profile", status="Running")
+                    active="/profile")
 
     blocks = parse(cv_text)
     counts = {"strong": 0, "thin": 0, "review": 0, "drop": 0}
@@ -78,4 +78,4 @@ def render(cv_text: str) -> str:
     return page("CV health",
                 h1("CV health", "Every line in your CV, graded on its own merit.")
                 + summary + "".join(body),
-                active="/profile", status="Running")
+                active="/profile")

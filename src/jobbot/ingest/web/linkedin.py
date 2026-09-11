@@ -160,7 +160,8 @@ def signed_in(tab) -> bool:
 
 def fetch(tab, queries: list[str], location: str = "United Kingdom",
           levels: list[str] | None = None, pages: int = 3,
-          deep: bool = True, skip: frozenset[str] = frozenset()) -> list[Posting]:
+          deep: bool = True, skip: frozenset[str] = frozenset(),
+          stop=None) -> list[Posting]:
     """Tìm rồi đọc kỹ tin LinkedIn.
 
     skip = id những tin ĐÃ có mô tả. Vòng đọc kỹ bỏ qua chúng.
@@ -193,6 +194,9 @@ def fetch(tab, queries: list[str], location: str = "United Kingdom",
     pairs = [(q, p) for q in queries for p in places]
 
     for step, (query, place) in enumerate(pairs, 1):
+        if stop and stop():
+            jlog.warn(SEARCH, f"dừng theo yêu cầu — mới xong {step - 1}/{len(pairs)} lượt tìm")
+            break
         jlog.progress(SEARCH, f"tìm LinkedIn — {query}"
                               + (f" · {place}" if len(places) > 1 else ""),
                       step, len(pairs))
@@ -221,6 +225,11 @@ def fetch(tab, queries: list[str], location: str = "United Kingdom",
                          f" -> chỉ đọc kỹ {len(fresh)}" if skip else
                          f", đọc kỹ cả {len(fresh)}"))
     for index, item in enumerate(fresh):
+        # Điểm ngắt THẬT: đây là vòng tốn 8-16 phút, mở Chrome đọc từng tin.
+        # Đặt cờ dừng ở ngoài vòng này thì bấm Dừng xong vẫn phải chờ hết.
+        if stop and stop():
+            jlog.warn(SEARCH, f"dừng theo yêu cầu — đã đọc kỹ {index}/{len(fresh)} tin")
+            break
         # Chỗ vòng quét đứng lâu nhất — mỗi tin nghỉ 2.5-5 giây. Không báo
         # tiến độ ở đây thì màn hình im lặng suốt.
         jlog.progress(SEARCH, "đọc kỹ LinkedIn", index + 1, len(fresh))

@@ -97,14 +97,28 @@ def proposals(conn: sqlite3.Connection) -> list[dict]:
 
 
 def settle(conn: sqlite3.Connection, message_id: int, accept: bool) -> None:
-    """Vin trả lời một đề xuất. Nhận thì đổi trạng thái, bỏ thì im luôn."""
+    """Vin trả lời một đề xuất. Nhận thì đổi trạng thái, bỏ thì im luôn.
+
+    Thư CŨ không được đè trạng thái MỚI. Man Group gửi "thank you for
+    applying" ngày 1 rồi "unfortunately" ngày 20; Vin nhận thư từ chối trước,
+    xong nhận nốt thư xác nhận cũ — và dòng quay ngược về "đang chờ". Bảng nói
+    đơn còn sống trong khi nó đã chết, đúng thứ tệ nhất một bảng theo dõi có
+    thể làm.
+    """
     row = conn.execute(
-        "SELECT kind, subject, application_id FROM message WHERE id = ?",
-        (message_id,)).fetchone()
+        "SELECT m.kind, m.subject, m.received_at, m.application_id,"
+        " a.last_event_at FROM message m"
+        " LEFT JOIN application a ON a.id = m.application_id"
+        " WHERE m.id = ?", (message_id,)).fetchone()
     if row is None:
         return
-    if accept and row["application_id"] and row["kind"] in board.STAGES:
+    stale = bool(row["received_at"] and row["last_event_at"]
+                 and row["received_at"] < row["last_event_at"])
+    if accept and row["application_id"] and row["kind"] in board.STAGES and not stale:
         board.set_stage(conn, row["application_id"], row["kind"],
                         row["subject"][:90])
+    elif accept and stale:
+        jlog.warn(SEARCH, f"bỏ qua thư cũ hơn trạng thái đang có — "
+                          f"{(row['subject'] or '')[:50]}")
     conn.execute("UPDATE message SET needs_you = 0 WHERE id = ?", (message_id,))
     conn.commit()

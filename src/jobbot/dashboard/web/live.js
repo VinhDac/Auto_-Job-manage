@@ -9,7 +9,8 @@
  *   [data-nav]                nút gập thanh bên
  *   [data-tags]               ô thẻ: gõ + Enter để thêm, × để bỏ
  *   [data-post]               nút gọi việc nền; [data-arg] là tham số
- *   [data-settings]           mở tấm phủ; giá trị = URL mảnh HTML cần nạp
+ *   [data-settings]           mở tấm bên phải; giá trị = URL mảnh HTML cần nạp
+ *   [data-appset]             mở hộp Cài đặt cả app (giữa màn)
  *   [data-widget]             một ô; [data-expand] trong đó là nút mở to
  *
  * Không dùng polling: mở một kết nối SSE rồi để yên. Chạy 24/7 mà hỏi mỗi
@@ -84,6 +85,13 @@
     return mins > 0 ? 'chờ · quét sau ' + mins + ' phút' : 'chờ';
   }
 
+  // Việc gần nhất, hiện ở thanh trạng thái đáy app. Không lưu đâu cả — đây là
+  // TIN, không phải trạng thái; dòng mới đến là đè lên dòng cũ.
+  function setLastMessage(text) {
+    if (!text) return;
+    $('[data-lastmsg]').forEach((el) => { el.textContent = text; });
+  }
+
   function setState(state, mins) {
     document.body.dataset.run = state;
     $('[data-state]').forEach((el) => { el.textContent = label(state, mins); });
@@ -119,8 +127,11 @@
         (m.events || []).forEach((e) => journal(e));
         progress(m.running || {});
         setState(m.state, m.next_in);
+        const last = (m.events || [])[(m.events || []).length - 1];
+        if (last) setLastMessage(last.text);
       } else if (m.type === 'event') {
         journal(m);
+        setLastMessage(m.text);
       } else if (m.type === 'progress') {
         // Luồng CỦA TRANG NÀY vừa xong -> vẽ lại trang. Ruột mỗi tab (danh
         // sách việc, kho đề bài) do máy chủ dựng thành HTML; SSE chỉ đẩy được
@@ -197,9 +208,13 @@
   // Nạp nội dung LÚC BẤM, không nhúng sẵn vào mọi trang: cài đặt là thứ mở ra
   // vài lần một tuần, mà nhúng sẵn thì trang nào cũng phải mang theo dữ liệu
   // nó không dùng.
-  function openSheet(url) {
+  // kind='stage' -> tấm bên phải (⚟ điều chỉnh khúc)
+  // kind='app'   -> hộp giữa màn (Cài đặt cả app). Cùng bộ máy mở/đóng, khác
+  //                 chỗ đứng, để nhìn là biết thứ này của khúc hay của app.
+  function openSheet(url, kind) {
     const sheet = document.querySelector('[data-sheet]');
     if (!sheet) return;
+    sheet.classList.toggle('mid', kind === 'app');
     const box = sheet.querySelector('.sheetbox');
     box.innerHTML = '<div class=sheetwait>đang mở…</div>';
     sheet.hidden = false;
@@ -216,8 +231,10 @@
 
   function wireSheet() {
     document.addEventListener('click', (e) => {
-      const gear = e.target.closest('[data-settings]');
-      if (gear) { e.preventDefault(); openSheet(gear.dataset.settings || ''); return; }
+      const app = e.target.closest('[data-appset]');
+      if (app) { e.preventDefault(); openSheet('/settings', 'app'); return; }
+      const knob = e.target.closest('[data-settings]');
+      if (knob) { e.preventDefault(); openSheet(knob.dataset.settings, 'stage'); return; }
       // Bấm ra ngoài hộp thì đóng — nhưng bấm TRONG hộp thì không.
       const sheet = e.target.closest('[data-sheet]');
       if (sheet && !e.target.closest('.sheetbox')) closeSheet();

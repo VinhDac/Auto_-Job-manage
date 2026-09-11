@@ -36,41 +36,51 @@ PORT = chrome.APPLY_PORT
 # Ashby "Submit Application", Lever "Submit application".
 SUBMIT_TEXT = re.compile(r"^(submit|apply|send|nộp|gửi)\b", re.I)
 
-FIND_JS = r"""
-(() => {
-  const el = document.querySelector('[data-jb]');
-  const form = el ? el.closest('form') : document.querySelector('form');
-  if (!form) return JSON.stringify({err: 'không thấy form'});
-  const spots = Array.from(form.querySelectorAll(
-      'button[type="submit"], input[type="submit"], button:not([type])'))
-    .filter(b => !b.disabled && b.offsetParent);
-  const named = spots.filter(b => %TEXT%.test(
-      ((b.innerText || b.value || '') + '').trim()));
-  const pick = named.length ? named : spots;
-  if (pick.length !== 1) return JSON.stringify({err: `tìm thấy ${pick.length} nút gửi`});
-  const b = pick[0];
-  b.scrollIntoView({block: 'center', behavior: 'instant'});
-  return JSON.stringify({ready: true, text: ((b.innerText || b.value || '') + '').trim()});
-})()
-"""
-
+# TÌM và NGẮM trong MỘT lần gọi. Trước đây tách làm hai khối JS lặp lại y hệt
+# logic chọn nút: một khối duyệt, một khối lấy toạ độ. Hai bản sao của cùng một
+# luật thì có ngày lệch nhau — và lệch ở đây nghĩa là duyệt nút này rồi bấm nút
+# kia, trên một hành động không rút lại được.
+#
+# Nút gửi phải nằm trong ĐÚNG cái form chứa những ô ta vừa điền (`[data-jb]`),
+# không phải một form bất kỳ nào khác trên trang.
 AIM_JS = r"""
 (() => {
-  const el = document.querySelector('[data-jb]');
-  const form = el ? el.closest('form') : document.querySelector('form');
-  const spots = Array.from(form.querySelectorAll(
+  // Form nào chứa NHIỀU Ô ĐÃ ĐIỀN nhất mới là form của ta. Lấy
+  // `querySelector('[data-jb]')` — ô ĐẦU TIÊN của cả trang — là sai: trang
+  // tuyển dụng hay có một form tìm kiếm hoặc đăng ký nhận tin đứng trước, và
+  // nếu ô đầu rơi vào form đó thì máy đi bấm nút của form đó. Chốt `inform`
+  // cũ so nút với chính cái form vừa lấy ra nên luôn đúng — một chốt rỗng.
+  const tally = new Map();
+  for (const el of document.querySelectorAll('[data-jb]')) {
+    const f = el.closest('form');
+    if (f) tally.set(f, (tally.get(f) || 0) + 1);
+  }
+  if (!tally.size) return JSON.stringify({err: 'không thấy form đã điền'});
+  let form = null, best = -1;
+  for (const [f, n] of tally) { if (n > best) { best = n; form = f; } }
+
+  const all = Array.from(form.querySelectorAll(
       'button[type="submit"], input[type="submit"], button:not([type])'))
     .filter(b => !b.disabled && b.offsetParent);
-  const named = spots.filter(b => %TEXT%.test(((b.innerText || b.value || '') + '').trim()));
-  const b = (named.length ? named : spots)[0];
-  if (!b) return JSON.stringify({err: 'mất nút'});
+  // CHỈ nút mang chữ gửi. Không có thì DỪNG, không lùi về "nút duy nhất còn
+  // lại" — nút đó có thể là "Save draft", "Add another", "Upload".
+  const named = all.filter(b => %TEXT%.test(((b.innerText || b.value || '') + '').trim()));
+  if (named.length !== 1)
+    return JSON.stringify({err: `${named.length} nút mang chữ gửi trong ${all.length} nút`});
+  const pick = named;
+
+  const b = pick[0];
+  b.scrollIntoView({block: 'center', behavior: 'instant'});
   const r = b.getBoundingClientRect();
   const x = r.x + r.width / 2, y = r.y + r.height / 2;
   const on = document.elementFromPoint(x, y);
-  return JSON.stringify({x: x, y: y, tag: b.tagName,
-                         inform: !!b.closest('form'),
-                         hits: !!on && (on === b || b.contains(on)),
-                         text: ((b.innerText || b.value || '') + '').trim()});
+  return JSON.stringify({
+    x: x, y: y, tag: b.tagName,
+    inform: form.contains(b),
+    fields: best,
+    hits: !!on && (on === b || b.contains(on)),
+    text: ((b.innerText || b.value || '') + '').trim(),
+  });
 })()
 """
 
@@ -133,14 +143,20 @@ def missing(tab) -> list[str]:
 
 def submit(tab, job: int | None = None) -> Sent:
     """Kiểm rồi mới bấm. Không đủ điều kiện thì KHÔNG bấm, và nói vì sao."""
+    # Trang KHÔNG CÒN Ô NÀO nghĩa là form đã đi rồi — thường là vừa gửi xong
+    # và trang đã nhảy sang lời cảm ơn. Lúc đó missing() trả rỗng (không ô nào
+    # thì không ô nào trống), nên nếu không chặn ở đây thì bấm lần hai sẽ đi
+    # tìm "một nút bất kỳ trong form bất kỳ" trên trang cảm ơn.
+    if not F.read(tab):
+        return Sent(False, "trang không còn form — có thể đã gửi rồi")
     gaps = missing(tab)
     if gaps:
         return Sent(False, "còn ô bắt buộc chưa trả lời", gaps)
 
-    where = json.loads(_js(tab, FIND_JS, TEXT=f"/{SUBMIT_TEXT.pattern}/i"))
-    if where.get("err"):
-        return Sent(False, where["err"])
-    time.sleep(0.45)                                 # cuộn xong rồi mới đo
+    # Cuộn trước, đo sau: trang đặt cuộn mượt thì đo ngay là lấy TOẠ ĐỘ CŨ và
+    # cú bấm rơi ra ngoài màn hình (đo được y=1252 trên màn hình cao 900).
+    _js(tab, AIM_JS, TEXT=f"/{SUBMIT_TEXT.pattern}/i")
+    time.sleep(0.45)
     aim = json.loads(_js(tab, AIM_JS, TEXT=f"/{SUBMIT_TEXT.pattern}/i"))
     if aim.get("err"):
         return Sent(False, aim["err"])
@@ -149,15 +165,28 @@ def submit(tab, job: int | None = None) -> Sent:
     if not aim.get("hits"):
         return Sent(False, "điểm bấm không nằm trên nút")
 
+    before = json.loads(json.dumps(tab.eval(AFTER_JS) or {}))
     for kind in ("mousePressed", "mouseReleased"):
         tab.call("Input.dispatchMouseEvent",
                  {"type": kind, "x": aim["x"], "y": aim["y"],
                   "button": "left", "clickCount": 1})
     time.sleep(3.5)
     after = json.loads(json.dumps(tab.eval(AFTER_JS) or {}))
+
+    # BẰNG CHỨNG, không phải "đã bắn được sự kiện chuột". Bản cũ tính `good`
+    # rồi vứt đi và luôn trả ok=True — nên một form bị ATS từ chối (thiếu ô nó
+    # tự kiểm, hết hạn tin, chống bot) vẫn được ghi vào bảng là "đã nộp", và
+    # Vin đinh ninh đã nộp trong khi chưa.
     body = (after.get("text") or "").lower()
-    good = any(w in body for w in ("thank", "received", "submitted", "application sent",
-                                  "we have your", "success"))
-    return Sent(True, "đã bấm gửi" + ("" if good else " — trang chưa xác nhận rõ"),
-                button=aim.get("text", ""),
+    said = any(w in body for w in ("thank", "received", "submitted", "success",
+                                   "application sent", "we have your", "đã nhận"))
+    moved = (after.get("url") or "") != (before.get("url") or "")
+    gone = not F.read(tab)                       # form biến mất = đã đi
+    if not (said or moved or gone):
+        return Sent(False, "bấm rồi mà trang không đổi gì — có thể chưa gửi được",
+                    button=aim.get("text", ""),
+                    landed=(after.get("url") or "")[:120])
+    why = "đã gửi" + ("" if said else
+                      " (trang đổi nhưng không nói lời xác nhận)")
+    return Sent(True, why, button=aim.get("text", ""),
                 landed=(after.get("url") or "")[:120])
