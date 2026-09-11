@@ -148,11 +148,18 @@ with tempfile.TemporaryDirectory() as tmp:
     print("\n[CHU TRÌNH dựng hồ sơ — Home phải dẫn đường, không chỉ báo cáo]")
     # Đây là cửa vào app. Người dùng mới đáp xuống đây trước tiên; trước đây
     # nó chỉ nói "Trang này đang trống".
-    _, _hm = get("/")
-    check("Home nói hồ sơ đang thiếu gì", "Chưa chạy được gì" in _hm)
+    # Chu trình dựng hồ sơ là TẤM PHỦ, không phải tab Home: việc của nó chỉ có
+    # lúc đầu, còn tab Home là chỗ của bảng điều khiển pipeline.
+    _, _hm = get("/onboarding")
+    _, _trang = get("/")
+    check("chu trình là mảnh HTML cho tấm phủ, không phải cả trang",
+          "<!doctype" not in _trang.lower() or "<!doctype" not in _hm.lower())
+    check("chưa đủ thì Home bật tấm phủ ngay khi vào",
+          "data-setup='/onboarding'" in _trang)
+    check("nói hồ sơ đang thiếu gì", "Chưa chạy được gì" in _hm)
     check("và có nút đi thẳng tới chỗ điền", "href='/profile/muc_tieu'" in _hm)
     check("có thanh tiến độ", "class=obar" in _hm)
-    check("liệt kê đủ 5 phần", _hm.count("class='blk ostep") == 5)
+    check("liệt kê đủ 6 phần", _hm.count("class='blk ostep") == 6)
     check("phần bắt buộc được đánh dấu", "BẮT BUỘC" in _hm)
     # Home KHÔNG được tự nghĩ luật: nó phải đọc đúng cổng mà Search đang đọc.
     from jobbot.dashboard import live as _live
@@ -163,15 +170,172 @@ with tempfile.TemporaryDirectory() as tmp:
     check("Home đọc CÙNG cổng với Search",
           [q["id"] for q in _ob["gate_missing"]]
           == _st.missing_for_ingest(_st.load(_c)))
+    print("\n[ô thẻ + gõ-để-tìm — MỘT ô nhập, không phải hai]")
+    _, _mt = get("/profile/muc_tieu")
+    check("câu chức danh là ô THẺ, không phải ô gõ chay",
+          "data-tags='job_titles'" in _mt and "<textarea" not in _mt.split(
+              "job_titles")[1][:400])
+    check("không còn ô lọc riêng thứ hai", "sugfind" not in _mt)
+    check("có danh sách gợi ý rơi xuống", "data-sugdrop" in _mt)
+    # ĐỌC RỘNG, GHI CHẶT. Dữ liệu cũ lưu "A · B · C" trên một dòng; chỉ cắt
+    # theo dấu nối mới thì cả cụm thành MỘT thẻ khổng lồ, mà cv/build.py đọc
+    # theo dòng nên vẫn tưởng chỉ có một chứng chỉ.
+    from jobbot.dashboard.views.profile import _tach as _tach2
+    check("ô thẻ đọc được hình dạng CŨ (một dòng, ngăn bằng ·)",
+          _tach2("CFA Level I · IBM Data Science · IBM ML", "\n")
+          == ["CFA Level I", "IBM Data Science", "IBM ML"])
+    check("và hình dạng mới", _tach2("A\nB", "\n") == ["A", "B"])
+    check("dấu phẩy vẫn đúng", _tach2("python, sql", ", ") == ["python", "sql"])
+    check("lúc nghỉ chỉ mời gõ, không bày cả kho", "gõ để tìm trong" in _mt)
+    print("\n[RESET = về trạng thái ban đầu, KHÔNG sót chỗ nào]")
+    # Chạy trên thư mục RIÊNG, kể cả HOME — reset.backup() ghi ra ~/Desktop,
+    # để nguyên thì mỗi lần chạy test là rơi một tệp lên Desktop thật.
+    import os as _osr, shutil as _shr, tempfile as _tfr
+    _rtmp = _tfr.mkdtemp()
+    _cu_home, _cu_data = _osr.environ.get("HOME"), _osr.environ.get("JOBBOT_DATA_DIR")
+    _osr.environ["HOME"] = _rtmp
+    _osr.environ["JOBBOT_DATA_DIR"] = _rtmp
+    try:
+        import importlib
+        from jobbot.core import db as _dbr, paths as _pr
+        importlib.reload(_pr)
+        from jobbot.core import reset as _rs
+        importlib.reload(_rs)
+        _cr = _dbr.connect(Path(_rtmp) / "jobbot.db")
+        _dbr.migrate(_cr)
+        _cr.execute("INSERT INTO pref(key,value) VALUES('x','1')")
+        _cr.execute("INSERT INTO audit(at,kind,detail) VALUES('t','k','d')")
+        _cr.commit()
+        (Path(_rtmp) / "app.log").write_text("rác")
+        (Path(_rtmp) / "cv").mkdir(exist_ok=True)
+        (Path(_rtmp) / "cv" / "a.pdf").write_text("x")
+        _truoc = _rs.inventory(_cr)["total_rows"]
+        _kq = _rs.run(_cr)
+        _dbr.migrate(_cr)
+        _sau = _rs.inventory(_cr)
+        check("trước reset có dữ liệu", _truoc >= 2)
+        check("sau reset KHÔNG bảng nào còn dòng", _sau["total_rows"] == 0)
+        check("và không tệp người dùng nào còn lại", _sau["files"] == 0)
+        check("nhật ký app cũng bị dọn", not (Path(_rtmp) / "app.log").exists())
+        check("sao lưu có thật và đọc được",
+              Path(_kq["backup"]).exists() and Path(_kq["backup"]).stat().st_size > 0)
+        check("sao lưu chỉ chủ máy đọc được",
+              oct(Path(_kq["backup"]).stat().st_mode)[-3:] == "600")
+        check("schema giữ nguyên, không phải dựng lại",
+              _cr.execute("PRAGMA user_version").fetchone()[0] > 0)
+        _cr.close()
+    finally:
+        for _k, _v in (("HOME", _cu_home), ("JOBBOT_DATA_DIR", _cu_data)):
+            if _v is None:
+                _osr.environ.pop(_k, None)
+            else:
+                _osr.environ[_k] = _v
+        _shr.rmtree(_rtmp, ignore_errors=True)
+        import importlib as _il
+        from jobbot.core import paths as _pr2, reset as _rs2
+        _il.reload(_pr2); _il.reload(_rs2)
+    _jsr = (Path(__file__).resolve().parent.parent
+            / "src/jobbot/dashboard/web/live.js").read_text(encoding="utf-8")
+    check("và quên cả thứ trình duyệt đang nhớ", "wipe_local" in _jsr)
+
+    _js2 = (Path(__file__).resolve().parent.parent
+            / "src/jobbot/dashboard/web/live.js").read_text(encoding="utf-8")
+    check("Enter lấy gợi ý khớp, không lấy chữ gõ dở",
+          "data-sugdrop] [data-addtag]:not([hidden])" in _js2)
+    _css3 = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
+    # BẪY ĐÃ DÍNH HAI LẦN: đặt display cho một phần tử là CSS của mình thắng
+    # luật [hidden]{display:none} của trình duyệt — chip bị JS ẩn vẫn hiện,
+    # flex bóp mỗi dòng còn 14px và cắt cụt chữ, nhìn như lỗi phông.
+    check("chip bị ẩn PHẢI thật sự biến mất",
+          ".sugdrop > .addtag[hidden]{display:none}" in _css3)
+    check("và chip không bị flex bóp", ".sugdrop > .addtag{flex:none" in _css3)
+    # Cùng cái bẫy, ở cấp CHA. Chọn hết gợi ý xong JS ẩn cả vùng, mà .sugdrop
+    # khai display:flex nên nó vẫn chiếm 96px khoảng trống.
+    check("vùng gợi ý ẩn đi PHẢI biến mất hẳn",
+          ".sugdrop[hidden]{display:none}" in _css3)
+    check("hàng tìm cũng vậy", ".findrow[hidden]{display:none}" in _css3)
+    # "Chọn tất cả" CHỈ cho kho nhỏ. Chọn cả 60 chức danh là tự tay vô hiệu
+    # hoá bộ lọc — giữ lại mọi tin thì lọc để làm gì.
+    check("kho ngành (7) có nút chọn tất cả", "data-addall" in _mt)
+    # Luật là NGƯỠNG, nên kiểm thẳng vào luật chứ không đếm nút trên một trang
+    # mà kho to nhỏ tuỳ dữ liệu. Chọn cả 60 chức danh là tự tay vô hiệu hoá bộ
+    # lọc — giữ lại mọi tin thì lọc để làm gì.
+    from jobbot.dashboard.views.profile import _o_the as _othe, _CHON_HET
+    from jobbot.profile.schema import all_questions
+    _q_ind = all_questions()["industries"]
+    _nho = _othe(_q_ind, {}, {"industries": [f"n{i}" for i in range(_CHON_HET)]})
+    _to = _othe(_q_ind, {}, {"industries": [f"n{i}" for i in range(_CHON_HET + 1)]})
+    check(f"kho <= {_CHON_HET} mục thì có nút chọn tất cả", "data-addall" in _nho)
+    check("kho lớn hơn thì KHÔNG", "data-addall" not in _to)
+
+    print("\n[LÀM LẠI TỪ ĐẦU — đường phá hoại phải có chốt]")
+    # Bài thử ném rác vào mọi route từng xoá mất app password thật 12 lần liền.
+    # Route xoá sạch còn nguy hơn, nên nó phải TỪ CHỐI khi không có xác nhận.
+    check("POST rỗng KHÔNG xoá được gì", post("/api/reset", b"") == 400)
+    check("sai chữ xác nhận cũng không", post("/api/reset", b"arg=x") == 400)
+    # Và chốt đó phải thật sự chặn — DB còn nguyên bảng sau hai cú trên.
+    from jobbot.core import db as _dbm
+    _cc = _dbm.connect()
+    check("DB vẫn còn nguyên schema sau hai cú POST đó",
+          _cc.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
+                      ).fetchone()[0] > 5)
+    _cc.close()
+    _, _set = get("/settings")
+    check("Cài đặt có tab Làm lại", "data-pane='lam-lai'" in _set)
+    check("nói trước sẽ mất gì", "Sẽ mất:" in _set)
+    check("nói trước sao lưu nằm ở đâu", "tar.gz" in _set)
+    check("nút khoá sẵn, phải gõ chữ mới mở",
+          "disabled>Xoá hết" in _set and "data-needword" in _set)
+    _js = (Path(__file__).resolve().parent.parent
+           / "src/jobbot/dashboard/web/live.js").read_text(encoding="utf-8")
+    check("và trình duyệt có trình nghe mở khoá", "wireDangerWord" in _js)
+
+    print("\n[VÒNG GIỮ — chưa đủ thì không cho đi tiếp]")
+    # Lưu một phần mà cổng vẫn đóng -> phải quay LẠI đúng chỗ còn thiếu, không
+    # được đi tiếp sang phần sau. Bỏ luật này thì người dùng lướt hết 5 phần,
+    # bỏ trống ba câu quan trọng nhất, rồi thắc mắc vì sao bấm Chạy không ra gì.
+    def _post_lay_dich(path, body):
+        import urllib.request as _u
+        class _NoRedirect(_u.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+        op = _u.build_opener(_NoRedirect)
+        try:
+            r = op.open(_u.Request(base.rstrip("/") + path, data=body), timeout=25)
+            return r.status, r.headers.get("Location", "")
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Location", "")
+
+    # Lưu phần "What you won't take" trong khi cổng còn đóng -> bị kéo ngược.
+    _ma, _di = _post_lay_dich("/profile/rang_buoc", b"deal_breakers=none")
+    check("lưu phần phụ khi chưa đủ -> bị đưa về chỗ còn thiếu",
+          _di.endswith("/profile/muc_tieu"), f"{_ma} -> {_di}")
+    # Trang đó phải NÓI vì sao giữ lại.
+    _, _sec = get("/profile/muc_tieu")
+    check("và nói rõ còn mấy câu", "câu nữa là app chạy được" in _sec)
+    check("nhãn nút không hứa đi tiếp", "còn" in _sec and "câu nữa</button>" in _sec)
+    # Điền đủ -> thả ra, đi tiếp bình thường.
+    _ma2, _di2 = _post_lay_dich(
+        "/profile/muc_tieu",
+        b"job_titles=Quant&markets=uk_onsite&work_auth=visa_no_sponsor")
+    check("đủ rồi thì được đi tiếp", _di2.endswith("/profile/rang_buoc"),
+          f"{_ma2} -> {_di2}")
+
     # Điền đủ cổng -> Home phải ĐỔI GIỌNG, không còn chặn.
     post("/profile/muc_tieu",
          b"job_titles=Quantitative+Analyst&markets=uk_onsite&work_auth=visa_no_sponsor")
-    _, _hm2 = get("/")
+    _, _hm2 = get("/onboarding")
     _ob2 = _live.onboarding(_db.connect())
     check("điền đủ 3 câu thì cổng mở", _ob2["gate_open"])
-    check("và Home đổi sang mời chạy", "Hồ sơ đủ để chạy" in _hm2)
-    check("danh sách thành menu thêm cho mạnh", "Thêm cho mạnh" in _hm2)
+    check("và đổi sang mời chạy", "Hồ sơ đủ để chạy" in _hm2)
     check("phần vừa xong được đánh dấu", "ostep done" in _hm2)
+    # ĐỦ CÂU BẮT BUỘC THÌ THÔI BẮT. Tấm phủ không tự bật nữa, tab Home trống
+    # trơn để dành cho bảng điều khiển pipeline.
+    _, _trang2 = get("/")
+    check("đủ rồi thì Home KHÔNG bật tấm phủ nữa", "data-setup=" not in _trang2)
+    check("và tab Home trả lại chỗ cho việc của nó",
+          "blk ostep" not in _trang2)
     _c.close()
     check("POST /profile/import rỗng -> không sập",
           post("/profile/import", b"") in (200, 303))
@@ -458,7 +622,13 @@ with tempfile.TemporaryDirectory() as tmp:
     # Trả MẢNH, không phải cả trang: nếu trả cả trang thì nhét vào tấm phủ sẽ
     # lồng nguyên một trang trong trang.
     check("/settings trả MẢNH html, không phải cả trang",
-          panel.lstrip().startswith("<form") and "<!doctype" not in panel.lower())
+          panel.lstrip().startswith("<div") and "<!doctype" not in panel.lower())
+    # BA TAB. Trước đây một cột dài 782px trong hộp cao 660px — phần "Làm lại
+    # từ đầu" nằm dưới nếp gấp, phải cuộn mới thấy mà không ai biết là cuộn
+    # được. Chia theo VIỆC: đổi được / chỉ đọc / phá huỷ.
+    check("Cài đặt chia ba tab", panel.count("data-stab=") == 3)
+    check("và ba khối nội dung tương ứng", panel.count("data-pane=") == 3)
+    check("chỉ một tab mở sẵn", panel.count("stpane on") == 1)
 
     # Ba núm — và ĐÚNG ba. Trang cũ có 18 dòng mà chỉ 2 dòng là setting thật.
     for name in ("every", "from", "to"):
@@ -466,8 +636,24 @@ with tempfile.TemporaryDirectory() as tmp:
     check("có nút Lưu", "Lưu" in panel)
     check("nói rõ hậu quả: chỉ đổi CÁCH CHẠY, không đụng phán quyết",
           "lần quét sau" in panel and "không đụng" in panel)
-    check("số máy tự báo tách riêng, ghi rõ chỉ để xem",
-          "chỉ để xem" in panel.lower() or "CHỈ ĐỂ XEM" in panel)
+    # Số máy tự báo về mình KHÔNG phải cài đặt -> phải ở tab khác với mấy núm
+    # chỉnh được, không chỉ là một mục dưới cùng cùng màn.
+    _tab_chay = panel.split("data-pane='xem'")[0]
+    check("số máy tự báo tách sang tab khác, không lẫn với núm chỉnh",
+          "strow" not in _tab_chay and "data-pane='xem'" in panel)
+    check("việc phá huỷ cũng ở tab riêng", "data-pane='lam-lai'" in panel)
+    # MỘT số đệm cho cả tấm phủ. Trước đây mỗi khối tự đặt (0 / 15px / 18px)
+    # nên tiêu đề CÀI ĐẶT dính đúng góc khung còn hàng dưới thì thụt vào.
+    _cssp = (Path(__file__).resolve().parent.parent
+             / "src/jobbot/dashboard/web/app.css").read_text(encoding="utf-8")
+    check("đệm tấm phủ khai MỘT chỗ", "--sheet-pad:18px" in _cssp)
+    for _ten, _r in (("tiêu đề", ".sheethead{"), ("hàng tab", ".stabs{"),
+                     ("khối nội dung", ".stpane{"), ("form", ".setform{"),
+                     ("hàng nút xoá", ".dangerrow{")):
+        _blk = _cssp[_cssp.index("\n" + _r) + 1:]
+        _blk = _blk[:_blk.index("}")]
+        check(f"{_ten} dùng chung đệm đó, không tự đặt số",
+              "var(--sheet-pad)" in _blk or "padding:0" in _blk, _blk[:70])
 
     # Núm "Máy LLM" ĐÃ BỎ cùng cả đường sinh đề bài bằng LLM. Đề bài giờ do
     # khuôn dựng, nên núm đó không điều khiển gì — mà một cái nút không điều
@@ -732,8 +918,7 @@ with tempfile.TemporaryDirectory() as tmp:
     _, _blank = get("/")
     check("Home vẫn mở được", "Home" in _blank)
     check("và không còn là trang trống", "đang trống" not in _blank)
-    check("Home luôn nêu bước tiếp theo",
-          "Bắt đầu" in _blank or "Tiếp tục" in _blank or "Hồ sơ đủ để chạy" in _blank)
+    check("Home nói rõ nó sẽ là gì", "bảng điều khiển pipeline" in _blank)
     # Gỡ nội dung mà để lại đống code nuôi nó thì mới là bẩn.
     for _gone in ("class=funnel", "class=needs", "class=stats", "class=plot"):
         check(f"không còn {_gone}", _gone not in _blank)

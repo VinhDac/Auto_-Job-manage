@@ -27,6 +27,22 @@ CITY = re.compile(r"\b(London|Manchester|Edinburgh|Birmingham|Leeds|Bristol|Glas
                   r"Cambridge|Oxford|Hanoi|Ho Chi Minh|New York|Singapore|Dublin)\b", re.I)
 
 
+# Từ khoá nhận ra một dòng LÀ chức danh. Cố tình hẹp: thà bỏ sót vài dòng còn
+# hơn đề xuất cả "References available on request" làm chức danh.
+ROLE_WORD = re.compile(
+    r"\b(Analyst|Engineer|Scientist|Developer|Researcher|Manager|Consultant|"
+    r"Trader|Strategist|Quant|Associate|Specialist|Architect|Administrator)\b", re.I)
+# Dòng có mấy thứ này thì KHÔNG phải chức danh — là câu mô tả hoặc tên công ty.
+NOT_ROLE = re.compile(r"[.;•·]|\b(and|with|using|for|the|a|an|of|to)\b\s", re.I)
+UK = re.compile(r"\b(London|Manchester|Edinburgh|Birmingham|Leeds|Bristol|Glasgow|"
+                r"Cambridge|Oxford|United Kingdom|UK|England|Scotland|Wales)\b")
+# Bậc: chữ trong CV -> lựa chọn trong schema. Không suy từ số năm kinh nghiệm —
+# đếm năm là đoán, còn chữ "Intern" in trên CV là bằng chứng.
+LEVEL_WORD = [("intern", re.compile(r"\b(intern|internship|placement)\b", re.I)),
+              ("grad", re.compile(r"\b(graduate|MSc|MEng|BSc|BEng|MA|BA)\b")),
+              ("junior", re.compile(r"\bjunior\b", re.I))]
+
+
 class ReadError(RuntimeError):
     pass
 
@@ -167,7 +183,7 @@ def read(filename: str, data: bytes) -> str:
 class Proposal:
     field: str
     label: str
-    value: str
+    value: str | list[str]        # danh sách cho câu chọn-nhiều
     note: str = ""
 
 
@@ -183,11 +199,32 @@ def propose(text: str, existing: dict) -> list[Proposal]:
     lines = [l.strip() for l in text.splitlines() if l.strip()]
     out: list[Proposal] = []
 
-    def add(field: str, label: str, value: str, note: str = ""):
-        if value and not (existing.get(field) or "").strip():
-            out.append(Proposal(field, label, value.strip(), note))
+    def add(field, label, value, note="", thay=False):
+        """Câu chọn-nhiều nhận DANH SÁCH mã lựa chọn, câu tự do nhận chuỗi —
+        store giữ nguyên kiểu nào đưa vào. Trước đây hàm này chỉ biết chuỗi,
+        đưa danh sách vào là vỡ ngay ở .strip().
 
-    add("cv_text", "Full CV text", text, f"{len(text)} characters")
+        `thay=True` cho phép đề xuất ĐÈ lên ô đã có. Chỉ dùng cho cv_text:
+        "nhập một CV mới" thì rõ ràng là muốn thay bản cũ. Mọi ô khác giữ luật
+        không-bao-giờ-đè — đó là thứ bảo vệ câu người dùng tự gõ.
+        """
+        cu = existing.get(field)
+        if isinstance(cu, (list, tuple)):
+            da_co = bool(cu)
+        else:
+            da_co = bool((cu or "").strip())
+        if not value or (da_co and not thay):
+            return
+        out.append(Proposal(field, label,
+                            value if isinstance(value, list) else value.strip(),
+                            note))
+
+    cu_cv = str(existing.get("cv_text") or "")
+    add("cv_text", "Full CV text", text,
+        (f"{len(text)} characters — THAY bản CV đang lưu "
+         f"({len(cu_cv)} ký tự). Bỏ tick nếu chỉ muốn lấy mấy ô bên dưới."
+         if cu_cv.strip() else f"{len(text)} characters"),
+        thay=True)
 
     if lines:
         head = lines[0]
@@ -212,10 +249,23 @@ def propose(text: str, existing: dict) -> list[Proposal]:
 
     edu = _section(text, "EDUCATION")
     if edu:
-        add("education", "Education", edu.split("Certification")[0].strip())
+        # Bỏ dòng KHÔNG mang tin: PDF hay đẻ ra một dấu "·" đứng lẻ giữa hai
+        # bằng. Để nguyên thì nó thành một dòng học vấn rỗng, mà score.py và
+        # cv/build.py đều đọc theo DÒNG.
+        sach = [l for l in edu.split("Certification")[0].strip().splitlines()
+                if l.strip(" ·—–-\t")]
+        add("education", "Education", "\n".join(sach))
     cert = re.search(r"^Certifications?\s*[—–-]\s*(.+)$", text, re.M)
     if cert:
-        add("certifications", "Certifications", cert.group(1).strip())
+        # MỘT CHỨNG CHỈ MỘT DÒNG. CV viết "A · B · C" trên một dòng, nhưng
+        # cv/build.py làm `certs.splitlines()[0]` để lấy chứng chỉ mạnh nhất —
+        # giữ nguyên một dòng thì nó nhét cả cụm 90 ký tự vào CV làm một
+        # "fact", và máy đếm ra 1 chứng chỉ trong khi thật sự có 3.
+        tung = [c.strip() for c in re.split(r"\s·\s|\s\|\s", cert.group(1))
+                if c.strip()]
+        add("certifications", "Certifications", "\n".join(tung),
+            f"{len(tung)} chứng chỉ — mỗi dòng một cái, hệ thống đọc theo dòng"
+            if len(tung) > 1 else "")
 
     skills = _section(text, "TECHNICAL SKILLS") or _section(text, "SKILLS")
     found = sorted({c for a, c in ALIASES.items()
@@ -225,4 +275,66 @@ def propose(text: str, existing: dict) -> list[Proposal]:
         add("skills_strong", "Skills recognised in your CV", ", ".join(found),
             f"{len(found)} terms — edit before saving, the system cannot tell "
             f"strong from merely mentioned")
+        # Cùng một mẻ kỹ năng, dùng luôn làm từ khoá tìm tin. Không rút lại
+        # lần nữa bằng luật khác — hai luật cho một thứ thì sớm muộn lệch nhau.
+        add("search_keywords", "Keywords to look for in postings",
+            ", ".join(found[:12]),
+            "taken from the skills above — trim to the few that really matter")
+
+    # --- phần MỤC TIÊU: đây mới là chỗ mở cổng cho app chạy được ------------
+    titles = _job_titles(text)
+    if titles:
+        add("job_titles", "Job titles to search for", "\n".join(titles),
+            f"{len(titles)} titles read off your CV — these are jobs you HAVE "
+            f"done. Edit them into the jobs you WANT; the search sends this "
+            f"string to the boards as-is")
+
+    levels = [key for key, rx in LEVEL_WORD if rx.search(text)]
+    if levels:
+        add("seniority", "Levels you'd accept", levels,
+            "inferred from words printed on your CV (" + ", ".join(levels) + ")")
+
+    if UK.search(blob) or UK.search(text[:600]):
+        add("markets", "Which markets?", ["uk_onsite", "uk_remote"],
+            "inferred from the location on your CV — change it if you are "
+            "looking elsewhere")
+
+    # work_auth CỐ TÌNH KHÔNG ĐỀ XUẤT. Nó là sự thật pháp lý về con người, CV
+    # không nói, và đoán sai thì hỏng cả lá đơn — nhà tuyển dụng lọc câu này
+    # trước khi đọc bất cứ thứ gì khác. Người phải tự trả lời.
     return out
+
+
+def _job_titles(text: str) -> list[str]:
+    """Chức danh đọc được trong CV, giữ nguyên thứ tự xuất hiện.
+
+    Hai luật, cả hai đều rút ra từ một CV THẬT đọc hụt:
+
+    1. CẮT TRƯỚC, ĐO SAU. CV thật viết cả dòng là "Founder / Quantitative
+       Developer — Algorithmic Trading Startup Jan 2024 – …" (81 ký tự). Đo
+       độ dài trước khi cắt vế công ty thì dòng nào cũng quá dài và bị loại
+       sạch — đúng lỗi làm hồ sơ của Vin không rút được chức danh nào.
+
+    2. CHỈ ĐỌC PHẦN EXPERIENCE nếu CV có phần đó. Quét cả tệp thì "Quant
+       Trading Studio" ở mục SELECTED PROJECTS cũng lọt vào — nó là tên
+       project, không phải chức danh, mà nhìn thì y hệt.
+    """
+    vung = (_section(text, "EXPERIENCE")
+            or _section(text, "WORK EXPERIENCE")
+            or _section(text, "PROFESSIONAL EXPERIENCE")
+            or text)
+    seen: list[str] = []
+    for raw in vung.splitlines():
+        line = raw.strip(" \t-–—•|")
+        if not ROLE_WORD.search(line):
+            continue
+        # cắt vế công ty / ngày tháng TRƯỚC rồi mới đo
+        line = re.split(r"\s[—–|]\s|\s{2,}|,\s", line)[0].strip()
+        # bỏ đuôi ngày tháng còn sót: "Research Consultant Jan 2025 – Sep 2025"
+        line = re.sub(r"\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*"
+                      r"\s+\d{4}.*$", "", line).strip()
+        if not (4 <= len(line) <= 60) or NOT_ROLE.search(line):
+            continue
+        if line.lower() not in [t.lower() for t in seen]:
+            seen.append(line)
+    return seen[:8]

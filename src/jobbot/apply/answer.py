@@ -77,6 +77,7 @@ class Education:
     start_year: int = 0
     end_month: int = 0
     end_year: int = 0
+    note: str = ""            # dòng phụ: điểm môn, hạng
     missing: list[str] = field(default_factory=list)
 
 
@@ -90,8 +91,69 @@ def _month(word: str | None) -> int:
     return MONTHS.get((word or "")[:3].lower(), 0)
 
 
+def educations(text: str) -> list[Education]:
+    """MỌI bằng trong ô Education, không chỉ bằng mới nhất.
+
+    MỘT ngữ pháp cho cả đọc lẫn ghi: form hồ sơ dựng dòng bằng `line()` ngay
+    dưới, rồi chính hàm này đọc lại. Hai bên lệch nhau là form ghi ra thứ máy
+    không hiểu — mà thứ máy không hiểu ở đây là NGÀY TỐT NGHIỆP, câu mà lá đơn
+    nào cũng hỏi.
+
+    Dòng thụt đầu là dòng PHỤ (điểm môn, hạng) — thuộc về bằng ngay trên nó,
+    không phải một bằng mới.
+    """
+    out: list[Education] = []
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        if line.startswith((" ", "\t")):
+            if out:
+                out[-1].note = (out[-1].note + " " + line.strip()).strip()
+            continue
+        sach = line.strip()
+        # Dòng KHÔNG mang tên bằng và KHÔNG có khoảng năm thì không phải một
+        # bằng — nó là dòng phụ viết sát lề. CV thật hay viết điểm môn kiểu đó
+        # ("Investment & Portfolio Management 86 · Data Analysis 83"), và nhận
+        # nhầm thì nó hiện ra thành một cái bằng tên "Investment".
+        if out and not _la_bang(sach):
+            out[-1].note = (out[-1].note + " " + sach).strip()
+            continue
+        out.append(_one(sach))
+    return out
+
+
+def _la_bang(dong: str) -> bool:
+    """Dòng này có phải một cái BẰNG không — có tên bằng, hoặc có khoảng năm."""
+    dau = _DEGREE_HEAD.match(dong)
+    if dau:
+        key = dau.group(1).lower().replace(".", "").replace(" (hons)", "")
+        if key in DEGREE_LEVEL:
+            return True
+    return bool(_YEARS.search(dong))
+
+
+def line(degree: str, discipline: str, school: str,
+         start: str, end: str, note: str = "") -> str:
+    """Các ô rời -> ĐÚNG dòng mà `educations()` đọc lại được.
+
+    Dạng: "MSc Computational Finance — Royal Holloway, Sep 2025 – Sep 2026"
+    Ghi chú (điểm môn) xuống dòng và THỤT VÀO — đó là cách nói "đây là dòng
+    phụ của bằng trên", và cũng là thứ giữ cho nó không bị đọc nhầm thành một
+    bằng thứ hai.
+    """
+    trai = " ".join(x for x in (degree.strip(), discipline.strip()) if x)
+    phai = school.strip()
+    khi = " – ".join(x for x in (start.strip(), end.strip()) if x)
+    if khi:
+        phai = f"{phai}, {khi}" if phai else khi
+    dong = " — ".join(x for x in (trai, phai) if x)
+    if note.strip():
+        dong += "\n  " + note.strip()
+    return dong
+
+
 def education(text: str) -> Education:
-    """Dòng học vấn mới nhất trên CV -> các ô mà form hỏi.
+    """Bằng MỚI NHẤT — dòng đầu. Các ô mà form xin việc hỏi.
 
     Ngữ pháp đọc được (đúng cách Vin đã viết):
 
@@ -101,16 +163,16 @@ def education(text: str) -> Education:
     Có tháng thì lấy tháng ("Sep 2025 – Sep 2026"). Không có thì KHÔNG đoán —
     ghi vào `missing` để báo Vin sửa hồ sơ một lần, khỏi phải chọn tay 49 lần.
     """
-    out = Education()
-    head = ""
-    for line in (text or "").splitlines():
-        if line.strip() and not line.startswith((" ", "\t")):
-            head = line.strip()
-            break                                  # dòng đầu = bằng mới nhất
-    if not head:
-        out.missing = ["học vấn"]
-        return out
+    hang = educations(text)
+    if not hang:
+        trong = Education()
+        trong.missing = ["học vấn"]
+        return trong
+    return hang[0]
 
+
+def _one(head: str) -> Education:
+    out = Education()
     # Nhiều kiểu dấu ngăn. Chỉ nhận "—" và " - " thì Vin gõ "MSc X-Royal
     # Holloway" hay "MSc X | Royal Holloway" là CẢ DÒNG chui vào ô ngành học
     # và ô trường bỏ trống — nhà tuyển dụng nhận một chuỗi vô nghĩa.

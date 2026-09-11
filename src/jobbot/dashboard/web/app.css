@@ -180,6 +180,25 @@ a:hover{text-decoration:underline}
 .obarnum{font-size:12px;color:var(--mute);margin:0 0 14px}
 .obarnum b{color:var(--ink);font-weight:600}
 .mbtn.big{display:inline-block;padding:9px 20px;font-size:13.5px;margin:0 0 4px}
+/* .mbtn.apply mặc định width:100% (nó sinh ra cho nút Lưu trong form),
+   nên trong hàng này phải trả về bề rộng theo chữ — không thì nút nuốt
+   cả hàng và đẩy link 'hoặc tự gõ' xuống dòng. */
+.octa{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.octa .mbtn.apply{width:auto;flex:none}
+.oalt{font-size:12.5px;color:var(--mute)}
+.oalt:hover{color:var(--ink)}
+.omeo{font-size:12.5px;color:var(--mute);line-height:1.5;margin:10px 0 0;max-width:78ch}
+.omeo b{color:var(--dim);font-weight:600}
+/* Xong phần bắt buộc thì chu trình tự đóng — mở lại bằng một cú bấm. */
+.odone{margin:18px 0 0}
+.odone > summary{cursor:pointer;list-style:none;font-size:12px;color:var(--mute);
+  padding:9px 12px;border:1px solid var(--line);border-radius:var(--round);
+  display:flex;align-items:center;gap:8px}
+.odone > summary::-webkit-details-marker{display:none}
+.odone > summary:before{content:"▸";color:var(--dim)}
+.odone[open] > summary:before{content:"▾"}
+.odone > summary:hover{color:var(--ink);border-color:var(--rim)}
+.odone .blklist{margin-top:6px}
 .ohead{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
   color:var(--mute);margin:22px 0 4px}
 .ostep{padding:13px 3px}
@@ -813,19 +832,28 @@ main:not(.flow) .inner{flex:1;min-height:0;max-width:none;
 .sheet{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.5);
   backdrop-filter:blur(2px);display:flex;align-items:flex-start;
   justify-content:flex-end;padding:calc(var(--top) + 8px) 14px 14px}
+/* Đệm TRONG tấm phủ — một số, mọi khối con dùng chung. Trước đây mỗi khối tự
+   đặt (0, 15px, 18px) nên tiêu đề dính sát góc còn hàng dưới thì thụt vào. */
+:root{--sheet-pad:18px}
+
 /* BẮT BUỘC. Thuộc tính hidden chỉ là luật [hidden]{display:none} của trình
    duyệt; .sheet{display:flex} cùng độ ưu tiên nhưng là CSS của mình nên
    THẮNG — hidden thành vô nghĩa, tấm phủ nằm trên cùng vĩnh viễn, phủ đen
    cả trang và nuốt mọi cú bấm. Không bấm được gì hết. */
 .sheet[hidden]{display:none}
+/* Tấm chu trình dựng hồ sơ rộng hơn tấm Cài đặt: nó có danh sách 6 mục,
+   nhét vào 400px thì dòng nào cũng gãy làm ba. */
+.setupbody{padding:4px 15px 15px}
+.sheet.mid .sheetbox:has(.setupbody){width:620px}
+
 /* Cài đặt CẢ APP đứng giữa màn, không phải tấm bên phải như ⚟ của khúc. */
 .sheet.mid{align-items:center;justify-content:center;padding:20px}
-.sheetbox{width:400px;max-width:calc(100vw - 28px);max-height:100%;overflow:auto;
+.sheetbox{width:480px;max-width:calc(100vw - 28px);max-height:100%;overflow:auto;
   background:var(--panel);border:1px solid var(--line-2);border-radius:12px;
   box-shadow:0 24px 70px rgba(0,0,0,.6)}
 .sheetwait{padding:26px;color:var(--mute);font-size:12px;text-align:center}
 
-.setform{padding:16px 18px 18px}
+.setform{padding:6px var(--sheet-pad) var(--sheet-pad)}
 .setform h3{margin:0 0 14px;font-size:12px;font-weight:700;letter-spacing:.07em;
   text-transform:uppercase;color:var(--dim)}
 .setform .srow{display:flex;align-items:center;justify-content:space-between;
@@ -1172,8 +1200,94 @@ body[data-run=running] .deckpill{border-color:var(--acc-2);
 }
 .mbtn.knob{padding:5px 10px;font-size:13px;line-height:1}
 
+/* Hàng nút phá hoại: ô gõ chữ + nút, nút khoá sẵn cho tới khi gõ đúng. */
+/* Ô thẻ trong FORM HỒ SƠ — BA VÙNG, không nhồi vào một khung:
+
+       ô tìm        gõ để lọc; Enter lấy gợi ý khớp
+       gợi ý        chip, tự xuống dòng, KHÔNG cuộn ngang, không bóp
+       đã chọn      khung thẻ riêng ở dưới, rộng bao nhiêu cũng được
+
+   Bản trước gộp ô nhập vào chung khung thẻ: đầy vài thẻ là hết chỗ, hàng gợi
+   ý bị ép cụt, mà gõ dở rồi bấm đi chỗ khác là chữ dở thành thẻ. */
+.tagfield{display:flex;flex-direction:column;gap:18px;padding:4px 0 2px}
+.findrow{display:flex;gap:10px;align-items:center}
+.findrow[hidden]{display:none}
+.tagfind{flex:1;min-width:0;padding:11px 13px;font-size:13px}
+.findrow .mbtn{flex:none}
+
+/* Cao hẳn ra: bày được ~5 hàng gợi ý mà không phải cuộn. Bóp lại cho vừa chỗ
+   là hàng gợi ý cụt, mà cụt thì người dùng tưởng kho chỉ có mấy cái đó. */
+.sugdrop{display:flex;flex-wrap:wrap;align-content:flex-start;gap:9px;
+  min-height:96px;max-height:260px;overflow-y:auto;padding:3px 2px 5px}
+.sugdrop > .addtag{flex:none;font-size:12.5px;padding:7px 13px}
+/* BẮT BUỘC — đã dính hai lần. Đặt display cho chip là CSS của mình THẮNG luật
+   [hidden]{display:none} của trình duyệt: chip bị JS ẩn vẫn hiện, flex bóp mỗi
+   dòng còn 14px và cắt cụt chữ, nhìn như lỗi phông. */
+.sugdrop > .addtag[hidden]{display:none}
+/* LẦN THỨ BA dính bẫy này: .sugdrop khai display:flex nên nó THẮNG luật
+   [hidden]{display:none} của trình duyệt. Chọn hết gợi ý xong, JS ẩn vùng
+   này mà nó vẫn chiếm 96px khoảng trống giữa trang. */
+.sugdrop[hidden]{display:none}
+.sugnone{font-size:12px;color:var(--mute);padding:5px 2px;flex-basis:100%}
+
+.chosenhead{font-size:10.5px;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--mute);margin:4px 0 -8px}
+/* Khung "đã chọn" cao sẵn: thêm bớt thẻ không làm cả trang nhảy lên nhảy xuống. */
+.tagfield .tagbox{min-height:92px;align-content:flex-start;gap:9px;padding:12px 13px}
+.tagfield .tag{font-size:12.5px;padding:6px 11px}
+.tagempty{font-size:12.5px;color:var(--mute);padding:4px 4px}
+
+/* Học vấn: MỖI BẰNG MỘT HÀNG. Ô rời thay cho khối chữ thô, vì ngữ pháp ô này
+   CÓ TẢI — apply/answer đọc nó ra ngày tốt nghiệp để điền form xin việc. */
+.edurows{display:flex;flex-direction:column;gap:14px;margin:0 0 12px}
+.edurow{display:grid;gap:9px 10px;align-items:end;
+  grid-template-columns:96px 1fr 1fr 118px 118px 30px;
+  padding:13px;border:1px solid var(--line);border-radius:var(--round);
+  background:var(--bg)}
+.edufield{display:flex;flex-direction:column;gap:5px;min-width:0}
+.edufield > span{font-size:10.5px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--mute)}
+.edufield .txt{width:100%;padding:8px 10px;font-size:12.5px}
+/* Điểm/hạng là dòng phụ -> cho nó cả hàng dưới, đừng bóp vào một cột hẹp. */
+.edufield.note{grid-column:1 / -2}
+.edudrop{font:inherit;font-size:15px;line-height:1;color:var(--mute);cursor:pointer;
+  background:none;border:1px solid var(--line);border-radius:7px;padding:7px 8px}
+.edudrop:hover{color:var(--bad);border-color:var(--bad)}
+@media (max-width:900px){.edurow{grid-template-columns:1fr 1fr 30px}
+  .edufield.note{grid-column:1 / -1}}
+
+/* Kinh nghiệm & project: mỗi thứ một KHỐI. Tên + nơi/thời gian trên một hàng,
+   phần "đã làm được gì" cả chiều ngang bên dưới — mỗi dòng ở đó là một câu có
+   thể lên CV, nên nó cần chỗ để viết. */
+.blockrows{display:flex;flex-direction:column;gap:14px;margin:0 0 12px}
+.blockrow{display:grid;gap:11px 10px;align-items:end;
+  grid-template-columns:1fr 190px 30px;
+  padding:14px;border:1px solid var(--line);border-radius:var(--round);
+  background:var(--bg)}
+.edufield.bbody{grid-column:1 / -1}
+.edufield.bbody .txt{min-height:88px;line-height:1.55;resize:vertical}
+@media (max-width:900px){.blockrow{grid-template-columns:1fr 30px}
+  .edufield.bmeta{grid-column:1 / -2}}
+
+/* Tab trong tấm Cài đặt. Cả ba tab nằm sẵn trong DOM, chỉ một cái mang .on —
+   đổi tab không gọi lại server, nên không có khoảnh khắc trống. */
+.stabs{display:flex;gap:5px;padding:0 var(--sheet-pad) 12px;
+  border-bottom:1px solid var(--line)}
+.stab{font:inherit;font-size:12px;font-weight:600;color:var(--mute);cursor:pointer;
+  background:none;border:1px solid transparent;border-radius:999px;padding:5px 12px}
+.stab:hover{color:var(--ink);background:var(--panel-2)}
+.stab.on{color:var(--acc);background:var(--acc-bg);border-color:var(--acc-2)}
+.stpane{display:none;padding:6px var(--sheet-pad) var(--sheet-pad)}
+/* .setform tự mang đệm riêng (nó là <form>), nên trong pane thì bỏ đệm
+   ngang đi, không thì cộng dồn thành 36px một bên. */
+.stpane > .setform{padding:0}
+.stpane.on{display:block}
+.dangerrow{display:flex;gap:9px;align-items:center;
+  padding:12px var(--sheet-pad) 0}
+.dangerrow .search{flex:1;min-width:0}
+.dangerrow .mbtn{flex:none}
 .sheethead{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--mute);padding:0 0 10px}
+  color:var(--mute);padding:var(--sheet-pad) var(--sheet-pad) 12px}
 
 /* --- thanh TRẠNG THÁI đáy app ---------------------------------------- */
 /* Tin CHUNG của cả app, không thuộc tab nào: đang chạy gì, việc gần nhất.

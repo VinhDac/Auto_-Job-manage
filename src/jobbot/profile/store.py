@@ -73,16 +73,32 @@ def _has_value(answers: Answers, question_id: str) -> bool:
     return True
 
 
+def has_answer(answers: Answers, question) -> bool:
+    """Câu này đã có nội dung chưa — HỎI ĐÚNG CHỖ NÓ NẰM.
+
+    Câu kiểu BLOCKS (kinh nghiệm, project) không lưu ở profile_answer mà lưu
+    thành khối trong cv_text. Chỉ nhìn profile_answer thì nhập CV xong, máy đã
+    rút ra 2 khối kinh nghiệm và 3 project, mà Home vẫn báo "0/1 — chưa xong".
+    """
+    from .schema import BLOCKS
+    if getattr(question, "kind", "") == BLOCKS:
+        from ..cv.blocks import parse as parse_cv
+        return any(b.kind == question.block_kind
+                   for b in parse_cv(str(answers.get("cv_text") or "")))
+    return _has_value(answers, question.id)
+
+
 def missing_in_section(answers: Answers, section: Section) -> list[str]:
     """Câu bắt buộc còn thiếu trong một phần."""
-    return [q.id for q in section.questions if q.required and not _has_value(answers, q.id)]
+    return [q.id for q in section.questions
+            if q.required and not has_answer(answers, q)]
 
 
 def is_section_done(answers: Answers, section: Section) -> bool:
     """Xong = không thiếu câu bắt buộc VÀ đã trả lời ít nhất một câu."""
     if missing_in_section(answers, section):
         return False
-    return any(_has_value(answers, q.id) for q in section.questions)
+    return any(has_answer(answers, q) for q in section.questions)
 
 
 def next_section(section_id: str) -> Section | None:
@@ -98,6 +114,27 @@ def first_unfinished_section(answers: Answers) -> Section | None:
 def missing_for_ingest(answers: Answers) -> list[str]:
     """Câu còn thiếu để được phép kéo tin về."""
     return [qid for qid in INGEST_GATE if not _has_value(answers, qid)]
+
+
+def section_of(question_id: str) -> Section | None:
+    """Câu này nằm ở phần nào. Dùng để ĐƯA NGƯỜI DÙNG TỚI chỗ còn thiếu."""
+    return next((s for s in SECTIONS
+                 if any(q.id == question_id for q in s.questions)), None)
+
+
+def next_gate_stop(answers: Answers) -> str | None:
+    """Chỗ tiếp theo BẮT BUỘC phải ghé, hay None nếu đã đủ để app chạy.
+
+    Đây là vòng lặp của chu trình khởi tạo: lưu xong một phần thì hỏi lại hàm
+    này — còn thiếu thì quay lại đúng phần chứa câu thiếu, đủ rồi mới thả ra.
+    Không đi tuần tự phần 1 -> 2 -> 3: người dùng chỉ bị giữ lại ở chỗ CÒN
+    THIẾU, không bị lùa qua 35 câu mới được dùng app.
+    """
+    thieu = missing_for_ingest(answers)
+    if not thieu:
+        return None
+    phan = section_of(thieu[0])
+    return f"/profile/{phan.id}" if phan else None
 
 
 def can_ingest(answers: Answers) -> bool:

@@ -155,6 +155,9 @@
   // --------------------------------------------------------------- ô thẻ
   // Gõ chức danh rồi Enter là thêm. Mỗi thẻ mang một <input hidden>, nên form
   // gửi lên một danh sách giá trị — server không phải ngồi tách dòng.
+  // Ô thẻ dùng chung cho MỌI câu hỏi kiểu danh sách. Tên trường lấy từ
+  // data-tags của chính ô đó — trước đây đóng cứng 'job_titles', nên mang
+  // widget sang ô khác là mọi thẻ lặng lẽ lưu nhầm vào chức danh.
   function addTag(box, text) {
     const name = text.trim().replace(/\s+/g, ' ');
     if (!name) return false;
@@ -167,7 +170,7 @@
     tag.textContent = name;                                 // textContent: chữ người
     const hidden = document.createElement('input');         // gõ vào, không phải HTML
     hidden.type = 'hidden';
-    hidden.name = 'job_titles';
+    hidden.name = box.dataset.tags || 'job_titles';
     hidden.value = name;
     const kill = document.createElement('button');
     kill.type = 'button';                                   // không có dòng này thì
@@ -177,6 +180,7 @@
     kill.textContent = '×';
     tag.append(hidden, kill);
     box.insertBefore(tag, box.querySelector('.taginput'));
+    dongBo(box.closest('[data-tagfield]'));
     return true;
   }
 
@@ -188,7 +192,19 @@
       if (e.key === 'Enter') {
         // Chặn Enter gửi form: người dùng đang thêm thẻ, chưa muốn Áp dụng.
         e.preventDefault();
-        if (addTag(box, input.value)) input.value = '';
+        // Đang có gợi ý khớp thì Enter lấy CÁI ĐÓ, không lấy chữ gõ dở. Gõ
+        // "quant" rồi Enter mà ra thẻ "quant" thì tìm không ra tin nào —
+        // chức danh phải đúng nguyên văn như trên tin.
+        const khoi = input.closest('[data-tagfield]');
+        const dau = khoi && input.value.trim()
+          ? khoi.querySelector('[data-sugdrop] [data-addtag]:not([hidden])')
+          : null;
+        const chu = dau ? dau.dataset.addtag : input.value;
+        if (addTag(box, chu)) {
+          input.value = '';
+          if (dau) dau.remove();
+          if (khoi) loc(khoi, '');
+        }
       } else if (e.key === 'Backspace' && !input.value) {
         const last = [...box.querySelectorAll('.tag')].pop();
         if (last) last.remove();
@@ -227,6 +243,155 @@
   function closeSheet() {
     const sheet = document.querySelector('[data-sheet]');
     if (sheet) { sheet.hidden = true; sheet.querySelector('.sheetbox').innerHTML = ''; }
+  }
+
+  // Nút phá hoại phải GÕ ĐÚNG CHỮ mới bấm được. Trình nghe đặt trên document
+  // vì khối Cài đặt nạp vào tấm phủ sau khi trang đã dựng — gắn thẳng vào nút
+  // thì lúc gắn nút chưa tồn tại.
+  //
+  // Đây chỉ là lớp khoá ở MÀN HÌNH cho đỡ bấm nhầm. Server kiểm lại lần nữa
+  // (arg phải là "xoa"); không bao giờ tin mỗi phía trình duyệt.
+  // Chuyển tab trong tấm Cài đặt. Đặt trên document vì tấm này nạp vào sau
+  // khi trang đã dựng. KHÔNG nạp lại từ server mỗi lần đổi tab: cả ba tab đã
+  // nằm sẵn trong mảnh HTML, đổi tab chỉ là đổi cái nào hiện.
+  function wireSheetTabs() {
+    document.addEventListener('click', (e) => {
+      const tab = e.target.closest('[data-stab]');
+      if (!tab) return;
+      const box = tab.closest('.sheetbox');
+      if (!box) return;
+      $('[data-stab]', box).forEach((b) => b.classList.toggle('on', b === tab));
+      $('[data-pane]', box).forEach((p) => {
+        p.classList.toggle('on', p.dataset.pane === tab.dataset.stab);
+      });
+    });
+  }
+
+  // GÕ ĐỂ TÌM, ngay trong ô thẻ — không có ô lọc thứ hai. Lọc trong DOM chứ
+  // không hỏi server: gợi ý là danh sách cố định, gọi mạng mỗi phím là thừa
+  // và giật.
+  //
+  // Không gõ -> CSS chỉ để lộ mấy chip đầu (một hàng, cho đỡ dồn mắt).
+  // Đang gõ  -> thêm .tim, danh sách thành dropdown và chỉ hiện cái khớp.
+  // Ô "chưa chọn gì" chỉ hiện khi khung thẻ rỗng thật.
+  function dongBo(khoi) {
+    if (!khoi) return;
+    const box = khoi.querySelector('[data-tags]');
+    const trong = khoi.querySelector('.tagempty');
+    if (box && trong) trong.hidden = box.querySelectorAll('.tag').length > 0;
+  }
+
+  function loc(khoi, tim) {
+    const drop = khoi.querySelector('[data-sugdrop]');
+    if (!drop) return null;
+    let dau = null, hien = 0;
+    $('[data-addtag]', drop).forEach((chip) => {
+      const hop = !tim || chip.dataset.addtag.toLowerCase().includes(tim);
+      chip.hidden = !hop;
+      if (hop) { hien += 1; if (!dau) dau = chip; }
+    });
+    drop.classList.toggle('tim', !!tim);
+    const trong = drop.querySelector('.sugnone');
+    if (trong) trong.hidden = hien > 0 || !tim;
+    return dau;
+  }
+
+  // Hết gợi ý thì thu gọn: ô tìm và vùng chip rỗng chỉ còn là khoảng trống.
+  function dongBoGoiY(khoi) {
+    if (!khoi) return;
+    const drop = khoi.querySelector('[data-sugdrop]');
+    if (!drop) return;
+    const con = drop.querySelectorAll('[data-addtag]').length;
+    drop.hidden = con === 0;
+    const o = khoi.querySelector('.findrow');
+    if (o) o.hidden = con === 0;
+  }
+
+  // "Chọn tất cả": thêm mọi gợi ý ĐANG HIỆN. Đang gõ lọc thì nó chỉ thêm cái
+  // khớp — đó là điều người ta mong đợi khi vừa lọc xong.
+  function wireAddAll() {
+    document.addEventListener('click', (e) => {
+      const nut = e.target.closest('[data-addall]');
+      if (!nut) return;
+      e.preventDefault();
+      const khoi = nut.closest('[data-tagfield]');
+      const box = khoi && khoi.querySelector('[data-tags]');
+      if (!box) return;
+      $('[data-sugdrop] [data-addtag]', khoi).forEach((chip) => {
+        if (chip.hidden) return;
+        if (addTag(box, chip.dataset.addtag)) chip.remove();
+      });
+      dongBoGoiY(khoi);
+    });
+  }
+
+  function wireSuggestFilter() {
+    document.addEventListener('input', (e) => {
+      const o = e.target;
+      if (!o.classList || !o.classList.contains('tagfind')) return;
+      const khoi = o.closest('[data-tagfield]');
+      if (khoi) loc(khoi, o.value.trim().toLowerCase());
+    });
+    // Enter ở ô TÌM: lấy gợi ý khớp đầu tiên. Không khớp gì thì mới lấy
+    // nguyên văn chữ gõ — thêm thứ ngoài kho là quyết định có ý thức, không
+    // phải hậu quả của một phím lỡ tay.
+    document.addEventListener('keydown', (e) => {
+      const o = e.target;
+      if (e.key !== 'Enter' || !o.classList || !o.classList.contains('tagfind')) return;
+      e.preventDefault();          // chặn Enter gửi cả form
+      const khoi = o.closest('[data-tagfield]');
+      const chu = o.value.trim();
+      if (!khoi || !chu) return;
+      const dau = khoi.querySelector('[data-sugdrop] [data-addtag]:not([hidden])');
+      if (addTag(khoi.querySelector('[data-tags]'), dau ? dau.dataset.addtag : chu)) {
+        if (dau) dau.remove();
+        o.value = '';
+        loc(khoi, '');
+      }
+    });
+  }
+
+  // Thêm / bỏ HÀNG — dùng chung cho học vấn, kinh nghiệm và project. Một cơ
+  // chế, ba chỗ dùng: nhân bản hàng CUỐI rồi xoá trắng, không dựng HTML trong
+  // JS. Dựng ở hai nơi thì hôm nào thêm một ô là quên một chỗ.
+  function wireRows() {
+    document.addEventListener('click', (e) => {
+      const them = e.target.closest('[data-rowadd]');
+      if (them) {
+        e.preventDefault();
+        const kho = them.previousElementSibling;
+        if (!kho || !kho.matches('[data-rows]')) return;
+        const cuoi = kho.lastElementChild;
+        if (!cuoi) return;
+        const moi = cuoi.cloneNode(true);
+        $('input, textarea', moi).forEach((o) => { o.value = ''; });
+        kho.appendChild(moi);
+        const dau = moi.querySelector('input, textarea');
+        if (dau) dau.focus();
+        return;
+      }
+      const bo = e.target.closest('[data-rowdrop]');
+      if (bo) {
+        e.preventDefault();
+        const kho = bo.closest('[data-rows]');
+        const hang = bo.parentElement;
+        // Hàng cuối cùng thì XOÁ TRẮNG chứ không gỡ: gỡ hết thì không còn gì
+        // để nhân bản, nút "thêm" chết câm.
+        if (kho && kho.children.length > 1) hang.remove();
+        else if (hang) $('input, textarea', hang).forEach((o) => { o.value = ''; });
+      }
+    });
+  }
+
+  function wireDangerWord() {
+    document.addEventListener('input', (e) => {
+      const box = e.target;
+      const btn = document.querySelector(`[data-needword="${box.id}"]`);
+      if (!box.id || !btn) return;
+      const ok = box.value.trim().toUpperCase() === 'XOA';
+      btn.disabled = !ok;
+      btn.dataset.arg = ok ? 'xoa' : '';
+    });
   }
 
   function wireSheet() {
@@ -325,7 +490,13 @@
         })
           .then((r) => r.json())
           .then((s) => {
-            if (s.reload) { location.reload(); return; }
+            if (s.reload) {
+              // "Về trạng thái ban đầu" gồm cả thứ trình duyệt đang nhớ —
+              // thanh bên đang gập hay mở là state của app, không phải của máy.
+              if (s.wipe_local) { try { localStorage.clear(); } catch (err) {} }
+              location.reload();
+              return;
+            }
             // BỊ TỪ CHỐI thì lý do ra THANH TRẠNG THÁI, không nhét vào nhãn
             // nút: câu lý do dài cả trăm ký tự, gán vào nút là vỡ viên thuốc.
             // Nút trả về chữ cũ và bấm lại được — người dùng vừa đọc được vì
@@ -355,9 +526,18 @@
       const add = e.target.closest('[data-addtag]');
       if (add) {
         e.preventDefault();
-        const box = document.querySelector('[data-tags]');
+        // Tìm ô thẻ CÙNG KHỐI với chip. Một trang hồ sơ có nhiều ô thẻ; lấy
+        // querySelector toàn trang thì mọi chip đều rơi vào ô đầu tiên.
+        const khoi = add.closest('[data-tagfield]') || document;
+        const box = khoi.querySelector('[data-tags]');
         if (box && addTag(box, add.dataset.addtag)) add.remove();
+        dongBoGoiY(add.closest('[data-tagfield]'));
         return;
+      }
+      const bot = e.target.closest('[data-untag]');
+      if (bot) {
+        // để nhánh [data-untag] sẵn có xử lí; chỉ cần dọn ô trống sau đó
+        setTimeout(() => dongBo(bot.closest('[data-tagfield]')), 0);
       }
       const untag = e.target.closest('[data-untag]');
       if (untag) { e.preventDefault(); untag.closest('.tag').remove(); return; }
@@ -380,6 +560,14 @@
   wire();
   wireTags();
   wireSheet();
+  wireDangerWord();
+  wireSheetTabs();
+  wireSuggestFilter();
+  wireAddAll();
+  // BẮT ĐIỀN: hồ sơ chưa đủ thì bật tấm phủ ngay khi vào app. Đóng được
+  // (Esc / bấm ra ngoài) — giữ chứ không nhốt; quay lại Home là nó bật lại.
+  if (document.body.dataset.setup) openSheet(document.body.dataset.setup, 'app');
+  wireRows();
   syncNav();
   connect();
 })();

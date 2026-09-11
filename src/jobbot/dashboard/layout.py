@@ -115,7 +115,7 @@ def deck(stage: str, name: str, state: str, metrics: list,
 
 
 def page(title: str, body: str, active: str = "",
-         flow: bool = True, bar: str = "") -> str:
+         flow: bool = True, bar: str = "", setup: str = "") -> str:
     """flow=True  trang cuộn như cũ — dành cho trang CHƯA chuyển sang widget
     flow=False trang không cuộn, nội dung là lưới widget tự cuộn bên trong
     """
@@ -164,7 +164,11 @@ def page(title: str, body: str, active: str = "",
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{esc(title)} · jobbot</title>"
         "<link rel=stylesheet href='/static/app.css'>"
-        f"{early}</head><body>"
+        f"{early}</head><body"
+        # Cờ BẮT ĐIỀN: live.js thấy thuộc tính này thì bật tấm phủ chu
+        # trình dựng hồ sơ ngay khi trang dựng xong. Chỉ trang Home đặt
+        # cờ — đặt ở mọi trang thì nó thành pop-up đuổi theo người dùng.
+        + (f" data-setup='{esc(setup)}'" if setup else "") + ">"
         # THANH TIÊU ĐỀ — dải trên cùng cửa sổ. Cửa sổ app không có khung nên
         # traffic lights của macOS nằm đè lên trang: chỗ đó phải LUÔN trống,
         # cuộn nội dung lên tới đây là mất chữ. Có thanh thật thì mọi trang tự

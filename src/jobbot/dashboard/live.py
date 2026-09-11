@@ -236,7 +236,13 @@ def settings(conn: sqlite3.Connection) -> dict:
     stale = stale_count(conn)
 
     from ..browser import chrome as ch
+    from ..core import reset as reset_mod
+    kho = reset_mod.inventory(conn)
     return {
+        "reset_rows": kho["total_rows"],
+        "reset_files": kho["files"],
+        "reset_mb": round(kho["bytes"] / 1_048_576, 1),
+        "reset_backup_dir": str(reset_mod.backup_dir()),
         "every": prefs.num(conn, prefs.SCAN_EVERY, MIN_EVERY, MAX_EVERY),
         "hours": human_window(),
         "status": [
@@ -420,7 +426,7 @@ def onboarding(conn: sqlite3.Connection) -> dict:
     phan = []
     da_tra_loi = tong = 0
     for s in SECTIONS:
-        co = [q for q in s.questions if store._has_value(answers, q.id)]
+        co = [q for q in s.questions if store.has_answer(answers, q)]
         da_tra_loi += len(co)
         tong += len(s.questions)
         phan.append({

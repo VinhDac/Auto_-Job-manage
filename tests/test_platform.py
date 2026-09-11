@@ -161,5 +161,30 @@ run_py = Path("run.py").read_text()
 check("run.py chặn Python quá cũ", "3, 11" in run_py)
 
 
+
+print("\n[cửa sổ app macOS — ô chọn tệp]")
+# WKWebView KHÔNG tự mở được hộp thoại chọn tệp. Thiếu delegate thì
+# <input type=file> chết câm: bấm "Choose File" không có gì xảy ra, không lỗi,
+# không log — mà trong trình duyệt thường thì cùng trang đó chạy bình thường.
+if sys.platform == "darwin":
+    try:
+        from jobbot.app import Delegate
+        _sel = (b"webView:runOpenPanelWithParameters:"
+                b"initiatedByFrame:completionHandler:")
+        _m = Delegate.webView_runOpenPanelWithParameters_initiatedByFrame_completionHandler_
+        check("Delegate có hàm mở hộp thoại chọn tệp", _m.selector == _sel)
+        # Chữ ký phải khai tay. Để PyObjC tự suy thì tham số cuối ra "@" chứ
+        # không phải "@?" (block) — `handler(...)` gọi vào hư không và ô chọn
+        # tệp treo vĩnh viễn.
+        check("tham số cuối khai đúng là BLOCK",
+              _m.signature.decode().endswith("@?"))
+        _src = (Path(__file__).resolve().parent.parent
+                / "src/jobbot/app.py").read_text(encoding="utf-8")
+        check("và delegate được gắn vào webview", "setUIDelegate_(delegate)" in _src)
+    except ImportError:
+        check("bỏ qua — máy này không có PyObjC", True)
+else:
+    check("bỏ qua — không phải macOS", True)
+
 print(f"\n{ok} ok, {fail} fail")
 sys.exit(1 if fail else 0)

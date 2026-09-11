@@ -22,7 +22,8 @@ import threading
 
 import objc
 from AppKit import (NSApplication, NSApplicationActivationPolicyRegular,
-                    NSBackingStoreBuffered, NSColor, NSMenu, NSMenuItem, NSStatusBar,
+                    NSBackingStoreBuffered, NSColor, NSMenu, NSMenuItem,
+                    NSModalResponseOK, NSOpenPanel, NSStatusBar,
                     NSVariableStatusItemLength, NSViewHeightSizable, NSViewWidthSizable,
                     NSWindow, NSWindowStyleMaskClosable, NSWindowStyleMaskFullSizeContentView,
                     NSWindowStyleMaskMiniaturizable, NSWindowStyleMaskResizable,
@@ -39,6 +40,19 @@ from .dashboard.server import serve
 objc.loadBundle("WebKit", globals(),
                 bundle_path="/System/Library/Frameworks/WebKit.framework")
 
+# loadBundle chỉ nạp CLASS, không nạp chữ ký method. Hàm mở hộp thoại chọn tệp
+# nhận một BLOCK ở tham số cuối; không khai chữ ký thì PyObjC không biết gọi
+# block đó thế nào và `handler(...)` chết ngay — mà chết ở đây thì <input
+# type=file> treo luôn, bấm mãi không mở. Chỉ số 5 = sau self, _cmd, webView,
+# parameters, frame.
+objc.registerMetaDataForSelector(
+    b"NSObject",
+    b"webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:",
+    {"arguments": {5: {"callable": {
+        "retval": {"type": b"v"},
+        "arguments": {0: {"type": b"^v"}, 1: {"type": b"@"}}}}}},
+)
+
 WINDOW_W, WINDOW_H = 1180, 820
 IDLE, BUSY = "◆", "◇"
 
@@ -52,6 +66,30 @@ class Delegate(NSObject):
     scheduler = None
     status_item = None
     url = ""
+
+    # --- hộp thoại chọn tệp ----------------------------------------------
+    # BẮT BUỘC PHẢI CÓ. WKWebView không tự mở được NSOpenPanel: thiếu hàm này
+    # thì <input type=file> chết câm — bấm "Choose File" không có gì xảy ra,
+    # không lỗi, không log. Trong trình duyệt thường thì cùng trang đó chạy
+    # bình thường, nên lỗi này rất dễ bị đổ oan cho HTML.
+    def _mo_hop_chon_tep(self, _webview, params, _frame, handler):
+        panel = NSOpenPanel.openPanel()
+        panel.setCanChooseFiles_(True)
+        panel.setCanChooseDirectories_(False)
+        panel.setAllowsMultipleSelection_(bool(params.allowsMultipleSelection()))
+        # Người dùng bấm Cancel -> PHẢI gọi handler(None). Không gọi thì
+        # WKWebView treo ô nhập vĩnh viễn, lần sau bấm cũng không mở nữa.
+        handler(panel.URLs() if panel.runModal() == NSModalResponseOK else None)
+
+    # Chữ ký phải khai TAY. Để PyObjC tự suy thì tham số cuối thành "@" (một
+    # object bình thường) thay vì "@?" (block) — lúc đó `handler(...)` gọi vào
+    # hư không và ô chọn tệp treo. Đã kiểm: không có dòng này thì signature ra
+    # v@:@@@@, có thì ra v@:@@@@?.
+    webView_runOpenPanelWithParameters_initiatedByFrame_completionHandler_ = objc.selector(
+        _mo_hop_chon_tep,
+        selector=b"webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:",
+        signature=b"v@:@@@@?",
+    )
 
     # --- vòng đời app -----------------------------------------------------
     def applicationShouldTerminateAfterLastWindowClosed_(self, _app) -> bool:
@@ -191,9 +229,10 @@ def run() -> int:
     # ba nút traffic light nổi trên nền đen. CSS chừa sẵn 38px ở trên.
     window.setTitlebarAppearsTransparent_(True)
     window.setTitleVisibility_(NSWindowTitleHidden)
-    # khớp với --bg trong app.css (#191B1C) — không nháy trắng lúc mở
+    # khớp với --side trong app.css (#1A1A1A) — nền KHUNG app, không phải nền
+    # vùng làm việc. Sai màu ở đây thì lúc mở cửa sổ nháy một cái khác tông.
     window.setBackgroundColor_(
-        NSColor.colorWithSRGBRed_green_blue_alpha_(0.098, 0.106, 0.110, 1.0))
+        NSColor.colorWithSRGBRed_green_blue_alpha_(0.102, 0.102, 0.102, 1.0))
     window.setMinSize_(NSMakeRect(0, 0, 760, 540).size)
     window.center()
     window.setDelegate_(delegate)
@@ -202,6 +241,7 @@ def run() -> int:
     webview = WKWebView.alloc().initWithFrame_configuration_(rect, config)   # noqa: F821
     webview.setAutoresizingMask_(NSViewWidthSizable | NSViewHeightSizable)
     webview.setValue_forKey_(False, "drawsBackground")   # nền webview trong suốt -> đen
+    webview.setUIDelegate_(delegate)     # không có dòng này thì <input type=file> chết câm
     window.contentView().addSubview_(webview)
     webview.loadRequest_(NSURLRequest.requestWithURL_(NSURL.URLWithString_(url)))
 

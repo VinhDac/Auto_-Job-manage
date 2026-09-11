@@ -27,6 +27,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 SINGLE, MULTI, TEXT, LONGTEXT = "single", "multi", "text", "longtext"
+# ROWS: mỗi bằng một HÀNG có ô rời, không phải một khối chữ thô. Form ghi ra
+# đúng dòng mà apply/answer.educations() đọc lại — một ngữ pháp, hai chiều.
+ROWS = "rows"
+# BLOCKS: kinh nghiệm làm việc và project cá nhân. Đây là THÔNG TIN CÁ NHÂN,
+# nên chỗ của nó là hồ sơ — không phải nằm ẩn trong một tài liệu dán vào. Thứ
+# máy đẻ ra sau (CV từng bản, project đề xuất) là đầu ra, chuyện khác.
+#
+# Nơi LƯU vẫn là khối trong cv_text, vì bộ chấm điểm và bộ dựng CV đều đọc ở
+# đó — hồ sơ là nơi SỬA, không phải bản sao thứ hai.
+BLOCKS = "blocks"
 
 
 @dataclass(frozen=True)
@@ -46,6 +56,13 @@ class Question:
     placeholder: str = ""
     required: bool = False
     allow_other: bool = False       # mở ô "add your own" cạnh danh sách
+    # Ô THẺ. Giá trị = dấu nối lúc lưu ("\n" hay ", "). Có dấu nối nghĩa là
+    # câu này thực chất là một DANH SÁCH, nên đừng bắt người dùng gõ chay:
+    # họ phải vừa nghĩ ra nội dung, vừa nhớ đúng chính tả, vừa nhớ luật ngăn
+    # cách của riêng ô đó — ba gánh cho một giá trị.
+    tags: str = ""
+    suggest: str = ""               # kho gợi ý: "titles" hay "skills"
+    block_kind: str = ""            # với kind=BLOCKS: "experience" hay "project"
 
 
 @dataclass(frozen=True)
@@ -70,6 +87,7 @@ SECTIONS: list[Section] = [
         questions=[
             Question(
                 id="job_titles",
+            tags="\n", suggest="titles",
                 text="Which job titles would you take? Write them EXACTLY as they appear on postings.",
                 kind=LONGTEXT,
                 required=True,
@@ -82,6 +100,7 @@ SECTIONS: list[Section] = [
             ),
             Question(
                 id="search_keywords",
+            tags=", ", suggest="skills",
                 text="Other keywords that should appear in the posting",
                 kind=TEXT,
                 why="Technologies, domains, tools. Used to filter after the title search.",
@@ -229,8 +248,14 @@ SECTIONS: list[Section] = [
             ),
             Question(
                 id="industries",
+                tags=", ", suggest="industries",
                 text="Industries or domains you want",
                 kind=TEXT,
+                # "Tích hết" chính là ĐỂ TRỐNG — nhưng trước đây không chỗ nào
+                # nói ra, nên ô trống trông như một câu bị bỏ quên.
+                why=("Để TRỐNG nghĩa là không kén ngành. Chọn vài ngành chỉ để "
+                     "nói rõ mình ưu tiên chỗ nào — kho này đúng bằng bộ ngành "
+                     "mà máy nhận ra được trên tin thật."),
                 placeholder="fintech, healthtech, e-commerce, games…",
             ),
             Question(
@@ -289,6 +314,8 @@ SECTIONS: list[Section] = [
                 id="no_go_other",
                 text="Anything else you won't take?",
                 kind=LONGTEXT,
+                why="Để TRỐNG nghĩa là không kén ngành — app không lọc theo ngành nữa. "
+                    "Chọn vài ngành chỉ để nói rõ mình ưu tiên chỗ nào.",
                 placeholder="no PHP · no companies under 20 people · no frequent travel",
             ),
         ],
@@ -299,16 +326,12 @@ SECTIONS: list[Section] = [
         title="What you have",
         why="Raw material for matching and for building CVs. Without it, scoring is guesswork.",
         questions=[
-            Question(
-                id="cv_text",
-                text="Paste your current CV here",
-                kind=LONGTEXT,
-                why=(
-                    "Rough paste is fine, it doesn't need to be tidy. Later the system will read "
-                    "it and PROPOSE filling the gaps you left — you still approve each one."
-                ),
-                placeholder="Everything in your CV — experience, projects, skills…",
-            ),
+            # Ô "dán CV vào đây" ĐÃ BỎ khỏi form. `cv_text` vẫn là nguồn sự
+            # thật quan trọng nhất của app (cv/blocks.py đọc nó ra khối kinh
+            # nghiệm, score.py chấm theo từng khối) — nhưng nó có ĐƯỜNG RIÊNG:
+            # Import CV đọc PDF/DOCX rồi đề xuất từng ô để duyệt, và tab CV
+            # sửa từng khối. Bày thêm một ô trắng khổng lồ trong form là đường
+            # thứ hai cho cùng một thứ, mà lại là đường không ai biết điền gì.
             Question(
                 id="years_real",
                 text="How many years have you ACTUALLY worked?",
@@ -327,6 +350,7 @@ SECTIONS: list[Section] = [
             ),
             Question(
                 id="skills_strong",
+            tags=", ", suggest="skills",
                 text="Skills you're GENUINELY strong in",
                 kind=TEXT,
                 why="Matched directly against the requirements in the posting. Only list what you'd survive being grilled on.",
@@ -334,6 +358,7 @@ SECTIONS: list[Section] = [
             ),
             Question(
                 id="skills_weak",
+            tags=", ", suggest="skills",
                 text="Skills you've touched or are learning",
                 kind=TEXT,
                 why=(
@@ -344,6 +369,7 @@ SECTIONS: list[Section] = [
             ),
             Question(
                 id="stack_want",
+            tags=", ", suggest="skills",
                 text="Areas or tools you WANT to move into, even if you're not strong yet",
                 kind=TEXT,
                 why="Different from what you have. Used to rank postings, never to score a match.",
@@ -351,6 +377,45 @@ SECTIONS: list[Section] = [
         ],
     ),
     # ------------------------------------------------------------------ 4
+    # ------------------------------------------------------------------ 4
+    Section(
+        id="kinh_nghiem",
+        title="Work experience",
+        why=("Chỗ nhà tuyển dụng đọc đầu tiên. Mỗi việc một khối: chức danh, "
+             "nơi làm, thời gian, rồi những câu nói bạn ĐÃ LÀM ĐƯỢC GÌ — "
+             "có số thì càng tốt."),
+        questions=[
+            Question(
+                id="experience_blocks",
+                text="Việc đã làm",
+                kind=BLOCKS,
+                block_kind="experience",
+                why=("Mỗi dòng trong phần mô tả là một câu có thể lên CV. Máy "
+                     "chọn câu nào hợp tin nào — nên viết thêm câu là CV trúng "
+                     "hơn, không phải chọn khéo hơn."),
+                placeholder="Backtested alpha signals across 49 industry portfolios",
+            ),
+        ],
+    ),
+    # ------------------------------------------------------------------ 5
+    Section(
+        id="project",
+        title="Personal project",
+        optional=True,
+        why=("Thứ tách bạn khỏi 40 người khác cùng khớp một tin: khớp thì qua "
+             "được bộ lọc, còn BẰNG CHỨNG mới đưa bạn vào nhóm được gọi."),
+        questions=[
+            Question(
+                id="project_blocks",
+                text="Project của bạn",
+                kind=BLOCKS,
+                block_kind="project",
+                why=("Làm dở cũng tính. Nhiều cái chỉ thiếu mỗi việc đo lại và "
+                     "viết cho tử tế."),
+                placeholder="Sharpe 0.74 in sample against 0.322 out-of-sample",
+            ),
+        ],
+    ),
     Section(
         id="danh_tinh",
         title="Who you are",
@@ -396,11 +461,14 @@ SECTIONS: list[Section] = [
             Question(
                 id="education",
                 text="Education",
-                kind=LONGTEXT,
+                kind=ROWS,
                 why=(
                     "For an early-career application this IS the main body of the CV, not a "
                     "footnote. Include module grades and classification — graduate schemes "
-                    "filter on them directly."
+                    "filter on them directly.\n"
+                    "MỘT BẰNG MỘT DÒNG, theo đúng dạng này thì máy điền hộ được form xin "
+                    "việc: Bằng — Trường, Tháng Năm – Tháng Năm. Thiếu tháng thì mỗi lá đơn "
+                    "bạn phải tự chọn lại ngày tốt nghiệp."
                 ),
                 placeholder="MSc Computational Finance — Royal Holloway, University of London, "
                             "2025–2026\n  Investment & Portfolio Management 86 · Deep Learning 83\n"
@@ -408,6 +476,7 @@ SECTIONS: list[Section] = [
             ),
             Question(
                 id="certifications",
+                tags="\n",
                 text="Certifications and awards",
                 kind=LONGTEXT,
                 why=(
@@ -434,47 +503,6 @@ SECTIONS: list[Section] = [
         ],
     ),
     # ------------------------------------------------------------------ 5
-    Section(
-        id="project",
-        title="Personal project",
-        optional=True,
-        why=(
-            "OPTIONAL — this section is specific to computer science, skip it freely. "
-            "But it's what separates you from the 40 other people who match the same posting: "
-            "matching gets you through the filter, evidence is what gets you into the five "
-            "who are called. See docs/strategy.md."
-        ),
-        questions=[
-            Question(
-                id="proof_jds",
-                text="Paste 2–3 real postings where you thought \"I could genuinely do this\"",
-                kind=LONGTEXT,
-                why=(
-                    "The most important question here. With real postings you work BACKWARDS to a "
-                    "project — rather than building something first and hunting for somewhere it "
-                    "fits. Pick ones you're confident about, not ones you'd have to stretch for."
-                ),
-                placeholder="Paste the postings verbatim, separated by a line of ---",
-            ),
-            Question(
-                id="existing_projects",
-                text="Projects you've already built",
-                kind=LONGTEXT,
-                why="Half-finished ones count. Some only need measuring and writing up properly.",
-            ),
-            Question(
-                id="project_numbers",
-                text="Any NUMBERS? Before → after, and how you measured it.",
-                kind=LONGTEXT,
-                why=(
-                    "Without the method, the number means nothing. And \"here's what I got wrong\" "
-                    "is the part experienced readers trust most — a project with no scars reads "
-                    "as one that never ran for real."
-                ),
-                placeholder="e.g. build time 8 min -> 90 s, measured across 30 CI runs",
-            ),
-        ],
-    ),
 ]
 
 
@@ -495,3 +523,26 @@ def section_index(section_id: str) -> int:
 #   markets     dùng nguồn nào
 #   work_auth   ở UK đây là bộ lọc gắt nhất — thiếu thì đề xuất toàn tin không nộp được
 INGEST_GATE = ("job_titles", "markets", "work_auth")
+
+def suggestions(name: str) -> list[str]:
+    """Kho gợi ý cho ô thẻ.
+
+    "skills" lấy thẳng từ vựng chấm điểm: đó là danh sách máy THẬT SỰ nhận ra
+    khi đọc tin. Bịa một danh sách riêng cho màn hình thì người dùng chọn được
+    từ mà máy không biết đọc — gợi ý xong vẫn không ăn thua.
+
+    "titles" KHÔNG nằm ở đây, cố ý. Chức danh phải rút từ TIN THẬT (xem
+    profile/titles.py): một danh sách gõ tay trong mã sai ngay từ ngày viết và
+    mục dần từ đó — thị trường đẻ chức danh mới liên tục mà không ai nhớ vào
+    sửa file. Bên gọi truyền kho vào.
+    """
+    if name == "skills":
+        from ..scoring.vocab import ALIASES
+        return sorted(set(ALIASES.values()))
+    if name == "industries":
+        # Kho ngành ĐÃ CÓ trong projects/inventory.py — chính bộ từ mà máy
+        # dùng để dán nhãn ngành cho tin thật. Gõ một danh sách riêng cho màn
+        # hình thì người dùng chọn được ngành mà máy không biết nhận ra.
+        from ..projects.inventory import INDUSTRY
+        return sorted(INDUSTRY)
+    return []

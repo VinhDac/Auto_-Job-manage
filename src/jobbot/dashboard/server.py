@@ -17,8 +17,8 @@ from ..core import db
 from ..core import journal, scheduler as sched
 from ..core.paths import web_dir
 from ..profile import store
-from ..profile.schema import (LONGTEXT, MULTI, SECTIONS, TEXT, all_questions,
-                             section_by_id)
+from ..profile.schema import (BLOCKS, LONGTEXT, MULTI, ROWS, SECTIONS, TEXT,
+                             all_questions, section_by_id)
 from . import layout, live
 from . import upload
 from .views import cv as cvview
@@ -48,12 +48,46 @@ def _segments(path: str) -> list[str]:
     return [unquote(part) for part in path.strip("/").split("/") if part]
 
 
+def _ghi_khoi(form: dict[str, list[str]], question, cv_text: str) -> str:
+    """Các hàng trên form -> khối trong cv_text.
+
+    Đổi tên một khối = khối cũ KHÔNG còn ai trỏ tới, nên phải xoá nó đi; nếu
+    không thì mỗi lần sửa tên là CV mọc thêm một khối mồ côi. Xoá = ghi khối
+    rỗng, đúng luật sẵn có của write_block.
+    """
+    from ..cv.blocks import parse as parse_cv, write_block
+
+    key = question.id
+    titles = form.get(f"{key}__title", [])
+    metas = form.get(f"{key}__meta", [])
+    bodies = form.get(f"{key}__body", [])
+
+    moi = []
+    for i, title in enumerate(titles):
+        title = title.strip()
+        if not title:
+            continue
+        meta = metas[i].strip() if i < len(metas) else ""
+        body = [l.strip() for l in (bodies[i] if i < len(bodies) else "").splitlines()
+                if l.strip()]
+        moi.append((title, meta, body))
+
+    con = {t for t, _, _ in moi}
+    for b in parse_cv(cv_text):
+        if b.kind == question.block_kind and b.title.strip() not in con:
+            cv_text = write_block(cv_text, b.kind, b.title, "", [])
+    for title, meta, body in moi:
+        cv_text = write_block(cv_text, question.block_kind, title, meta, body)
+    return cv_text
+
+
 def _split_other(raw: str) -> list[str]:
     """Ô 'add your own' của câu CHỌN-NHIỀU -> danh sách, ngăn bằng phẩy hoặc xuống dòng."""
     return [part.strip() for part in raw.replace("\n", ",").split(",") if part.strip()]
 
 
-def _form_to_answers(form: dict[str, list[str]], section_id: str) -> dict:
+def _form_to_answers(form: dict[str, list[str]], section_id: str,
+                     current: dict | None = None) -> dict:
     """Đọc form theo ĐỊNH NGHĨA trong schema, không tin những gì trình duyệt gửi lên."""
     section = section_by_id(section_id)
     answers: dict = {}
@@ -69,6 +103,34 @@ def _form_to_answers(form: dict[str, list[str]], section_id: str) -> dict:
             picked = [v for v in values if v in allowed]
             extra = _split_other(other_raw)
             answers[question.id] = picked + [e for e in extra if e not in picked]
+        elif question.kind == BLOCKS:
+            # Ghi thẳng vào cv_text — MỘT nguồn sự thật. Hồ sơ là nơi SỬA;
+            # bộ chấm điểm và bộ dựng CV vẫn đọc khối ở đó, không có bản sao.
+            answers["cv_text"] = _ghi_khoi(
+                form, question, str((current or {}).get("cv_text") or ""))
+        elif question.kind == ROWS:
+            # Các ô cùng tên gửi lên thành MẢNG SONG SONG theo thứ tự hàng.
+            # Dựng lại bằng answer.line() — đúng ngữ pháp answer.educations()
+            # đọc vào, nên form ghi ra thứ máy chắc chắn hiểu.
+            from ..apply.answer import line as edu_line
+            cot = [form.get(f"edu_{k}", []) for k in
+                   ("degree", "discipline", "school", "start", "end", "note")]
+            dong = []
+            for hang in zip(*cot):
+                txt = edu_line(*(x.strip() for x in hang))
+                if txt.strip():
+                    dong.append(txt)
+            answers[question.id] = "\n".join(dong)
+        elif question.tags:
+            # Ô thẻ gửi MỘT input ẩn cho mỗi thẻ, cùng tên. Lấy values[0] như
+            # ô chữ thường thì mọi thẻ trừ cái đầu lặng lẽ biến mất.
+            sach, thay = [], set()
+            for v in values:
+                v = v.strip()
+                if v and v.lower() not in thay:
+                    thay.add(v.lower())
+                    sach.append(v)
+            answers[question.id] = question.tags.join(sach)
         elif question.kind in (TEXT, LONGTEXT):
             answers[question.id] = values[0].strip() if values else ""
         else:                                       # SINGLE
@@ -474,6 +536,15 @@ class Handler(BaseHTTPRequestHandler):
             finally:
                 conn.close()
 
+        if path == "/onboarding":
+            # Chu trình dựng hồ sơ — MẢNH HTML cho tấm phủ. Không phải một tab:
+            # việc của nó chỉ có lúc đầu.
+            conn = db.connect()
+            try:
+                return self._html(home.sheet(live.onboarding(conn)))
+            finally:
+                conn.close()
+
         if path == "/settings":
             # Trả MẢNH HTML, không phải cả trang: live.js nạp nó vào tấm phủ.
             # Cài đặt là menu bấm ra rồi đóng lại, không phải một tab.
@@ -510,8 +581,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._404()
                 done = {s.id for s in SECTIONS if store.is_section_done(answers, s)}
                 nxt = store.next_section(section.id)
-                label = f"Save and continue → {nxt.title}" if nxt else "Save and review profile"
-                return self._html(profile.render_section(section, answers, done, label))
+                thieu = store.missing_for_ingest(answers)
+                # Chưa đủ chạy thì nút KHÔNG hứa "đi tiếp" — lưu xong vẫn bị
+                # giữ lại đây. Nhãn nút phải nói đúng việc nó sắp làm.
+                if thieu:
+                    label = "Lưu — còn %d câu nữa" % len(thieu)
+                elif nxt:
+                    label = f"Save and continue → {nxt.title}"
+                else:
+                    label = "Save and review profile"
+                from ..profile import titles as tvocab
+                kho = {"titles": tvocab.cached(conn)}
+                return self._html(profile.render_section(
+                    section, answers, done, label, thieu, kho))
 
             self._404()
         finally:
@@ -764,6 +846,58 @@ class Handler(BaseHTTPRequestHandler):
                            f"hộp thư {address} đã nối được — bấm Quét thư")
             return self._json({"ok": True, "reload": True})
 
+        if path == "/api/titles/refresh":
+            # Đọc board công ty lấy chức danh THẬT. Không cần hồ sơ (cổng chỉ
+            # chặn quét CÓ LỌC), không cần Chrome — thuần HTTP. Đo được: 21
+            # board -> 2.226 tin -> 60 cụm nghề, ~13 giây.
+            from ..profile import titles as tvocab
+            from ..scan_runner import load_boards
+            conn = db.connect()
+            try:
+                tieu_de = tvocab.fetch_boards(
+                    load_boards(conn),
+                    log=lambda m: journal.log.warn(journal.SEARCH, m))
+                cum = tvocab.extract(tieu_de)
+                if not cum:
+                    # KHÔNG ghi kho rỗng đè lên kho đang có — mạng hỏng một
+                    # lần không được làm mất thứ đã lấy được.
+                    return self._json({"ok": False,
+                                       "note": "không lấy được chức danh nào"},
+                                      status=502)
+                n = tvocab.save(conn, cum)
+            finally:
+                conn.close()
+            journal.log.ok(journal.SEARCH,
+                           f"kho chức danh: {n} cụm từ {len(tieu_de)} tin thật")
+            return self._json({"ok": True, "reload": True,
+                               "note": f"{n} chức danh"})
+
+        if path == "/api/reset":
+            # LÀM LẠI TỪ ĐẦU. Cùng chốt với /api/mail/forget: phải gửi kèm
+            # "xoa", một POST rỗng không xoá được gì. Bài thử ném rác vào mọi
+            # route từng xoá mất app password thật 12 lần liền — đường phá
+            # hoại không được là đường mặc định.
+            if form.get("arg", [""])[0].strip() != "xoa":
+                return self._json({"ok": False, "note": "cần xác nhận"},
+                                  status=400)
+            from ..core import reset as reset_mod
+            conn = db.connect()
+            try:
+                ket = reset_mod.run(conn)
+                db.migrate(conn)      # dựng lại schema trống, giữ user_version
+            except OSError as exc:
+                # Sao lưu hỏng thì KHÔNG xoá gì — reset_mod.run() ném ra
+                # trước khi đụng tới dòng nào.
+                return self._json({"ok": False,
+                                   "note": f"không sao lưu được: {exc}"},
+                                  status=500)
+            finally:
+                conn.close()
+            journal.log.warn(journal.SYSTEM,
+                             f"đã làm lại từ đầu — sao lưu ở {ket['backup']}")
+            return self._json({"ok": True, "reload": True, "wipe_local": True,
+                               "note": f"đã sao lưu vào {ket['backup']}"})
+
         if path == "/api/mail/forget":
             # Việc XOÁ phải nói rõ là xoá. Bản cũ xoá ngay khi nhận một POST
             # rỗng — và một bài thử ném rác vào mọi route đã xoá mất app
@@ -923,7 +1057,15 @@ class Handler(BaseHTTPRequestHandler):
             section_id = _segments(path)[-1]
             conn = db.connect()
             try:
-                store.save(conn, _form_to_answers(form, section_id), note=f"section: {section_id}")
+                store.save(conn, _form_to_answers(form, section_id, store.load(conn)),
+                           note=f"section: {section_id}")
+                # CHU TRÌNH KHỞI TẠO: chưa đủ để app chạy thì quay lại đúng
+                # chỗ còn thiếu, không đi tiếp sang phần sau. Bỏ luật này thì
+                # người dùng lướt hết 5 phần, bỏ trống ba câu quan trọng nhất,
+                # rồi ngồi thắc mắc vì sao bấm Chạy không ra gì.
+                giu_lai = store.next_gate_stop(store.load(conn))
+                if giu_lai:
+                    return self._redirect(giu_lai)
                 nxt = store.next_section(section_id)
                 return self._redirect(f"/profile/{nxt.id}" if nxt else "/profile")
             finally:
@@ -966,9 +1108,13 @@ class Handler(BaseHTTPRequestHandler):
             picked = {k: v for k, v in found.items() if k in wanted}
             if picked:
                 store.save(conn, picked, note=f"imported CV ({len(picked)} fields)")
+            # Nhập CV xong KHÔNG thả về trang tổng kết: máy không đoán được
+            # quyền làm việc, nên gần như chắc chắn vẫn còn câu phải tự trả
+            # lời. Đưa thẳng tới đó, đừng bắt người dùng tự đi tìm.
+            tiep = store.next_gate_stop(store.load(conn))
         finally:
             conn.close()
-        self._redirect("/profile")
+        self._redirect(tiep or "/profile")
 
 
 def find_port(start: int = DEFAULT_PORT, tries: int = 20) -> int:

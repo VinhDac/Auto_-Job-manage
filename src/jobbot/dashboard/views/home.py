@@ -27,9 +27,14 @@ from ..layout import page
 LOI = {
     "muc_tieu": "Không có phần này thì app không biết tìm gì — chưa quét được.",
     "rang_buoc": "Lọc ở đây rẻ hơn nhiều so với đọc rồi mới loại.",
+    # Câu hay bị hỏi nhất: "không có phần kinh nghiệm làm việc à?". Có — nó
+    # đọc thẳng từ CV bạn nhập (mục EXPERIENCE), thành các khối ở tab CV. Gõ
+    # lại ở đây là đẻ hai nguồn cho cùng một sự thật.
     "nang_luc": "Nguyên liệu để chấm điểm và dựng CV. Thiếu thì chấm là đoán mò.",
+    "kinh_nghiem": "Chỗ nhà tuyển dụng đọc đầu tiên. Mỗi câu bạn viết ở đây là "
+                   "một câu có thể lên CV.",
+    "project": "Khớp thì qua được bộ lọc, bằng chứng mới đưa bạn vào nhóm được gọi.",
     "danh_tinh": "Cần lúc dựng CV và điền đơn. Chưa tới đó thì để trống cũng được.",
-    "project": "Chỗ hổng nào hồ sơ chưa nói được, project sẽ lấp.",
 }
 
 
@@ -63,38 +68,63 @@ def _the(s: dict, mo: bool) -> str:
         f"<span class='mbtn tiny'>{nut}</span></a>")
 
 
-def render(state: dict) -> str:
+def sheet(state: dict) -> str:
+    """Chu trình dựng hồ sơ — MẢNH HTML cho tấm phủ, không phải cả trang.
+
+    Nó không chiếm tab Home nữa: việc của nó chỉ có lúc đầu, mà tab Home là
+    chỗ của bảng điều khiển pipeline. Cổng chưa mở thì tấm này tự bật lên khi
+    vào app — đó là chỗ "bắt điền". Mở xong thì nó biến mất, bấm lại được từ
+    tab Profile.
+    """
     mo = state["gate_open"]
     ke = state["next"]
 
     if mo:
         gate = ("<div class='gate ok'><b>Hồ sơ đủ để chạy.</b> "
-                "Sang tab Search bấm Chạy — hoặc thêm bên dưới để app "
-                "chấm điểm và viết CV sát hơn.</div>")
-        loi_mo = ("Hồ sơ càng đầy, app càng ít phải đoán. Mỗi phần dưới đây "
-                  "nói rõ thêm nó thì được gì.")
+                "Sang tab Search bấm Chạy.</div>")
     else:
         thieu = " · ".join(esc(q["text"]) for q in state["gate_missing"])
         gate = (f"<div class='gate block'><b>Chưa chạy được gì.</b> "
                 f"App cần đúng {len(state['gate_missing'])} câu này trước: "
                 f"{thieu}</div>")
-        loi_mo = ("Trước khi tìm được việc nào, app cần biết bạn muốn gì. "
-                  "Ba câu là đủ để bắt đầu — phần còn lại thêm dần.")
 
-    nut = ""
-    if ke:
-        nhan = "Bắt đầu" if state["answered"] == 0 else "Tiếp tục"
+    if state["answered"] == 0:
+        nut = ("<div class=octa>"
+               "<a class='mbtn apply big' href='/profile/import'>"
+               "Nhập CV — app điền hộ →</a>"
+               + (f"<a class=oalt href='{esc(ke['href'])}'>hoặc tự gõ</a>"
+                  if ke else "")
+               + "</div>"
+               "<p class=omeo>Máy đọc CV rồi ĐỀ XUẤT từng ô — không ô nào được "
+               "ghi vào cho tới khi bạn tick duyệt. Riêng <b>quyền làm việc</b> "
+               "máy cố tình không đoán: CV không nói, mà đoán sai thì hỏng cả "
+               "lá đơn.</p>")
+    elif ke:
         nut = (f"<a class='mbtn apply big' href='{esc(ke['href'])}'>"
-               f"{nhan} — {esc(ke['title'])} →</a>")
+               f"Tiếp tục — {esc(ke['title'])} →</a>")
+    else:
+        nut = ""
 
-    body = (
-        "<h1>Hồ sơ của bạn</h1>"
-        f"<p class=lead>{loi_mo}</p>"
-        + _thanh(state["answered"], state["total"])
-        + gate + nut
-        + "<h2 class=ohead>"
-        + ("Thêm cho mạnh" if mo else "Các phần")
-        + "</h2><div class=blklist>"
-        + "".join(_the(s, mo) for s in state["sections"])
-        + "</div>")
-    return page("Home", body, active="/")
+    return ("<div class=sheethead>Hồ sơ của bạn</div>"
+            "<div class=setupbody>"
+            + _thanh(state["answered"], state["total"])
+            + gate + nut
+            + "<div class=blklist>"
+            + "".join(_the(s, mo) for s in state["sections"])
+            + "</div></div>")
+
+
+def render(state: dict) -> str:
+    """Tab Home — để trống, chờ bảng điều khiển pipeline (phương án B).
+
+    Chu trình dựng hồ sơ ĐÃ RỜI khỏi đây: nó là tấm phủ, tự bật lên khi cổng
+    chưa mở. Để nó nằm lì trên Home thì mỗi lần mở app đều phải nhìn một danh
+    sách đã xong, mà tab Home thì không còn chỗ cho việc của chính nó.
+    """
+    cho = ("Trang này sẽ là bảng điều khiển pipeline — khúc nào tự chạy, "
+           "khúc nào chờ bạn duyệt.")
+    body = f"<div class=empty-box>{esc(cho)}</div>"
+    # Cổng chưa mở -> bật tấm phủ ngay khi vào app. Chỉ đặt cờ ở ĐÂY, không
+    # đặt trong layout: bật ở mọi trang thì nó thành cái pop-up đuổi theo.
+    return page("Home", body, active="/",
+                setup="" if state["gate_open"] else "/onboarding")
