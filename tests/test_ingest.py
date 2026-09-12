@@ -46,7 +46,36 @@ keep, _ = jf.judge(P("Graduate Analyst to Senior Analyst"), PROFILE)
 check("tin ghi cả grad lẫn senior -> vẫn giữ", keep)
 
 keep, why = jf.judge(P("Data Scientist", location="New York"), PROFILE)
-check("ngoài thị trường -> bỏ", not keep and "outside your markets" in why)
+check("ngoài khu vực -> bỏ", not keep and "outside your area" in why)
+# Lý do phải NÓI RÕ khu vực nào, vì khu vực đó nay suy từ ô "Where you're
+# based" chứ không còn đóng cứng UK. Không ghi ra thì đọc nhật ký không biết
+# máy đang lấy đâu làm nhà.
+check("và nói rõ lấy đâu làm nhà", "(UK)" in why, )
+
+# Ô "Where you're based" GIỜ CÓ TÁC DỤNG THẬT. Trước đây không một dòng nào
+# trong tìm/lọc đọc nó — trong khi chính câu `why` của nó hứa
+# "Used to filter on-site and hybrid roles by commute".
+o_my = dict(PROFILE, location="New York, NY")
+keep, _ = jf.judge(P("Data Scientist", location="New York"), o_my)
+check("ở Mỹ thì việc New York được giữ", keep)
+keep, why = jf.judge(P("Data Scientist", location="London"), o_my)
+check("và việc London thành ngoài khu vực", not keep and "(US)" in why)
+# Ô để trống thì giữ NẾP CŨ, không tự ý đổi thứ đang giữ.
+keep, _ = jf.judge(P("Data Scientist", location="London"),
+                   dict(PROFILE, location=""))
+check("hồ sơ chưa khai nơi ở -> vẫn xử như UK", keep)
+
+# CHỐT CHẶN tên thành phố đụng nhau. "Birmingham, AL" là Alabama — mà nó
+# đang nằm trong danh sách việc UK của Vin (đo 12/09, Mission Pet Health).
+keep, _ = jf.judge(P("Data Scientist", location="Birmingham, AL"), PROFILE)
+check("Birmingham, AL (Alabama) KHÔNG phải việc UK", not keep)
+keep, _ = jf.judge(P("Data Scientist", location="Birmingham, England"), PROFILE)
+check("nhưng Birmingham, England thì vẫn là UK", keep)
+# Dấu hiệu MẠNH thắng chốt chặn: có "United Kingdom" thì mã bang không cứu
+# nổi — tin đăng nhiều nơi là chuyện thường.
+keep, _ = jf.judge(P("Data Scientist",
+                     location="New York, NY; London, United Kingdom"), PROFILE)
+check("tin đăng cả hai nơi, có UK rõ ràng -> vẫn giữ", keep)
 
 keep, _ = jf.judge(P("Data Scientist", location="London, United Kingdom"), PROFILE)
 check("nhiều địa điểm có London -> giữ", keep)

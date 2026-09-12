@@ -29,8 +29,17 @@ from dataclasses import dataclass, field
 # nút rời thì phải đọc hết cả ba mới đoán ra thứ tự.
 
 SHOW = [("matched", "Giữ"), ("dropped", "Đã loại"), ("all", "Tất cả")]
-LOC = [("", "Mọi nơi"), ("london", "London"), ("uk", "UK"),
-       ("remote", "Remote"), ("other", "Ngoài UK")]
+# NƠI CHỐN — tính theo HỒ SƠ, không đóng cứng tên thành phố nào.
+#
+# "london" và "uk" từng nằm thẳng ở đây, tức là bộ lọc chỉ đúng với đúng MỘT
+# người dùng. Giờ id là QUAN HỆ — gần tôi / cả nước / nơi khác — còn chữ hiện
+# lên nút thì lấy từ ô "Where you're based".
+#
+# Đây là chỗ `location` đúng ra phải tác động: nó không quyết định việc nào
+# HỢP LỆ (cắt theo London là mất 71 việc UK ngoài London, đo 12/09), nó cho
+# một cú bấm để xem việc nào TIỆN.
+LOC = [("", "Mọi nơi"), ("near", "Gần tôi"), ("home", "Cả nước"),
+       ("remote", "Remote"), ("other", "Nơi khác")]
 DAYS = [("", "Mọi lúc"), ("7", "7 ngày"), ("30", "30 ngày"), ("90", "90 ngày")]
 SORT = [("score", "Khớp nhất"), ("new", "Mới nhất"), ("old", "Cũ nhất"),
         ("company", "Công ty"), ("title", "Chức danh")]
@@ -55,8 +64,9 @@ VIA = [("direct", "Chủ trực tiếp"), ("all", "Cả môi giới"), ("agency"
 # tin mới có. Lọc được theo cách tìm là soi được ngay cách nào đang đẻ ra rác.
 FOUND = [("", "Mọi nguồn"), ("api", "api"), ("chrome", "chrome")]
 
-UK_LIKE = ("london", "united kingdom", "england", "scotland", "wales", "manchester",
-           "edinburgh", "cambridge", "oxford", "bristol", "leeds", "birmingham")
+# UK_LIKE ĐÃ BỎ. Nó là bản sao thứ BA của cùng một danh sách địa danh
+# (ingest/filter.UK_WORDS, ingest/web/linkedin.MARKET_PLACE, và đây) — ba bản
+# rời nhau, lệch nhau mà không ai biết. Giờ đọc chung `ingest.filter.NOI`.
 
 
 PER_PAGE = 50
@@ -126,7 +136,13 @@ class JobFilter:
         return found
 
     # --- dựng SQL ---------------------------------------------------------
-    def where(self) -> tuple[str, list]:
+    def where(self, nha: str = "uk", near: str = "") -> tuple[str, list]:
+        """`nha` = vùng người dùng đang ở, `near` = thành phố đang ở.
+
+        Hai thứ này là NGỮ CẢNH chứ không phải lựa chọn của người dùng, nên
+        chúng không nằm trên URL — chúng đến từ hồ sơ. Để mặc định thì xử như
+        UK, y hệt nếp cũ.
+        """
         clauses: list[str] = []
         args: list = []
 
@@ -149,16 +165,26 @@ class JobFilter:
             clauses.append(f"LOWER(company) IN ({marks})")
             args += [c.lower() for c in self.company]
 
-        if self.loc == "london":
-            clauses.append("LOWER(location) LIKE '%london%'")
-        elif self.loc == "uk":
-            clauses.append("(" + " OR ".join("LOWER(location) LIKE ?" for _ in UK_LIKE) + ")")
-            args += [f"%{w}%" for w in UK_LIKE]
+        if self.loc in ("near", "home", "other"):
+            from ..ingest.filter import NOI
+            vung = NOI.get(nha) or NOI["uk"]
+            ca_nuoc = sorted(vung["manh"] | vung["thanh"])
+            if self.loc == "near":
+                # Hồ sơ chưa khai nơi ở -> "gần tôi" không có nghĩa gì. Không
+                # lọc còn hơn lọc theo một chỗ bịa ra.
+                if near:
+                    clauses.append("LOWER(location) LIKE ?")
+                    args.append(f"%{near.lower()}%")
+            elif self.loc == "home":
+                clauses.append("(" + " OR ".join("LOWER(location) LIKE ?"
+                                                 for _ in ca_nuoc) + ")")
+                args += [f"%{w}%" for w in ca_nuoc]
+            else:
+                clauses.append("NOT (" + " OR ".join("LOWER(location) LIKE ?"
+                                                     for _ in ca_nuoc) + ")")
+                args += [f"%{w}%" for w in ca_nuoc]
         elif self.loc == "remote":
             clauses.append("remote = 1")
-        elif self.loc == "other":
-            clauses.append("NOT (" + " OR ".join("LOWER(location) LIKE ?" for _ in UK_LIKE) + ")")
-            args += [f"%{w}%" for w in UK_LIKE]
 
         if self.via == "direct":
             clauses.append("via_agency = 0")

@@ -85,6 +85,21 @@ def sieve(conn: sqlite3.Connection) -> dict:
     }
 
 
+def noi_toi(conn: sqlite3.Connection) -> tuple[str, str]:
+    """(vùng đang ở, thành phố đang ở) — ngữ cảnh cho bộ lọc nơi chốn.
+
+    Đọc từ ô "Where you're based". Đây là chỗ `location` tác động tới việc
+    XEM: nó không quyết định việc nào hợp lệ (cắt theo London là mất 71 việc
+    UK ngoài London), nó cho bạn một cú bấm để xem việc nào TIỆN.
+    """
+    from ..ingest.filter import noi_o
+    from ..profile import store
+    o_dau = (store.load(conn).get("location") or "").strip()
+    # "London, UK" -> "London". Lấy nguyên chuỗi đem so LIKE thì không tin
+    # nào khớp, vì tin ghi "London, England, United Kingdom".
+    return noi_o(o_dau) or "uk", o_dau.split(",")[0].strip()
+
+
 def jobs(conn: sqlite3.Connection, flt) -> list[dict]:
     """Lọc theo ý người dùng, RỒI mới gộp trùng — gộp trước thì lọc sai nhóm.
 
@@ -94,7 +109,7 @@ def jobs(conn: sqlite3.Connection, flt) -> list[dict]:
     144 thẻ — 5 nhóm bị cắt đôi qua ranh giới trang và hiện thành hai thẻ.
     Gộp phải xảy ra TRONG SQL, trước khi cắt trang.
     """
-    where, args = flt.where()
+    where, args = flt.where(*noi_toi(conn))
     per, offset = flt.limit()
     rows = conn.execute(
         # `ca_nhom` đếm CẢ nhóm, trên bảng CHƯA lọc. Badge "◆ api ⌕ chrome" và
@@ -164,8 +179,9 @@ def jobs(conn: sqlite3.Connection, flt) -> list[dict]:
 def job_counts(conn: sqlite3.Connection, flt) -> dict:
     """Số lượng cho từng lựa chọn 'Show' — người dùng thấy trước khi bấm."""
     out = {}
+    noi = noi_toi(conn)          # đọc MỘT lần cho cả ba lượt đếm
     for value, _label in (("matched", ""), ("dropped", ""), ("all", "")):
-        where, args = type(flt)(**{**flt.__dict__, "show": value}).where()
+        where, args = type(flt)(**{**flt.__dict__, "show": value}).where(*noi)
         out[value] = int(conn.execute(
             f"SELECT COUNT(DISTINCT COALESCE(group_id, CAST(id AS TEXT)))"
             f" FROM posting{where}", args).fetchone()[0])
@@ -552,23 +568,24 @@ def search_stage(conn: sqlite3.Connection) -> dict:
     #
     # Ba tình huống, đọc thẳng từ DB chứ không giữ cờ trạng thái nào: cờ thì
     # có ngày lệch với sự thật, còn đếm thì luôn đúng.
-    from ..core.postings import HAVE_DESC
-    tong = one("SELECT COUNT(*) FROM posting")
-    con_do = conn.execute(
-        "SELECT COUNT(*) FROM posting WHERE source = 'linkedin'"
-        " AND length(COALESCE(description,'')) < ?", (HAVE_DESC,)).fetchone()[0]
+    # NÚT ĐỌC LẠI QUYẾT ĐỊNH CỦA VÒNG QUÉT, không tự đoán một quyết định
+    # song song. Trước đây chỗ này có công thức riêng, và nó đếm cả tin lưới
+    # sàng đã loại: nút ghi "còn 1.855 tin chưa đọc kỹ" trong khi vòng đọc kỹ
+    # chỉ mở 11 tin. Bấm xong không thấy con số nhúc nhích là người dùng thôi
+    # tin cái nút.
+    #
     # Chữ ở đây là chữ lúc RẢNH. Lúc đang chạy thì live.js đổi thành
-    # "Đang quét…" rồi khoá nút — để một chỗ lo một trạng thái, máy chủ không
-    # phải đoán xem trình duyệt đang thấy gì.
-    if not tong:
-        nhan, vi_sao = "Bắt đầu", "chưa có tin nào trong kho — quét lần đầu"
-    elif con_do:
-        nhan, vi_sao = "Tiếp tục", f"còn {con_do:,} tin chưa đọc kỹ — quét tiếp chỗ dở"
-    else:
-        nhan, vi_sao = "Cập nhật", "kho đã đầy đủ — lấy tin mới từ lần quét trước"
+    # "Đang quét…" rồi khoá nút — một chỗ lo một trạng thái.
+    from ..scan_runner import scan_mode
+    kieu = scan_mode(conn)
 
+    # Chữ cho chip NƠI CHỐN. Lấy từ hồ sơ, không đóng cứng: "Gần tôi · London"
+    # chỉ đúng với người khai mình ở London.
+    from ..ingest.filter import NOI
+    nha, gan = noi_toi(conn)
     return {"kept": kept, "worth": worth, "fresh": fresh, "state": state,
-            "run_label": nhan, "run_note": vi_sao}
+            "run_label": kieu["label"], "run_note": kieu["note"],
+            "gan": gan, "vung": NOI[nha]["ten"]}
 
 
 def cv_pdf_plan(conn: sqlite3.Connection) -> list[dict]:

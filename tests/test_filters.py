@@ -54,6 +54,11 @@ check("chip tắt được từng cái", any(u == "/search?loc=london&page=3" or
 print("\n[lọc trên dữ liệu thật]")
 with tempfile.TemporaryDirectory() as tmp:
     conn = db.connect(Path(tmp) / "t.db")
+    # Hồ sơ phải khai NƠI Ở, vì bộ lọc nơi chốn nay tính theo nó chứ không
+    # còn đóng cứng "london" trong mã nguồn.
+    from jobbot.profile import store as _st
+    _st.save(conn, {"job_titles": "Data Scientist", "markets": ["uk_onsite"],
+                    "work_auth": "citizen", "location": "London"}, "t")
     items = []
     for i, (title, comp, loc, when) in enumerate([
         ("Quantitative Analyst", "Man Group", "London", "2026-09-01T00:00:00+00:00"),
@@ -77,8 +82,27 @@ with tempfile.TemporaryDirectory() as tmp:
     check("tìm theo chữ", len(live.jobs(conn, Q(q="quantitative"))) == 1)
     check("tìm cả tên công ty", len(live.jobs(conn, Q(q="monzo"))) == 1)
     check("lọc theo công ty", len(live.jobs(conn, Q(company="Man Group"))) == 1)
-    check("lọc theo địa điểm", len(live.jobs(conn, Q(show="all", loc="london"))) == 2)
-    check("lọc ngoài UK", len(live.jobs(conn, Q(show="all", loc="other"))) == 1)
+    # NƠI CHỐN TÍNH THEO HỒ SƠ, không đóng cứng tên thành phố. Id là QUAN HỆ
+    # — gần tôi / cả nước / nơi khác — còn "gần" là ở đâu thì ô "Where you're
+    # based" nói. Trước đây "london" nằm thẳng trong mã nguồn, tức là bộ lọc
+    # chỉ đúng với đúng một người dùng.
+    check("cả nước (UK) -> 2 việc London", len(live.jobs(conn, Q(show="all", loc="home"))) == 2)
+    check("nơi khác -> 1 việc New York", len(live.jobs(conn, Q(show="all", loc="other"))) == 1)
+    # PROFILE khai location="London", nên "gần tôi" = London.
+    check("gần tôi -> đúng việc ở London",
+          len(live.jobs(conn, Q(show="all", loc="near"))) == 2)
+
+    # "Gần tôi" mà hồ sơ chưa khai nơi ở thì KHÔNG lọc gì cả — lọc theo một
+    # chỗ bịa ra còn tệ hơn không lọc.
+    _w, _ = Q(loc="near").where("uk", "")
+    check("chưa khai nơi ở -> 'gần tôi' không thêm điều kiện nào",
+          "LOWER(location)" not in _w)
+    _w2, _a2 = Q(loc="near").where("uk", "London")
+    check("khai rồi thì lọc đúng chỗ đó", _a2 == ["%london%"])
+    # Đổi nơi ở là đổi luôn nghĩa của "cả nước" — không còn UK đóng cứng.
+    _w3, _a3 = Q(loc="home").where("us", "")
+    check("ở Mỹ thì 'cả nước' nghĩa là nước Mỹ", "%united states%" in _a3)
+    check("và không còn dính chữ UK nào", "%united kingdom%" not in _a3)
     check("lọc theo ngày", len(live.jobs(conn, Q(days="30"))) == 1)
     check("sắp theo công ty", live.jobs(conn, Q(sort="company"))[0]["company"] == "Man Group")
     check("mặc định sắp theo điểm", Q().sort == "score")

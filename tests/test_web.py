@@ -32,6 +32,9 @@ PROFILE = {
     "markets": ["uk_onsite"], "work_auth": "citizen",
     "seniority": ["grad", "junior"], "years_real": "0-1",
     "full_name": "Test User", "email": "t@example.com",
+    # Nơi ở: bộ lọc nơi chốn nay tính theo ô này, nên hồ sơ thử phải có nó —
+    # hồ sơ thật của ai cũng có.
+    "location": "London, UK",
     "education": "MSc Computational Finance — Somewhere, 2026",
     "certifications": "CFA Level I",
     "skills_strong": "Python, pandas, SQL",
@@ -791,7 +794,15 @@ with tempfile.TemporaryDirectory() as tmp:
     _trong.close()
 
     _nut = seeded(Path(tmp) / "nut.db")
-    check("kho đầy đủ -> nút mời CẬP NHẬT",
+    # Có tin rồi nhưng LinkedIn chưa chạy lần nào: không phải "Bắt đầu" (kho
+    # không rỗng), càng không phải "Cập nhật" (hỏi cửa sổ 24 giờ thì bỏ sót
+    # sạch những gì LinkedIn đang có).
+    check("có tin nhưng LinkedIn chưa chạy -> QUÉT ĐẦY",
+          _lv.search_stage(_nut)["run_label"] == "Quét đầy",
+          _lv.search_stage(_nut)["run_label"])
+    from jobbot.core import postings as _po
+    _po.record_run(_nut, "linkedin", ok=True, fetched=1, new_rows=0)
+    check("LinkedIn đã chạy xong, không còn việc dở -> CẬP NHẬT",
           _lv.search_stage(_nut)["run_label"] == "Cập nhật",
           _lv.search_stage(_nut)["run_label"])
     # Một tin LinkedIn chưa có mô tả = vòng đọc kỹ còn dở dang. Ghi bằng
@@ -801,6 +812,11 @@ with tempfile.TemporaryDirectory() as tmp:
     postings.save_batch(_nut, "linkedin", [
         Posting(source_id="9", title="Quant", company="X", location="London",
                 url="https://x/9", description="")])
+    # kept=1: tin LỌT LƯỚI nhưng chưa kịp đọc kỹ. Đó mới là "việc dở" thật.
+    # Tin lưới sàng đã loại thì đọc bao nhiêu lần cũng không ai dùng tới, nên
+    # không được tính vào con số trên nút.
+    _nut.execute("UPDATE posting SET kept = 1 WHERE source = 'linkedin'")
+    _nut.commit()
     _st = _lv.search_stage(_nut)
     check("còn tin chưa đọc kỹ -> nút mời TIẾP TỤC",
           _st["run_label"] == "Tiếp tục", _st["run_label"])
@@ -811,7 +827,20 @@ with tempfile.TemporaryDirectory() as tmp:
                  ("x" * (_HD + 1),))
     _nut.commit()
     check("đọc kỹ xong thì quay về CẬP NHẬT",
-          _lv.search_stage(_nut)["run_label"] == "Cập nhật")
+          _lv.search_stage(_nut)["run_label"] == "Cập nhật",
+          _lv.search_stage(_nut)["run_label"])
+    # Tin lưới sàng ĐÃ LOẠI mà thiếu mô tả thì KHÔNG phải việc dở — vòng đọc
+    # kỹ không bao giờ mở chúng. Đếm cả chúng thì nút hứa 1.855 trong khi
+    # việc thật là 11, đo được trên kho thật ngày 12/09.
+    postings.save_batch(_nut, "linkedin", [
+        Posting(source_id="8", title="Rác", company="Y", location="Mars",
+                url="https://x/8", description="")])
+    _nut.execute("UPDATE posting SET kept = 0 WHERE source='linkedin'"
+                 " AND url = 'https://x/8'")
+    _nut.commit()
+    check("tin lưới đã loại KHÔNG được tính là việc dở",
+          _lv.search_stage(_nut)["run_label"] == "Cập nhật",
+          _lv.search_stage(_nut)["run_label"])
     _nut.close()
     # Chữ lúc rảnh phải đi kèm nút, để live.js trả về được sau khi hiện
     # "Đang quét…". Không có nó thì quét xong nút kẹt ở chữ tạm.
@@ -890,6 +919,25 @@ with tempfile.TemporaryDirectory() as tmp:
     _cao, _vua, _het = (_n(get("/search?chance=likely")[1]), _n(_f1), _n(_f0))
     check("nâng sàn thì tập kết quả chỉ co lại",
           _cao <= _vua <= _het, f"{_cao} <= {_vua} <= {_het}")
+
+    # NƠI CHỐN — chữ trên nút lấy từ ô "Where you're based", không đóng cứng.
+    check("có hàng lọc theo nơi", "name=loc" in _f0 or "loc=" in _f0)
+    check("nút 'Gần tôi' nói rõ gần ĐÂU", "Gần tôi ·" in _f0, "")
+    # Nơi ở không CẮT, nó chỉ ƯU TIÊN: "Cả nước" vẫn còn đó để xem hết.
+    check("và vẫn có nút xem cả nước", "Cả " in _f0)
+    # Chưa khai nơi ở thì GIẤU nút "Gần tôi": một nút không lọc được gì là
+    # nút bấm vào thấy y nguyên, và người dùng thôi tin cả hàng nút.
+    from jobbot.dashboard.views import search as _sv
+    _trong = _sv._noi(_lv.JobFilter.from_query({}) if hasattr(_lv, "JobFilter")
+                      else __import__("jobbot.dashboard.filters", fromlist=["x"])
+                      .JobFilter.from_query({}), "", "UK")
+    check("chưa khai nơi ở -> giấu luôn nút 'Gần tôi'", "Gần tôi" not in _trong)
+    _n2 = lambda h: int(_re2.search(r">Giữ ([0-9,]+)<", h).group(1).replace(",", ""))
+    _, _gan = get("/search?loc=near")
+    check("lọc 'gần tôi' thì danh sách hẹp lại, không rỗng",
+          0 < _n2(_gan) <= _n2(_f0), f"{_n2(_gan)} / {_n2(_f0)}")
+    check("và 'cả nước' rộng hơn 'gần tôi'",
+          _n2(get("/search?loc=home")[1]) >= _n2(_gan))
 
     # TAG NGUỒN — Vin nhìn thấy badge api/chrome trên từng dòng rồi, nên lọc
     # theo chính hai badge đó là thứ tiếp theo người ta thò tay tìm.

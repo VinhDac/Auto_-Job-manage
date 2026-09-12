@@ -144,18 +144,27 @@ MARKET_PLACE = {
 }
 
 
-def places_for(markets: list[str]) -> list[str]:
+def places_for(markets: list[str], location: str = "") -> list[str]:
     """Cần tìm ở mấy nơi. Giữ thứ tự khai trong hồ sơ, bỏ trùng.
 
-    'United Kingdom' rộng hơn 'London' và bao cả London — chọn nơi rộng hơn
-    vì hồ sơ nói uk_onsite + uk_remote, không nói riêng London.
+    'United Kingdom' rộng hơn 'London' và bao cả London — chọn nơi rộng hơn.
+    Đo được ngày 12/09: trong 290 việc đang giữ có 75 việc ở UK ngoài London,
+    và 71/75 do LinkedIn mang về. Thu câu tìm về đúng "London" là mất chỗ đó,
+    vì board không phủ nổi.
+
+    Chưa khai thị trường nào thì tìm ở NƠI BẠN Ở, không phải ở một chữ "United
+    Kingdom" đóng cứng trong mã nguồn.
     """
+    from ..filter import NOI, noi_o
     out: list[str] = []
     for m in markets or []:
         place = MARKET_PLACE.get(m)
         if place is not None and place not in out:
             out.append(place)
-    return out or ["United Kingdom"]
+    if out:
+        return out
+    nha = noi_o(location)
+    return [NOI[nha]["place"]] if nha else ["United Kingdom"]
 
 
 # Chức danh gửi đi mỗi vòng. Có TRẦN, và trần đó được GHI RA nhật ký khi

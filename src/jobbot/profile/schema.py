@@ -141,12 +141,13 @@ SECTIONS: list[Section] = [
                     _o("uk_remote", "UK — remote, UK-based company",
                        "Same sources, remote postings only. No cross-border tax or legal mess."),
                     _o("eu_remote", "Europe — remote",
-                       "Arbeitnow covers the EU well. 1–2h offset, easy to live with."),
+                       "1–2h offset, easy to live with. LinkedIn has no remote "
+                       "filter, so these come back mixed with on-site roles."),
                     _o("us_remote", "US — remote",
                        "5–8h offset. Many US companies hire only people already authorised to "
                        "work in the US — needs careful filtering."),
                     _o("global_remote", "Remote, anywhere",
-                       "Greenhouse, Lever, Ashby, Remotive. Most competitive of all."),
+                       "Greenhouse, Lever, Ashby. Most competitive of all."),
                     _o("relocate", "Willing to relocate abroad",
                        "Needs filtering for visa sponsorship."),
                 ],
@@ -434,8 +435,15 @@ SECTIONS: list[Section] = [
             Question(id="email", text="Contact email", kind=TEXT,
                      placeholder="used to send applications and catch replies"),
             Question(id="phone", text="Phone", kind=TEXT),
+            # Ô này TỪNG hứa hão: câu why nói nó lọc theo khu vực, mà cho
+            # tới 12/09 không một dòng nào trong tìm/lọc đọc nó — chỉ CV và
+            # điền form dùng. Còn "UK" thì đóng cứng ở ba chỗ trong mã nguồn.
+            # Giờ nó quyết định thật: `filter.noi_o()` suy ra vùng, và việc
+            # ngoài vùng đó bị loại kèm lý do ghi rõ vùng nào.
             Question(id="location", text="Where you're based", kind=TEXT,
-                     why="Used to filter on-site and hybrid roles by commute.",
+                     why="Decides what counts as near you: postings outside "
+                         "this area are dropped. Also printed on your CV and "
+                         "filled into application forms.",
                      placeholder="London, UK"),
             Question(
                 id="links",

@@ -138,6 +138,51 @@ try:
 finally:
     li.open_page, li._pause = real_open, real_pause
 
+print("\n[cập nhật thì chỉ hỏi TIN MỚI — không quét lại từ đầu]")
+# ĐÃ THỬ THẬT trên cổng guest ngày 12/09:
+#   f_TPR=r86400  CHẠY  — 10/10 tin trả về đều từ 24 giờ qua
+#   sortBy=DD     bị phớt lờ — kết quả y hệt không truyền gì
+#   f_WT=2        bị phớt lờ — (đo hôm trước, cùng kiểu)
+# Phải thử từng cái: hai tham số trông hợp lý kia không làm gì cả, mà cổng
+# vẫn trả 200 nên nhìn như đang chạy.
+li.open_page = lambda tab, url, timeout=30: opened.append(url)
+li._pause = lambda *a: None
+try:
+    opened.clear()
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=False)
+    check("quét đầy thì KHÔNG kèm cửa sổ thời gian",
+          not any("f_TPR" in u for u in opened))
+    opened.clear()
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=False, recent=li.NGAY)
+    check("cập nhật thì hỏi đúng 24 giờ qua",
+          all("f_TPR=r86400" in u for u in opened), str(opened[:1]))
+    opened.clear()
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=False, recent=li.TUAN)
+    check("nghỉ mấy hôm thì nới ra 7 ngày",
+          all("f_TPR=r604800" in u for u in opened), str(opened[:1]))
+finally:
+    li.open_page, li._pause = real_open, real_pause
+
+print("\n[TIẾP TỤC = đọc nốt chỗ dở, KHÔNG tìm lại]")
+# "Tiếp tục" mà vẫn chạy vòng tìm thì nó chỉ là chữ khác của "quét lại từ
+# đầu": tìm lại 2.296 tin y hệt mất 30 phút, để rồi đọc nốt 11 tin.
+from jobbot.ingest.base import Posting as _P
+li.open_page = lambda tab, url, timeout=30: opened.append(url)
+li._pause = lambda *a: None
+try:
+    opened.clear()
+    do_dang = [_P(source_id="1000001", title="Quant Analyst", company="A",
+                  location="London", url="https://x/jobs/view/a-1000001")]
+    suc = li.read_deep(FakeTab(), do_dang)
+    check("read_deep chạy được MỘT MÌNH, không cần vòng tìm", suc.attempted == 1)
+    check("và KHÔNG gọi một trang tìm kiếm nào",
+          not any("seeMoreJobPostings" in u for u in opened), str(opened[:2]))
+    check("chỉ mở đúng trang chi tiết của tin dở",
+          sum(1 for u in opened if "jobPosting" in u) == 1)
+    check("mô tả được vá thẳng vào tin đó", len(do_dang[0].description) > 200)
+finally:
+    li.open_page, li._pause = real_open, real_pause
+
 print("\n[nhịp gọi: núm hiệu năng THẬT, và nó là núm đánh đổi]")
 # Vì sao không làm "chạy N tab song song": N tab với nhịp P giống hệt 1 tab
 # với nhịp P/N — cùng số lượt gọi mỗi giây, cùng rủi ro bị bóp. Song song chỉ

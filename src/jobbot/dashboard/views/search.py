@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from html import escape as esc
 
-from ..filters import BAND, CHANCE, FOUND, SHOW, SORT, VIA
+from ..filters import BAND, CHANCE, FOUND, LOC, SHOW, SORT, VIA
 from ..layout import deck, score_bar
 from . import runtime
 
@@ -167,7 +167,25 @@ def _thang(key: str, ten: str, options, current: str, flt) -> str:
             f"<span class=lvltrack>{nac}</span></span>")
 
 
-def _list(jobs: list[dict], flt, counts: dict) -> str:
+def _noi(flt, gan: str, vung: str) -> str:
+    """Chip NƠI CHỐN — chữ lấy từ ô "Where you're based".
+
+    Nơi ở không quyết định việc nào HỢP LỆ: cắt theo London là mất 71 việc UK
+    ngoài London (đo 12/09), mà 71 việc đó do LinkedIn mang về, board không
+    phủ nổi. Nó quyết định việc nào TIỆN — nên nó là một cú bấm để XEM, không
+    phải một cái kéo.
+
+    Chưa khai nơi ở thì GIẤU chip "Gần tôi": một nút không lọc được gì là nút
+    bấm vào thấy y nguyên, và người dùng thôi tin cả hàng nút.
+    """
+    ten = {"near": f"Gần tôi · {gan}" if gan else "", "home": f"Cả {vung}"}
+    chon = [(v, ten.get(v) or nhan) for v, nhan in LOC
+            if not (v == "near" and not gan)]
+    return "<span class=vlabel>Nơi</span>" + _chips("loc", chon, flt.loc, flt)
+
+
+def _list(jobs: list[dict], flt, counts: dict,
+          gan: str = "", vung: str = "UK") -> str:
     # MỘT nút thay cho hai. "Can't tell" nằm hàng cơ hội, "Not scorable" nằm
     # hàng điểm — mà đo trên kho thật thì chúng là cùng một chồng tin (185 tin
     # thiếu cả hai, 0 tin chỉ thiếu một). Cùng một nguyên nhân: vòng đọc kỹ
@@ -197,8 +215,13 @@ def _list(jobs: list[dict], flt, counts: dict) -> str:
             + hang(_thang("chance", "Cơ hội", CHANCE, flt.chance, flt)
                    + _thang("band", "Điểm", BAND, flt.band, flt),
                    chua)
-            + hang(_chips("found", FOUND, flt.found, flt),
-                   _chips("via", VIA, flt.via, flt)))
+            # NƠI ở đầu trái — đó là câu hỏi chính về một tin. Bên phải là
+            # XUẤT XỨ: ai đăng (môi giới hay chủ) và mình tìm ra bằng cách
+            # nào. Không đẻ thêm hàng thứ tư: một hàng có đúng một đầu thì
+            # nửa màn hình lại bỏ trống, đúng thứ vừa sửa hôm qua.
+            + hang(_noi(flt, gan, vung),
+                   _chips("via", VIA, flt.via, flt)
+                   + _chips("found", FOUND, flt.found, flt)))
     if not jobs:
         # Nói rõ không ra CÁI GÌ, và cho đường quay lại. "không có tin nào
         # khớp" khi đang gõ dở một chữ đọc ra như kho rỗng.
@@ -346,6 +369,9 @@ def render(*, jobs: list[dict], flt, counts: dict, sieve: dict,
         # Vin thật sự đọc — lấy cả bề ngang. Nhật ký về dải dẹt dưới đáy.
         cols=1, journal="bottom",
         panels=[
-            runtime.panel("Việc tìm được", _list(jobs, flt, counts), span=1),
+            runtime.panel("Việc tìm được",
+                          _list(jobs, flt, counts,
+                                gan=info.get("gan", ""),
+                                vung=info.get("vung", "UK")), span=1),
         ],
     )

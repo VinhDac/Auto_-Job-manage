@@ -123,8 +123,11 @@ def scan_mode(conn) -> dict:
         except ValueError:
             cach = 0.0
     if not row:
-        return {"mode": DAU, "label": "Bắt đầu", "recent": 0, "todo": 0,
-                "note": "LinkedIn chưa quét lần nào — quét đầy"}
+        # Kho KHÔNG rỗng (board đã về) nhưng LinkedIn chưa chạy lần nào. Gọi
+        # là "Bắt đầu" thì sai — có tin rồi; gọi là "Cập nhật" còn sai hơn —
+        # hỏi cửa sổ 24 giờ thì bỏ sót tất cả những gì LinkedIn đang có.
+        return {"mode": DAU, "label": "Quét đầy", "recent": 0, "todo": 0,
+                "note": "LinkedIn chưa quét lần nào — quét đầy một lượt"}
     if cach <= li.NGAY:
         return {"mode": MOI, "label": "Cập nhật", "recent": li.NGAY, "todo": 0,
                 "note": "chỉ tìm tin đăng trong 24 giờ qua"}
@@ -198,7 +201,8 @@ def _chrome_pass(conn, answers: dict, log: Log, deep: bool,
         # titles[:5] ĐÃ BỎ: nó cắt 7/12 chức danh của hồ sơ mà không báo gì, và
         # nó tồn tại chỉ vì vòng đọc kỹ chạy quá lâu. Sửa gốc rồi thì không cần
         # cắt nữa — trần bây giờ nằm ở li.MAX_QUERIES và có ghi nhật ký khi chạm.
-        places = li.places_for(answers.get("markets") or [])
+        places = li.places_for(answers.get("markets") or [],
+                               answers.get("location") or "")
         seen = postings.already_read(conn, li.NAME)
 
         # ĐÁNG ĐỌC KỸ KHÔNG. Trả lời bằng đúng bộ lọc mà derive() sẽ dùng sau
@@ -220,16 +224,35 @@ def _chrome_pass(conn, answers: dict, log: Log, deep: bool,
             giu, _ = jobfilter.judge(item, answers)
             return giu
 
-        jlog.emit(SEARCH, f"linkedin: {len(titles)} chức danh × {len(places)} nơi"
-                          f" · bỏ qua {len(seen)} tin đã đọc"
-                          + (f" · {len(tu_giu)} tin bạn tự giữ" if tu_giu else ""))
-        sources = [
-            (li.NAME, lambda tab: li.fetch(tab, titles, location=places,
-                                           levels=levels, pages=4, deep=deep,
-                                           skip=frozenset(seen),
-                                           worth=dang_doc, pace=nhip,
-                                           stop=lambda: halt.wanted(STAGE))),
-        ]
+        # LƯỢT NÀY LÀM GÌ — hỏi đúng chỗ đã đặt tên cho nút Chạy, nên thứ máy
+        # làm và thứ nút hứa không bao giờ lệch nhau.
+        kieu = scan_mode(conn)
+        jlog.emit(SEARCH, f"linkedin · {kieu['label'].upper()} — {kieu['note']}")
+
+        if kieu["mode"] == TIEP:
+            # KHÔNG TÌM GÌ CẢ. Chỗ dở nằm sẵn trong DB rồi; chạy lại vòng tìm
+            # là mở lại 2.296 tin y hệt trong 30 phút để rồi đọc nốt mấy tin
+            # đã biết từ đầu là tin nào.
+            do_dang = _tin_do_dang(conn)
+            jlog.emit(SEARCH, f"linkedin: đọc nốt {len(do_dang)} tin dở,"
+                              f" bỏ qua vòng tìm")
+            def _chay(tab, _items=do_dang):
+                suc = li.read_deep(tab, _items, pace=nhip,
+                                   stop=lambda: halt.wanted(STAGE))
+                return _items, suc
+            sources = [(li.NAME, _chay)]
+        else:
+            jlog.emit(SEARCH, f"linkedin: {len(titles)} chức danh × {len(places)} nơi"
+                              f" · bỏ qua {len(seen)} tin đã đọc"
+                              + (f" · {len(tu_giu)} tin bạn tự giữ" if tu_giu else ""))
+            sources = [
+                (li.NAME, lambda tab: li.fetch(tab, titles, location=places,
+                                               levels=levels, pages=4, deep=deep,
+                                               skip=frozenset(seen),
+                                               worth=dang_doc, pace=nhip,
+                                               recent=kieu["recent"],
+                                               stop=lambda: halt.wanted(STAGE))),
+            ]
 
         total_seen = total_new = 0
         for name, run in sources:
