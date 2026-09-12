@@ -147,6 +147,39 @@ with tempfile.TemporaryDirectory() as tmp:
           eta.running()[SEARCH]["started"] != moc)
     check("và lại im cho tới khi đủ nhịp", eta.running()[SEARCH]["eta"] == 0)
 
+    print("\n[nhật ký phải CHẠY THEO tin mới nhất]")
+    # Hợp đồng hai đầu: máy chủ gửi CŨ TRƯỚC, trình duyệt chèn từng dòng vào
+    # ĐỈNH — nên nạp xong thì tin mới nhất nằm trên cùng, cùng chiều với dòng
+    # về sau. Đảo một trong hai đầu là danh sách lộn tùng phèo mà không ai
+    # nhận ra ngay, vì lúc mới mở app nhật ký nào cũng trông hợp lý.
+    xep = Journal()
+    for n in range(4):
+        xep.emit(SEARCH, f"dòng {n}")
+    trong_bo_nho = [e.text for e in xep.tail(SEARCH, 10)]
+    check("tail() trả MỚI NHẤT trước", trong_bo_nho[0] == "dòng 3", str(trong_bo_nho))
+    gui_di = trong_bo_nho[::-1]            # đúng phép server.py dùng cho 'hello'
+    check("gói gửi cho trình duyệt thì CŨ trước", gui_di[0] == "dòng 0")
+    tren_man = []
+    for e in gui_di:                       # live.js: chèn từng dòng vào đỉnh
+        tren_man.insert(0, e)
+    check("chèn vào đỉnh xong thì mới nhất lên trên cùng",
+          tren_man[0] == "dòng 3", str(tren_man))
+
+    # LỖI THẬT: chèn ở TRÊN chỗ đang nhìn thì trình duyệt giữ nguyên scrollTop,
+    # nên mỗi dòng mới đẩy khung nhìn xuống thêm một nấc — càng chạy càng trôi
+    # xa tin mới nhất. Đo trên máy thật: nhật ký cao 877px trong khung 60px,
+    # vòng nộp đang chạy mà màn hình đứng ở mấy dòng cũ.
+    js = (Path(__file__).resolve().parent.parent
+          / "src/jobbot/dashboard/web/live.js").read_text(encoding="utf-8")
+    than = js.split("function addLine")[1].split("\n  const journal")[0]
+    check("chèn dòng xong có xử lý cuộn", "scrollTop" in than, "")
+    check("đang bám đỉnh -> kéo về tin mới nhất", "sc.scrollTop = 0" in than)
+    check("đang đọc dòng cũ -> giữ nguyên chỗ, không giật",
+          "sc.scrollTop += row.offsetHeight" in than)
+    # Thanh cuộn KHÔNG nằm trên .journal mà trên .jfeed bọc ngoài. Đặt
+    # scrollTop lên nhầm phần tử thì không có gì xảy ra và cũng không có lỗi.
+    check("tìm đúng khung cuộn chứ không đoán", "function scroller" in js)
+
     print("\n[quét: MỌI nguồn phải để lại dấu vết]")
     # Lượt quét 19:22 chạy 21 board và để lại đúng 3 dòng nhật ký, vì luật cũ
     # là "chỉ ghi khi có tin mới". Người dùng không có cách nào biết 18 board

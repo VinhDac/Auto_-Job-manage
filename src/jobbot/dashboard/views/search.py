@@ -101,16 +101,20 @@ def _row(job: dict) -> str:
         f"{money}</div>{why}</div>"
         f"<div class=jtags>{tay}{chance}{marks}{merged}"
         f"<span class=jwhen>{esc(job['posted'])}</span>"
-        # Nút Nộp: mở trang nộp bằng trình duyệt mặc định và ghi một dòng vào
-        # bảng Quản lí.
+        # KHÔNG có nút Nộp ở đây. Nộp là một QUYẾT ĐỊNH: mở Chrome, điền form,
+        # ghi một dòng vào Quản lí. Quyết định đó phải đứng sau khi ĐỌC — mà
+        # chỗ đọc là trang chi tiết, nơi có điểm từng yêu cầu, bằng chứng, và
+        # đường sang tin gốc. Bấm nộp từ danh sách là nộp mù.
         #
-        # KHÔNG gắn onclick stopPropagation ở đây. Trình nghe [data-post] nằm ở
-        # `document`, nên chặn lan truyền là giết luôn sự kiện trước khi nó tới
-        # nơi — nút bấm không làm gì cả, mà cũng không báo lỗi. Bản thân trình
+        # Nút GIỮ LẠI thì ngược lại, và đó là lý do nó vẫn ở đây: sàng đống
+        # 4.055 tin bị loại là việc LƯỚT, quét mắt qua hàng chục dòng một lúc.
+        # Bắt mở từng trang chi tiết để nhặt một tin là giết luôn việc sàng.
+        #
+        # KHÔNG gắn onclick stopPropagation. Trình nghe [data-post] nằm ở
+        # `document`, nên chặn lan truyền là giết sự kiện trước khi nó tới nơi
+        # — nút bấm không làm gì cả, mà cũng không báo lỗi. Bản thân trình
         # nghe đã gọi preventDefault(), đủ để thẻ <a> bao ngoài không nhảy trang.
         f"{giu}"
-        f"<button class='mbtn tiny' data-post='/api/apply'"
-        f" data-arg='{esc(job['id'])}'>Nộp</button>"
         f"</div></a>")
 
 

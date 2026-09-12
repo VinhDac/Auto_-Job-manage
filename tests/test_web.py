@@ -314,6 +314,25 @@ with tempfile.TemporaryDirectory() as tmp:
     check("Cài đặt có tab Làm lại", "data-pane='lam-lai'" in _set)
     check("nói trước sẽ mất gì", "Sẽ mất:" in _set)
     check("nói trước sao lưu nằm ở đâu", "tar.gz" in _set)
+    # NÚM NHỊP phải nói ra cái ĐÁNH ĐỔI ngay trên màn hình. Một núm ghi
+    # "Nhanh" mà không nói nhanh bằng giá gì là núm mời người ta bấm rồi lãnh
+    # hậu quả.
+    _, _st = get("/settings")
+    check("cài đặt có núm nhịp gọi", "name=pace" in _st and "Nhịp gọi" in _st)
+    check("ba mức, không hơn", _st.count("type=radio name=pace") == 3)
+    check("và nói thẳng cái đánh đổi", "dễ bị bóp hơn" in _st)
+    check("mặc định đang chọn 'thường'", "value='thuong' checked" in _st)
+    # Gõ bừa vào form thì rơi về mặc định — không để chuỗi lạ thành nhịp gọi.
+    post("/settings", b"every=60&from=8&to=22&pace=bi%E1%BB%8Fa")
+    from jobbot.core import prefs as _pf
+    _cc = db.connect()
+    check("nhịp lạ bị vứt, về mặc định",
+          _pf.get(_cc, _pf.PACE) == "thuong", _pf.get(_cc, _pf.PACE))
+    post("/settings", b"every=60&from=8&to=22&pace=nhanh")
+    check("nhịp hợp lệ thì lưu được", _pf.get(_cc, _pf.PACE) == "nhanh")
+    post("/settings", b"every=60&from=8&to=22&pace=thuong")
+    _cc.close()
+
     check("nút khoá sẵn, phải gõ chữ mới mở",
           "disabled>Xoá hết" in _set and "data-needword" in _set)
     _js = (Path(__file__).resolve().parent.parent
@@ -935,6 +954,18 @@ with tempfile.TemporaryDirectory() as tmp:
     check("bấm lần nữa thì trả về cho máy", gui(_bo_id) == 200
           and f"/jobs/{_bo_id}" in get("/search?show=dropped")[1])
     check("id bịa thì từ chối, không đổi gì", gui("khong-phai-so") == 400)
+
+    # NỘP KHÔNG ĐỨNG Ở DANH SÁCH. Nộp là một quyết định — mở Chrome, điền
+    # form, ghi một dòng vào Quản lí — nên nó phải đứng SAU khi đọc. Chỗ đọc
+    # là trang chi tiết: có điểm từng yêu cầu, bằng chứng, và đường sang tin
+    # gốc. Bấm nộp từ danh sách là nộp mù.
+    check("dòng việc KHÔNG có nút Nộp", "/api/apply" not in _giu)
+    check("nhưng trang chi tiết thì có",
+          "data-post='/api/apply'" in get(f"/jobs/{job_id}")[1])
+    # Giữ lại thì NGƯỢC LẠI: sàng đống bị loại là việc lướt, quét mắt qua hàng
+    # chục dòng. Bắt mở từng trang chi tiết là giết luôn việc sàng.
+    check("nhưng Giữ lại thì vẫn ở danh sách — đó là việc lướt, không phải đọc",
+          "/api/keep" in _bo)
 
     # MỖI TIN PHẢI CÓ ĐƯỜNG SANG TIN GỐC. Trang chi tiết hiện điểm, hiện từng
     # yêu cầu, hiện cả bản mô tả — mà không có đường nào sang xem tin thật thì

@@ -116,7 +116,7 @@ class FakeTab:
 real_open, real_pause = li.open_page, li._pause
 opened = []
 li.open_page = lambda tab, url, timeout=30: opened.append(url)
-li._pause = lambda: None
+li._pause = lambda *a: None
 try:
     opened.clear()
     li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=True)
@@ -138,6 +138,64 @@ try:
 finally:
     li.open_page, li._pause = real_open, real_pause
 
+print("\n[nhịp gọi: núm hiệu năng THẬT, và nó là núm đánh đổi]")
+# Vì sao không làm "chạy N tab song song": N tab với nhịp P giống hệt 1 tab
+# với nhịp P/N — cùng số lượt gọi mỗi giây, cùng rủi ro bị bóp. Song song chỉ
+# là cách viết phức tạp hơn của một con số nhỏ hơn, cộng thêm N cửa sổ Chrome
+# ăn RAM và N chỗ có thể chết nửa chừng.
+check("ba nhịp, không hơn", set(li.NHIP) == {"nhe", "thuong", "nhanh"})
+check("mặc định là nhịp cũ, không đổi hành vi sẵn có",
+      li.NHIP["thuong"] == li.PAUSE)
+check("nhanh thì gọi dày hơn, nhẹ thì thưa hơn",
+      li.NHIP["nhanh"][1] < li.NHIP["thuong"][1] < li.NHIP["nhe"][1])
+# Nhịp lạ (gõ bừa vào URL) KHÔNG được thành nhịp 0 giây.
+_do = []
+_that = li.time.sleep
+li.time.sleep = lambda s: _do.append(s)
+li.open_page = lambda tab, url, timeout=30: None
+try:
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=False, pace="bịa")
+    check("nhịp lạ -> rơi về mặc định, không phải 0 giây",
+          _do and min(_do) >= li.PAUSE[0], str(_do[:3]))
+    _do.clear()
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=False, pace="nhanh")
+    check("chọn 'nhanh' thì nhịp thật sự ngắn lại",
+          _do and max(_do) <= li.NHIP["nhanh"][1], str(_do[:3]))
+finally:
+    li.time.sleep = _that
+    li.open_page = real_open
+
+print("\n[đọc kỹ là chỗ TỐN NHẤT — chỉ đọc tin sẽ được giữ]")
+# Đo trên kho thật: 2.389 tin LinkedIn, chỉ 257 tin lọt lưới sàng. 89% số tin
+# được mở trang, chờ 2,5-5 giây, rồi bị loại ngay sau đó — hơn hai tiếng mỗi
+# lượt quét đổ đi.
+#
+# Lọc trước được vì judge() chỉ đụng tiêu đề/công ty/địa điểm, ba thứ trang
+# danh sách đã đưa sẵn; mô tả mới là thứ phải mở trang mới có.
+li.open_page = lambda tab, url, timeout=30: opened.append(url)
+li._pause = lambda *a: None
+try:
+    opened.clear()
+    tin, _ = li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=True,
+                      worth=lambda i: i.title == "Data Scientist")
+    doc = [u for u in opened if "jobPosting" in u]
+    check("chỉ đọc kỹ tin lọt lưới", len(doc) == 1, f"đọc {len(doc)}/3")
+    check("nhưng VẪN trả về đủ tin để lưu — chồng 'Đã loại' còn nguyên",
+          len(tin) == 3, f"{len(tin)} tin")
+
+    opened.clear()
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=True,
+             worth=lambda i: False)
+    check("lưới loại hết -> không mở trang chi tiết nào",
+          not [u for u in opened if "jobPosting" in u])
+
+    opened.clear()
+    li.fetch(FakeTab(), ["Quant Analyst"], pages=1, deep=True)
+    check("không truyền lưới -> đọc kỹ tất, y như cũ",
+          len([u for u in opened if "jobPosting" in u]) == 3)
+finally:
+    li.open_page, li._pause = real_open, real_pause
+
 print("\n[đứt giữa chừng: GIỮ LẠI thứ đã tìm được]")
 # Xảy ra thật lúc 17:18 ngày 11/09: 48/76 lượt tìm đã xong, một
 # ConnectionResetError ở vòng tìm bay thẳng ra ngoài fetch() — `items` không
@@ -152,7 +210,7 @@ def _dut_o_lan_3(tab, url, timeout=30):
     if _dem["n"] >= 3:
         raise ConnectionResetError(54, "Connection reset by peer")
 li.open_page = _dut_o_lan_3
-li._pause = lambda: None
+li._pause = lambda *a: None
 try:
     _tin, _suc = li.fetch(FakeTab(), ["Quant Analyst", "Data Scientist"],
                           location=["United Kingdom", ""], pages=1, deep=True)
@@ -175,7 +233,7 @@ print("\n[vòng quét phải NÓI nó đang làm gì]")
 from jobbot.core.journal import SEARCH as _S, log as _jl
 _nhip_that = li.NHIP_BAO
 li.open_page = lambda tab, url, timeout=30: None
-li._pause = lambda: None
+li._pause = lambda *a: None
 li.NHIP_BAO = 2                      # 3 tin thử là đủ chạm nhịp báo
 try:
     _truoc = len(_jl.tail(_S, 999))

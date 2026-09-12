@@ -22,8 +22,18 @@ SCAN_EVERY = "scan_every_min"    # quét lại mỗi bao nhiêu phút
 HOURS_FROM = "hours_from"        # Chrome chỉ chạy trong khung giờ này
 HOURS_TO = "hours_to"
 
+# NHỊP gọi LinkedIn. Đây là núm hiệu năng THẬT của vòng quét, và nó là một
+# núm ĐÁNH ĐỔI chứ không phải núm "nhanh hơn miễn phí": đi nhanh là gọi dày
+# hơn, mà LinkedIn là bên duy nhất app đang ở nhờ.
+#
+# Vì sao không làm "chạy nhiều tab song song": N tab với nhịp P giống hệt 1
+# tab với nhịp P/N — cùng số lượt gọi mỗi giây, cùng rủi ro bị bóp. Song song
+# chỉ là cách viết phức tạp hơn của một con số nhỏ hơn, cộng thêm N cửa sổ
+# Chrome ăn RAM và N chỗ có thể chết nửa chừng.
+PACE = "linkedin_pace"
+
 DEFAULTS = {AUTORUN: "0", SCAN_EVERY: "60",
-            HOURS_FROM: "8", HOURS_TO: "22"}
+            HOURS_FROM: "8", HOURS_TO: "22", PACE: "thuong"}
 
 
 def get(conn: sqlite3.Connection, key: str) -> str:

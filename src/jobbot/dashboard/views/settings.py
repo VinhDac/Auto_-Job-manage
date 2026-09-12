@@ -39,8 +39,38 @@ def _num(name: str, value: int, low: int, high: int, unit: str) -> str:
             f" min={low} max={high} step=1><span class=unit>{esc(unit)}</span>")
 
 
+PACE_TEXT = [
+    ("nhe", "Nhẹ nhàng", "4-7 giây mỗi tin · ít bị bóp nhất"),
+    ("thuong", "Thường", "2,5-5 giây · mặc định"),
+    ("nhanh", "Nhanh", "1,2-2,5 giây · gọi dày gấp đôi, dễ bị bóp hơn"),
+]
+
+
+def _nhip(pace: str) -> str:
+    """Núm hiệu năng THẬT của vòng quét — và nó là núm ĐÁNH ĐỔI.
+
+    Vì sao không phải "chạy mấy tab song song": N tab với nhịp P giống hệt 1
+    tab với nhịp P/N — cùng số lượt gọi mỗi giây, cùng rủi ro bị bóp. Song
+    song chỉ là cách viết phức tạp hơn của một con số nhỏ hơn, cộng thêm N cửa
+    sổ Chrome ăn RAM và N chỗ có thể chết nửa chừng. Nên bày ra đúng cái thật
+    sự đổi: nhịp.
+
+    Nói thẳng cái ĐÁNH ĐỔI ngay trên màn hình. Một núm ghi "Nhanh" mà không
+    nói nhanh bằng giá gì là núm mời người ta bấm rồi lãnh hậu quả.
+    """
+    nut = "".join(
+        f"<label class=prow><input type=radio name=pace value='{esc(v)}'"
+        f"{' checked' if v == pace else ''}>"
+        f"<b>{esc(ten)}</b><span class=muted>{esc(ghi)}</span></label>"
+        for v, ten, ghi in PACE_TEXT)
+    return (f"<div class=sthead>Nhịp gọi LinkedIn</div>{nut}"
+            "<div class=safe>Board công ty không đụng tới nhịp này — chúng là "
+            "API công khai, mỗi board một lượt gọi. Nhịp chỉ áp cho LinkedIn, "
+            "bên duy nhất app đang ở nhờ.</div>")
+
+
 def render(*, every: int, hours: tuple[int, int],
-           status: list[tuple[str, str]],
+           status: list[tuple[str, str]], pace: str = "thuong",
            reset_rows: int = 0, reset_files: int = 0, reset_mb: float = 0.0,
            reset_backup_dir: str = "") -> str:
     rows = "".join(f"<div class=strow><span>{esc(k)}</span><b>{esc(v)}</b></div>"
@@ -54,6 +84,7 @@ def render(*, every: int, hours: tuple[int, int],
         + _num("from", hours[0], 0, 23, "giờ") + "</label>"
         "<label class=srow><span>… đến</span>"
         + _num("to", hours[1], 1, 24, "giờ") + "</label>"
+        + _nhip(pace) +
         "<div class=setfoot>"
         "<button class='mbtn apply' type=submit>Lưu</button>"
         "<span class=applynote>có tác dụng từ lần quét sau · "

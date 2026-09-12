@@ -297,6 +297,7 @@ def settings(conn: sqlite3.Connection) -> dict:
         "reset_mb": round(kho["bytes"] / 1_048_576, 1),
         "reset_backup_dir": str(reset_mod.backup_dir()),
         "every": prefs.num(conn, prefs.SCAN_EVERY, MIN_EVERY, MAX_EVERY),
+        "pace": prefs.get(conn, prefs.PACE) or "thuong",
         "hours": human_window(),
         "status": [
             ("Chrome", "đang mở" if ch.alive() else "tắt"),

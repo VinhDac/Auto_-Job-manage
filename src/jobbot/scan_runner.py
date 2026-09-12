@@ -15,6 +15,7 @@ from .core.paths import PROJECT_ROOT
 
 STAGE = "search"      # tên khúc, dùng chung với cờ dừng và nút trên thanh
 from .ingest import ashby, greenhouse, lever
+from .ingest import filter as jobfilter
 from .profile import store
 from .profile.schema import all_questions
 
@@ -69,6 +70,90 @@ def _run_source(conn, name: str, fn, *args, log: Log) -> tuple[int, int]:
     return seen, new
 
 
+# Ba lượt quét, ba việc khác hẳn nhau.
+DAU, TIEP, MOI = "dau", "tiep", "moi"
+
+
+def scan_mode(conn) -> dict:
+    """Lượt quét TỚI sẽ làm gì. MỘT chỗ quyết, nút Chạy chỉ đọc lại để đặt tên.
+
+    Nút đoán một kiểu còn vòng quét làm một kiểu thì chữ trên nút là lời nói
+    dối — và người dùng học được rằng đừng tin cái nút đó nữa.
+
+        Bắt đầu   kho rỗng          -> tìm đầy, không giới hạn thời gian
+        Tiếp tục  còn việc đọc dở   -> KHÔNG tìm gì cả, đọc nốt chỗ dở
+        Cập nhật  xong hết          -> chỉ tìm tin ĐĂNG TỪ LẦN QUÉT TRƯỚC
+
+    "Tiếp tục" mà vẫn chạy vòng tìm thì nó chỉ là chữ khác của "quét lại từ
+    đầu": tìm lại 2.296 tin y hệt, mất 30 phút, để rồi đọc nốt 11 tin.
+    """
+    from datetime import datetime, timezone
+    from .core.postings import HAVE_DESC
+    from .ingest.web import linkedin as li
+
+    one = lambda q, a=(): conn.execute(q, a).fetchone()[0]      # noqa: E731
+    co_tin = one("SELECT COUNT(*) FROM posting")
+    # Việc DỞ = tin vòng đọc kỹ THẬT SỰ sẽ mở: lọt lưới sàng, hoặc do người
+    # tự giữ lại. Đếm cả tin lưới đã loại thì nút hứa 1.855 trong khi việc
+    # thật là 11 — đo được ngày 12/09, và 1.844 tin kia bấm bao nhiêu lần
+    # cũng không ai đọc.
+    do_dang = one("SELECT COUNT(*) FROM posting WHERE source = 'linkedin'"
+                  " AND length(COALESCE(description,'')) < ?"
+                  " AND (kept = 1 OR user_keep = 1)", (HAVE_DESC,))
+
+    if not co_tin:
+        return {"mode": DAU, "label": "Bắt đầu", "recent": 0, "todo": 0,
+                "note": "kho đang rỗng — quét đầy lần đầu"}
+    if do_dang:
+        return {"mode": TIEP, "label": "Tiếp tục", "recent": 0, "todo": do_dang,
+                "note": f"còn {do_dang:,} tin chưa đọc kỹ — đọc nốt chỗ dở,"
+                        f" không tìm lại từ đầu"}
+
+    # Cửa sổ thời gian co giãn theo chính khoảng nghỉ: quét đều thì hỏi 24
+    # giờ, nghỉ vài hôm thì hỏi 7 ngày, nghỉ lâu quá thì quét đầy cho chắc.
+    # Một con số cứng sẽ bỏ sót đúng lúc người dùng đi vắng lâu nhất.
+    row = conn.execute(
+        "SELECT started_at FROM source_run WHERE source = 'linkedin' AND ok = 1"
+        " ORDER BY id DESC LIMIT 1").fetchone()
+    cach = 0.0
+    if row and row[0]:
+        try:
+            cach = (datetime.now(timezone.utc)
+                    - datetime.fromisoformat(row[0])).total_seconds()
+        except ValueError:
+            cach = 0.0
+    if not row:
+        return {"mode": DAU, "label": "Bắt đầu", "recent": 0, "todo": 0,
+                "note": "LinkedIn chưa quét lần nào — quét đầy"}
+    if cach <= li.NGAY:
+        return {"mode": MOI, "label": "Cập nhật", "recent": li.NGAY, "todo": 0,
+                "note": "chỉ tìm tin đăng trong 24 giờ qua"}
+    if cach <= li.TUAN:
+        return {"mode": MOI, "label": "Cập nhật", "recent": li.TUAN, "todo": 0,
+                "note": "nghỉ mấy hôm rồi — tìm tin đăng trong 7 ngày qua"}
+    return {"mode": DAU, "label": "Quét đầy", "recent": 0, "todo": 0,
+            "note": "nghỉ hơn một tuần — quét đầy cho chắc"}
+
+
+def _tin_do_dang(conn) -> list:
+    """Tin LinkedIn đáng đọc kỹ mà chưa có mô tả — dựng lại từ DB.
+
+    Đủ để `read_deep` mở trang và `save_batch` vá mô tả vào đúng dòng cũ:
+    source_id để tìm trang, title/company để viết lên thanh tiến độ.
+    """
+    from .core.postings import HAVE_DESC
+    from .ingest.base import Posting
+    rows = conn.execute(
+        "SELECT r.source_id, p.title, p.company, p.location, p.url"
+        "  FROM raw_posting r JOIN posting p ON p.raw_id = r.id"
+        " WHERE r.source = 'linkedin'"
+        "   AND length(COALESCE(p.description,'')) < ?"
+        "   AND (p.kept = 1 OR p.user_keep = 1)", (HAVE_DESC,)).fetchall()
+    return [Posting(source_id=r["source_id"], title=r["title"] or "",
+                    company=r["company"] or "", location=r["location"] or "",
+                    url=r["url"] or "", payload={"guest": True}) for r in rows]
+
+
 def _chrome_pass(conn, answers: dict, log: Log, deep: bool,
                  manual: bool = False) -> tuple[int, int]:
     """Nguồn phải qua Chrome. Chạy sau nguồn API, chỉ trong cửa sổ giờ người.
@@ -115,12 +200,34 @@ def _chrome_pass(conn, answers: dict, log: Log, deep: bool,
         # cắt nữa — trần bây giờ nằm ở li.MAX_QUERIES và có ghi nhật ký khi chạm.
         places = li.places_for(answers.get("markets") or [])
         seen = postings.already_read(conn, li.NAME)
+
+        # ĐÁNG ĐỌC KỸ KHÔNG. Trả lời bằng đúng bộ lọc mà derive() sẽ dùng sau
+        # đó, nên không có hai luật song song có ngày lệch nhau.
+        #
+        # Cộng thêm những tin Vin đã tự tay GIỮ LẠI: lưới sàng loại chúng, nên
+        # nếu chỉ hỏi mỗi lưới thì chúng không bao giờ được đọc kỹ — giữ lại
+        # một tin rồi nó đứng mãi ở "máy chưa đọc" là nút Giữ tự phản bội mình.
+        from .core import prefs
+        nhip = prefs.get(conn, prefs.PACE) or "thuong"
+
+        tu_giu = {r[0] for r in conn.execute(
+            "SELECT r.source_id FROM raw_posting r JOIN posting p ON p.raw_id = r.id"
+            " WHERE r.source = ? AND p.user_keep = 1", (li.NAME,))}
+
+        def dang_doc(item) -> bool:
+            if item.source_id in tu_giu:
+                return True
+            giu, _ = jobfilter.judge(item, answers)
+            return giu
+
         jlog.emit(SEARCH, f"linkedin: {len(titles)} chức danh × {len(places)} nơi"
-                          f" · bỏ qua {len(seen)} tin đã đọc")
+                          f" · bỏ qua {len(seen)} tin đã đọc"
+                          + (f" · {len(tu_giu)} tin bạn tự giữ" if tu_giu else ""))
         sources = [
             (li.NAME, lambda tab: li.fetch(tab, titles, location=places,
                                            levels=levels, pages=4, deep=deep,
                                            skip=frozenset(seen),
+                                           worth=dang_doc, pace=nhip,
                                            stop=lambda: halt.wanted(STAGE))),
         ]
 

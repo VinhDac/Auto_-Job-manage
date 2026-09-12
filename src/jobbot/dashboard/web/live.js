@@ -28,7 +28,22 @@
     return isNaN(d) ? '' : d.toTimeString().slice(0, 8);
   };
 
-  function addLine(box, ev, atTop) {
+  // Khung CUỘN thật nằm ở đâu. Dòng nhật ký nằm trong .journal, nhưng thứ có
+  // thanh cuộn là .jfeed bọc ngoài — đặt scrollTop lên nhầm phần tử thì không
+  // có gì xảy ra, và cũng không có lỗi nào để mà lần ra. Dừng ở [data-widget]
+  // để không leo ra tới cả trang.
+  function scroller(el) {
+    for (let n = el; n; n = n.parentElement) {
+      const how = getComputedStyle(n).overflowY;
+      if (how === 'auto' || how === 'scroll') return n;
+      if (n.matches('[data-widget]')) return null;
+    }
+    return null;
+  }
+
+  const STICK = 24;               // cách đỉnh trong ngần này px = đang bám tin mới
+
+  function addLine(box, ev) {
     const want = box.dataset.journal;
     if (want && want !== ev.stream) return;
 
@@ -42,14 +57,21 @@
     if (!want) row.querySelector('.jstream').textContent = ev.stream;
     row.querySelector('.jtext').textContent = ev.text;
 
-    if (atTop) box.insertBefore(row, box.firstChild);
-    else box.appendChild(row);
-    while (box.childElementCount > MAX_LINES) {
-      box.removeChild(atTop ? box.lastChild : box.firstChild);
-    }
+    // Dòng mới vào ĐỈNH. Chèn ở trên chỗ đang nhìn thì trình duyệt giữ
+    // nguyên scrollTop, nghĩa là mỗi dòng mới đẩy khung nhìn xuống thêm một
+    // nấc — càng chạy càng trôi xa tin mới nhất, và tin mới nhất nằm ngoài
+    // màn hình. Đúng cái vừa thấy: vòng nộp đang chạy mà nhật ký đứng ở
+    // mấy dòng cũ.
+    const sc = scroller(box);
+    const dang_bam = !sc || sc.scrollTop <= STICK;
+    box.insertBefore(row, box.firstChild);
+    while (box.childElementCount > MAX_LINES) box.removeChild(box.lastChild);
+    if (!sc) return;
+    if (dang_bam) sc.scrollTop = 0;              // bám theo tin mới nhất
+    else sc.scrollTop += row.offsetHeight;       // đang đọc dòng cũ -> giữ nguyên chỗ
   }
 
-  const journal = (ev) => $('[data-journal]').forEach((b) => addLine(b, ev, true));
+  const journal = (ev) => $('[data-journal]').forEach((b) => addLine(b, ev));
 
   // --------------------------------------------------------------- tiến độ
   function drawProgress(box, all) {

@@ -630,6 +630,11 @@ class Handler(BaseHTTPRequestHandler):
                 prefs.put(conn, prefs.SCAN_EVERY, form.get("every", ["60"])[0])
                 prefs.put(conn, prefs.HOURS_FROM, form.get("from", ["8"])[0])
                 prefs.put(conn, prefs.HOURS_TO, form.get("to", ["22"])[0])
+                # Chỉ nhận ba giá trị có thật. Gõ bừa vào URL thì về mặc định,
+                # không được để một chuỗi lạ chui xuống thành nhịp gọi.
+                from ..ingest.web.linkedin import NHIP
+                chon = form.get("pace", ["thuong"])[0]
+                prefs.put(conn, prefs.PACE, chon if chon in NHIP else "thuong")
                 journal.log.emit(journal.SYSTEM, "cài đặt đã đổi")
                 return self._html(settings.render(**live.settings(conn)))
             finally:
